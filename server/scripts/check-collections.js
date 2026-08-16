@@ -1,6 +1,6 @@
 import 'dotenv/config'
 import mongoose from 'mongoose'
-import { Applicant, Employer, Admin } from './models/collections.js'
+import { Applicant, Employer, Admin } from '../models/collections.js'
 
 const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://localhost:27017/peso-portal'
 

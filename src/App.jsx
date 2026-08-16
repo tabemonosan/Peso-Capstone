@@ -1,4 +1,7 @@
 ﻿import { useEffect, useState } from "react"
+import JobsView from "./components/JobsView"
+import ReferralList from "./components/ReferralList"
+import PesoReferralPanel from "./components/PesoReferralPanel"
 
 const initialAccounts = [
   { email: "admin@peso.gov", password: "password123", role: "Admin" },
@@ -8,27 +11,24 @@ const initialAccounts = [
 
 const navigationByRole = {
   Admin: [
-    { id: "dashboard", label: "Dashboard" },
-    { id: "records", label: "Records" },
-    { id: "intake", label: "Intake Forms" },
-    { id: "jobs", label: "Job Offers" },
+    { id: "employers", label: "Employers" },
+    { id: "applicants", label: "Applicants" },
     { id: "requests", label: "Employer Requests" },
-    { id: "notify", label: "Notifications" },
+    { id: "jobs", label: "Job Postings" },
+    { id: "peso-referrals", label: "Reports" },
   ],
   Employer: [
     { id: "dashboard", label: "Dashboard" },
-    { id: "employer", label: "Employer Module" },
-    { id: "jobs", label: "Post Vacancies" },
+    { id: "employer", label: "Job Postings" },
+    { id: "referrals", label: "Reports" },
+    { id: "reviews", label: "Reviews" },
     { id: "notify", label: "Notifications" },
   ],
   Applicant: [
-    { id: "dashboard", label: "My Dashboard" },
-    { id: "profile", label: "Profile" },
-    { id: "jobs", label: "Job Matches" },
-    { id: "applications", label: "Applications" },
-    { id: "match", label: "Matchmaking" },
-    { id: "reputation", label: "Reputation" },
-    { id: "notify", label: "Updates" },
+    { id: "jobs", label: "Jobs" },
+    { id: "applications", label: "Applied Jobs" },
+    { id: "reputation", label: "Reviews" },
+    { id: "notify", label: "Notifications" },
   ],
 }
 
@@ -129,11 +129,8 @@ const [authView, setAuthView] = useState("login")
   const [signupForm, setSignupForm] = useState({
     email: "",
     password: "",
+    confirmPassword: "",
     name: "",
-    location: "",
-    skills: [],
-    traits: "",
-    summary: "",
   })
   const [employerRequestForm, setEmployerRequestForm] = useState({
     email: "",
@@ -144,9 +141,9 @@ const [authView, setAuthView] = useState("login")
     phone: "",
     message: "",
   })
+  const [requirementsFile, setRequirementsFile] = useState(null)
   const [employerRequests, setEmployerRequests] = useState([])
   const [adminUsers, setAdminUsers] = useState([])
-  const [selectedUser, setSelectedUser] = useState(null)
   const [jobForm, setJobForm] = useState({
     title: "",
     company: "",
@@ -162,20 +159,70 @@ const [authView, setAuthView] = useState("login")
   const [notifications, setNotifications] = useState([])
   const [approvedJobs, setApprovedJobs] = useState([])
   const [declinedJobs, setDeclinedJobs] = useState([])
+  const [referredApplicantIdsByJob, setReferredApplicantIdsByJob] = useState({})
   const [myJobs, setMyJobs] = useState([])
   const [jobSearchTerm, setJobSearchTerm] = useState('')
   const [adminJobSearchTerm, setAdminJobSearchTerm] = useState('')
+  const [adminEmployerSearchTerm, setAdminEmployerSearchTerm] = useState('')
+  const [adminEmployerStatusFilter, setAdminEmployerStatusFilter] = useState('all')
   const [adminJobStatusFilter, setAdminJobStatusFilter] = useState('all')
   const [jobSkillFilter, setJobSkillFilter] = useState('all')
   const [jobLocationFilter, setJobLocationFilter] = useState('all')
   const [jobLoading, setJobLoading] = useState(false)
   const [selectedJob, setSelectedJob] = useState(null)
   const [selectedNotification, setSelectedNotification] = useState(null)
+  const [referralPrefill, setReferralPrefill] = useState({ jobId: '', applicantIds: [] })
+  const [appMessage, setAppMessage] = useState(null)
+  const [declineRequestTarget, setDeclineRequestTarget] = useState(null)
+  const [declineReason, setDeclineReason] = useState('')
+  const [approveRequestTarget, setApproveRequestTarget] = useState(null)
+  const [selectedDirectoryUser, setSelectedDirectoryUser] = useState(null)
+  const [showVerificationModal, setShowVerificationModal] = useState(false)
+  const [verificationEmail, setVerificationEmail] = useState('')
+  const [verificationCode, setVerificationCode] = useState('')
+  const [showSkillPrompt, setShowSkillPrompt] = useState(false)
+
+  const applicantProfileInitials = (profileData.name || currentUser?.email || 'Applicant')
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() || '')
+    .join('') || 'A'
+
+  const saveProfile = (nextProfile) => {
+    const token = currentUser?.token || localStorage.getItem('peso-token')
+    if (!token) return Promise.resolve({ ok: false })
+
+    return fetch('http://localhost:4000/api/profile', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ profile: nextProfile }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.error) {
+          alert(data.error)
+          return { ok: false }
+        }
+        return { ok: true, data }
+      })
+      .catch((err) => {
+        console.error(err)
+        alert('Save failed')
+        return { ok: false }
+      })
+  }
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
       localStorage.setItem('peso-active-role', activeRole)
       localStorage.setItem('peso-active-view', activeView)
+    }
+  }, [activeRole, activeView])
+
+  useEffect(() => {
+    if (activeRole === "Admin" && activeView === "records") {
+      setActiveView("employers")
     }
   }, [activeRole, activeView])
 
@@ -231,14 +278,12 @@ const [authView, setAuthView] = useState("login")
       setJobLoading(true)
       fetch('http://localhost:4000/api/jobs?status=mine', { headers })
         .then((r) => r.json())
-        .then((data) => setMyJobs(Array.isArray(data) ? data : []))
+        .then((data) => {
+          const jobs = Array.isArray(data) ? data : []
+          setMyJobs(jobs)
+          setPendingJobs(jobs.filter((job) => job.status === 'pending'))
+        })
         .catch(() => setMyJobs([]))
-        .finally(() => setJobLoading(false))
-
-      fetch('http://localhost:4000/api/jobs?status=pending', { headers })
-        .then((r) => r.json())
-        .then((data) => setPendingJobs(Array.isArray(data) ? data : []))
-        .catch(() => setPendingJobs([]))
         .finally(() => setJobLoading(false))
       return
     }
@@ -262,6 +307,7 @@ const [authView, setAuthView] = useState("login")
 
       Promise.all([pendingRequest, approvedRequest, declinedRequest]).finally(() => setJobLoading(false))
       fetchEmployerRequests()
+      fetchAdminReferrals()
     }
   }
 
@@ -272,6 +318,27 @@ const [authView, setAuthView] = useState("login")
       .then((r) => r.json())
       .then((data) => setAdminUsers(Array.isArray(data) ? data : []))
       .catch(() => setAdminUsers([]))
+  }
+
+  const fetchAdminReferrals = () => {
+    const token = getToken()
+    if (!token) return
+
+    fetch('http://localhost:4000/api/referrals/admin', { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json())
+      .then((data) => {
+        const referredByJob = (Array.isArray(data) ? data : []).reduce((current, referral) => {
+          const jobId = String(referral.jobId || '')
+          const applicantId = String(referral.applicantId || '')
+          if (!jobId || !applicantId) return current
+          return {
+            ...current,
+            [jobId]: [...new Set([...(current[jobId] || []), applicantId])],
+          }
+        }, {})
+        setReferredApplicantIdsByJob(referredByJob)
+      })
+      .catch(() => setReferredApplicantIdsByJob({}))
   }
 
   const handleCreateJob = (event) => {
@@ -304,6 +371,7 @@ const [authView, setAuthView] = useState("login")
   const handleReviewJob = (jobId, status) => {
     const token = getToken()
     if (!token) return alert('Not authenticated')
+    if (status === 'declined' && !window.confirm('Decline this job posting?')) return
 
     fetch(`http://localhost:4000/api/jobs/${jobId}/status`, {
       method: 'PUT',
@@ -366,10 +434,36 @@ const [authView, setAuthView] = useState("login")
 
       setEmployerRequestForm({ email: '', password: '', companyName: '', contactName: '', location: '', phone: '', message: '' })
       setAuthView('login')
-      alert('Employer request submitted. Admin will review it.')
+      alert('Employer account created. You can now sign in and submit your NSRP registration form for review.')
     } catch (err) {
       console.error('Employer request submit failed:', err)
       alert(err?.message || 'Failed to submit employer request')
+    }
+  }
+
+  const handleSubmitEmployerRequirements = async (event) => {
+    event.preventDefault()
+    const token = getToken()
+    if (!token || !requirementsFile) return alert('Select the NSRP registration PDF first')
+
+    const payload = new FormData()
+    payload.append('requirements', requirementsFile)
+    try {
+      const response = await fetch('http://localhost:4000/api/employer-requirements', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: payload,
+      })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) return alert(data?.error || 'Failed to submit requirements')
+      setRequirementsFile(null)
+      alert('NSRP registration form submitted for admin review.')
+      const profileResponse = await fetch('http://localhost:4000/api/profile', { headers: { Authorization: `Bearer ${token}` } })
+      const profile = await profileResponse.json().catch(() => null)
+      if (profile && !profile.error) setCurrentUser((current) => ({ ...current, verificationStatus: profile.verificationStatus, verificationReason: profile.verificationReason }))
+      fetchEmployerRequests()
+    } catch (err) {
+      alert(err?.message || 'Failed to submit requirements')
     }
   }
 
@@ -380,19 +474,165 @@ const [authView, setAuthView] = useState("login")
     fetch(`http://localhost:4000/api/employer-requests/${requestId}/status`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ status, reason: status === 'declined' ? declineReason.trim() : '' }),
     })
       .then((r) => r.json())
       .then((data) => {
-        if (data.error) return alert(data.error)
+        if (data.error) return setAppMessage({ type: 'error', text: data.error })
         fetchEmployerRequests()
         fetchNotifications()
-        alert(`Employer request ${status}`)
+        setDeclineRequestTarget(null)
+        setDeclineReason('')
+        setAppMessage({ type: 'success', text: `Employer request ${status}.` })
       })
       .catch((err) => {
         console.error(err)
-        alert('Failed to update employer request')
+        setAppMessage({ type: 'error', text: err?.message || 'Failed to update employer request' })
       })
+  }
+
+  const handleDownloadRequirements = async (requestId, filename) => {
+    const token = getToken()
+    if (!token) return
+    const response = await fetch(`http://localhost:4000/api/employer-requirements/${requestId}/download`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (!response.ok) return alert('Requirements PDF could not be downloaded')
+    const blob = await response.blob()
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = filename || 'nsrp-registration-form.pdf'
+    link.click()
+    URL.revokeObjectURL(link.href)
+  }
+
+  const handleViewRequirements = async (requestId) => {
+    const token = getToken()
+    if (!token) return
+    const preview = window.open('', '_blank')
+    const response = await fetch(`http://localhost:4000/api/employer-requirements/${requestId}/view`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (!response.ok) {
+      preview?.close()
+      return alert('Requirements PDF could not be opened')
+    }
+    const blob = await response.blob()
+    const url = URL.createObjectURL(blob)
+    if (preview) preview.location.href = url
+    else window.open(url, '_blank')
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  }
+
+  const handleViewOwnRequirements = async () => {
+    const token = getToken()
+    if (!token) return
+    const preview = window.open('', '_blank')
+    const response = await fetch('http://localhost:4000/api/employer-requirements/current/view', {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (!response.ok) {
+      preview?.close()
+      return alert('Your submitted PDF could not be opened')
+    }
+    const blob = await response.blob()
+    const url = URL.createObjectURL(blob)
+    if (preview) preview.location.href = url
+    else window.open(url, '_blank')
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  }
+
+  const handleReferApplicantFromJob = async (jobId, applicantEmail, isReferred = false) => {
+    const token = getToken()
+    if (!token) {
+      if (isReferred) return setAppMessage({ type: 'error', text: 'Not authenticated. Please sign in again.' })
+      return alert('Not authenticated')
+    }
+
+    const applicant = adminUsers.find(
+      (user) => user.role === 'Applicant' && String(user.email || '').toLowerCase() === String(applicantEmail || '').toLowerCase(),
+    )
+
+    if (!applicant) {
+      fetchAdminUsers()
+      if (isReferred) return setAppMessage({ type: 'error', text: 'Applicant record not found yet. Please try again in a moment.' })
+      return alert('Applicant record not found yet. Please try again in a moment.')
+    }
+
+    const applicantId = String(applicant.id || applicant._id)
+    const applicantName = applicant.profile?.name || applicant.email
+    if (!window.confirm(`${isReferred ? 'Cancel referral for' : 'Refer'} ${applicantName}${isReferred ? '?' : ' to this job?'}`)) return
+
+    try {
+      const response = await fetch('http://localhost:4000/api/referrals', {
+        method: isReferred ? 'DELETE' : 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ jobId, applicantIds: [applicantId] }),
+      })
+      const data = await response.json().catch(() => null)
+      if (!response.ok || data?.error) throw new Error(data?.error || `Request failed: ${response.status}`)
+
+      fetchJobs()
+      fetchNotifications()
+      if (isReferred) {
+        setAppMessage({ type: 'success', text: 'Referral cancelled successfully.' })
+      } else {
+        alert(data?.createdCount === 0 ? 'Applicant was already referred' : 'Applicant referred successfully')
+      }
+    } catch (err) {
+      console.error(err)
+      if (isReferred) {
+        setAppMessage({ type: 'error', text: err?.message || 'Failed to cancel referral.' })
+      } else {
+        alert(err?.message || 'Failed to create referral')
+      }
+    }
+  }
+
+  const isNewApplicationNotification = (notification) =>
+    notification?.type === 'new_application' || notification?.kind === 'new_application'
+
+  const markNotificationAsRead = async (notificationId) => {
+    const token = getToken()
+    if (!token || !notificationId) return
+
+    try {
+      const response = await fetch(`http://localhost:4000/api/notifications/${notificationId}/read`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null)
+        console.warn('Failed to mark notification as read:', payload?.error || response.status)
+      }
+    } catch (err) {
+      console.warn('Failed to mark notification as read:', err?.message || err)
+    }
+  }
+
+  const handleNotificationClick = async (notification) => {
+    if (activeRole === 'Admin' && isNewApplicationNotification(notification)) {
+      const notificationId = String(notification?._id || '')
+      if (notificationId && !notificationId.startsWith('job-')) {
+        await markNotificationAsRead(notificationId)
+      }
+
+      setNotifications((current) =>
+        current.map((item) =>
+          String(item._id) === String(notification._id) ? { ...item, read: true } : item,
+        ),
+      )
+
+      setReferralPrefill({
+        jobId: notification?.jobId ? String(notification.jobId) : '',
+        applicantIds: notification?.applicantId ? [String(notification.applicantId)] : [],
+      })
+      setSelectedNotification(null)
+      setActiveView('peso-referrals')
+      return
+    }
+
+    setSelectedNotification(notification)
   }
 
   useEffect(() => {
@@ -400,8 +640,11 @@ const [authView, setAuthView] = useState("login")
       fetchJobs()
       fetchNotifications()
     }
-    if (isLoggedIn && activeRole === 'Admin' && activeView === 'records') fetchAdminUsers()
-  }, [isLoggedIn, activeRole, activeView, profileData.skills])
+    if (isLoggedIn && activeRole === 'Employer' && currentUser?.verificationStatus && currentUser.verificationStatus !== 'approved' && !['dashboard', 'profile'].includes(activeView)) {
+      setActiveView('dashboard')
+    }
+    if (isLoggedIn && activeRole === 'Admin' && ['records', 'employers', 'applicants', 'requests', 'jobs', 'peso-referrals'].includes(activeView)) fetchAdminUsers()
+  }, [isLoggedIn, activeRole, activeView, currentUser?.verificationStatus, profileData.skills])
 
   useEffect(() => {
     if (isLoggedIn) {
@@ -423,7 +666,7 @@ const [authView, setAuthView] = useState("login")
           return
         }
         const norm = normalizeProfile({ profile: data.profile }, data.role)
-        setCurrentUser({ email: data.email, role: data.role, profile: data.profile, token })
+        setCurrentUser({ id: data.id, email: data.email, role: data.role, profile: data.profile, verificationStatus: data.verificationStatus, verificationReason: data.verificationReason, token })
         setActiveRole(data.role)
         setIsLoggedIn(true)
         setProfileData(norm)
@@ -432,6 +675,33 @@ const [authView, setAuthView] = useState("login")
         localStorage.removeItem('peso-token')
       })
   }, [])
+
+  useEffect(() => {
+    if (!isLoggedIn || activeRole !== 'Employer') return undefined
+
+    const refreshEmployerVerification = () => {
+      const token = getToken()
+      if (!token) return
+      fetch('http://localhost:4000/api/profile', {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then((response) => response.json())
+        .then((data) => {
+          if (data.error) return
+          setCurrentUser((current) => ({
+            ...current,
+            verificationStatus: data.verificationStatus,
+            verificationReason: data.verificationReason,
+            requirementsFile: data.requirementsFile,
+          }))
+        })
+        .catch(() => {})
+    }
+
+    refreshEmployerVerification()
+    const intervalId = window.setInterval(refreshEmployerVerification, 5000)
+    return () => window.clearInterval(intervalId)
+  }, [isLoggedIn, activeRole])
 
   const handleLogin = (event) => {
     event.preventDefault()
@@ -455,7 +725,7 @@ const [authView, setAuthView] = useState("login")
 
         setCurrentUser({ ...data.user, token: data.token })
         setActiveRole(data.user.role)
-        setActiveView('dashboard')
+        setActiveView(data.user.role === 'Employer' && data.user.verificationStatus !== 'approved' ? 'dashboard' : navigationByRole[data.user.role]?.[0]?.id || "dashboard")
         setIsLoggedIn(true)
         setProfileData(normalizeProfile(data.user, data.user.role))
       })
@@ -467,6 +737,10 @@ const [authView, setAuthView] = useState("login")
 
   const handleSignup = (event) => {
     event.preventDefault()
+    if (signupForm.password !== signupForm.confirmPassword) {
+      alert('Passwords do not match')
+      return
+    }
     // Call backend signup
     fetch('http://localhost:4000/api/signup', {
       method: 'POST',
@@ -475,21 +749,19 @@ const [authView, setAuthView] = useState("login")
         email: signupForm.email,
         password: signupForm.password,
         name: signupForm.name,
-        location: signupForm.location,
-        skills: signupForm.skills,
-        traits: signupForm.traits,
-        summary: signupForm.summary,
       }),
     })
       .then((r) => r.json())
       .then((data) => {
         if (data.error) return alert(data.error)
         if (data.token) localStorage.setItem('peso-token', data.token)
-        setCurrentUser({ ...data.user, token: data.token })
+        const applicantProfile = normalizeProfile(data.user, data.user.role || 'Applicant')
+        setCurrentUser({ ...data.user, token: data.token, role: 'Applicant' })
         setActiveRole('Applicant')
-        setActiveView('dashboard')
+        setActiveView('profile')
         setIsLoggedIn(true)
-        setProfileData(normalizeProfile(data.user, data.user.role || 'Applicant'))
+        setProfileData(applicantProfile)
+        setShowSkillPrompt(true)
         setAuthView("login")
       })
       .catch((err) => {
@@ -551,87 +823,98 @@ const [authView, setAuthView] = useState("login")
   const selectedNotificationId = selectedNotification?._id ? String(selectedNotification._id) : ''
   const selectedNotificationJobId = selectedNotification?.jobId || (selectedNotificationId.startsWith('job-pending-') ? selectedNotificationId.replace('job-pending-', '') : null)
   const selectedNotificationIsPending = selectedNotification?.status === 'pending' || (selectedNotification?.title || '').toLowerCase().includes('pending')
+  const accountNeedsVerification = Boolean(
+    currentUser?.verificationStatus && currentUser.verificationStatus !== 'approved',
+  ) || (
+    currentUser?.role === 'Applicant' &&
+    currentUser?.email?.toLowerCase() === 'third@gmail.com' &&
+    currentUser?.verificationStatus !== 'approved'
+  )
 
   if (!isLoggedIn) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-100 p-6">
-        <div className="w-full max-w-md rounded-3xl border border-slate-800 bg-slate-900/90 p-8 shadow-xl">
-          <div className="text-center mb-6">
-            <p className="text-sm font-semibold uppercase tracking-[0.35em] text-cyan-300">PESO Portal</p>
-            <h1 className="mt-4 text-3xl font-semibold text-white">Welcome back</h1>
+      <div className="auth-page">
+        <div className="auth-card">
+          <div className="auth-logo" aria-label="Public Employment Service Office">
+            <img
+              src="/peso-logo.png"
+              alt="Public Employment Service Office logo"
+              onError={(event) => { event.currentTarget.style.display = 'none' }}
+            />
+          </div>
+          <div className="auth-heading">
+            <h1>{authView === "signup" ? "Sign Up" : "Welcome back"}</h1>
+            <p>Enter your PESO account credentials to continue.</p>
           </div>
           {authView === "login" ? (
-            <form className="space-y-4" onSubmit={handleLogin}>
+            <form className="auth-form" onSubmit={handleLogin}>
               <div>
-                <label htmlFor="email" className="block text-sm font-medium text-slate-200">
-                  Email
-                </label>
+                <label htmlFor="email">Email</label>
                 <input
                   id="email"
                   type="email"
                   value={formData.email}
                   onChange={(event) => setFormData({ ...formData, email: event.target.value })}
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                  placeholder="you@example.com"
                   autoComplete="email"
                 />
               </div>
               <div>
-                <label htmlFor="password" className="block text-sm font-medium text-slate-200">
-                  Password
-                </label>
+                <label htmlFor="password">Password</label>
                 <input
                   id="password"
                   type={showPassword ? "text" : "password"}
                   value={formData.password}
                   onChange={(event) => setFormData({ ...formData, password: event.target.value })}
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                  placeholder="Enter your password"
                   autoComplete="current-password"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((value) => !value)}
+                  className="auth-password-toggle"
+                >
+                  {showPassword ? "Hide" : "Show"}
+                </button>
               </div>
-              <div className="flex items-center justify-between text-sm text-slate-300">
-                <label className="flex items-center gap-2">
+              <div className="auth-options">
+                <label className="auth-remember">
                   <input
                     type="checkbox"
                     checked={rememberMe}
                     onChange={() => setRememberMe((value) => !value)}
-                    className="h-4 w-4 rounded border-slate-600 bg-slate-800"
                   />
                   Remember me
                 </label>
                 <button
                   type="button"
-                  onClick={() => setShowPassword((value) => !value)}
-                  className="text-cyan-300 hover:text-cyan-200"
+                  className="auth-link"
                 >
-                  {showPassword ? "Hide" : "Show"}
+                  Forgot password?
                 </button>
               </div>
-              <button
-                type="submit"
-                className="w-full rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
-              >
-                Sign in
-              </button>
+              <button type="submit" className="auth-primary-button auth-signin-button">Sign in</button>
 
-              <div className="pt-2 space-y-2">
+              <div className="auth-divider"><span>NEW TO PESO PORTAL?</span></div>
+              <div className="auth-account-actions">
                 <button
                   type="button"
                   onClick={() => setAuthView("signup")}
-                  className="w-full rounded-2xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm text-slate-200"
+                  className="auth-secondary-button"
                 >
                   Create an account (Applicant)
                 </button>
                 <button
                   type="button"
                   onClick={() => setAuthView("employer")}
-                  className="w-full rounded-2xl bg-slate-700 px-4 py-2 text-sm font-semibold text-white"
+                  className="auth-secondary-button"
                 >
                   Connect with us (Employer)
                 </button>
               </div>
             </form>
           ) : authView === "employer" ? (
-            <form className="space-y-4" onSubmit={handleSubmitEmployerRequest}>
+            <form className="auth-form auth-detail-form" onSubmit={handleSubmitEmployerRequest}>
               <div>
                 <label htmlFor="employer-email" className="block text-sm font-medium text-slate-200">
                   Email
@@ -722,20 +1005,32 @@ const [authView, setAuthView] = useState("login")
                 />
               </div>
               <div className="flex gap-2">
-                <button type="submit" className="flex-1 rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950">
-                  Send request
+                <button type="submit" className="auth-primary-button auth-account-submit">
+                  Create employer account
                 </button>
                 <button
                   type="button"
                   onClick={() => setAuthView("login")}
-                  className="flex-1 rounded-2xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm text-slate-200"
+                  className="auth-secondary-button"
                 >
                   Cancel
                 </button>
               </div>
             </form>
           ) : (
-            <form className="space-y-4" onSubmit={handleSignup}>
+            <form className="auth-form auth-detail-form applicant-signup-form" onSubmit={handleSignup}>
+              <div>
+                <label htmlFor="signup-name" className="block text-sm font-medium text-slate-200">
+                  Name
+                </label>
+                <input
+                  id="signup-name"
+                  type="text"
+                  value={signupForm.name}
+                  onChange={(e) => setSignupForm({ ...signupForm, name: e.target.value })}
+                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                />
+              </div>
               <div>
                 <label htmlFor="signup-email" className="block text-sm font-medium text-slate-200">
                   Email
@@ -763,83 +1058,23 @@ const [authView, setAuthView] = useState("login")
                 />
               </div>
               <div>
-                <label htmlFor="signup-name" className="block text-sm font-medium text-slate-200">
-                  Full name
+                <label htmlFor="signup-confirm-password" className="block text-sm font-medium text-slate-200">
+                  Confirm password
                 </label>
                 <input
-                  id="signup-name"
-                  type="text"
-                  value={signupForm.name}
-                  onChange={(e) => setSignupForm({ ...signupForm, name: e.target.value })}
+                  id="signup-confirm-password"
+                  type="password"
+                  value={signupForm.confirmPassword}
+                  onChange={(e) => setSignupForm({ ...signupForm, confirmPassword: e.target.value })}
                   className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                  required
                 />
               </div>
-              <div>
-                <label htmlFor="signup-location" className="block text-sm font-medium text-slate-200">
-                  Location
-                </label>
-                <input
-                  id="signup-location"
-                  type="text"
-                  value={signupForm.location}
-                  onChange={(e) => setSignupForm({ ...signupForm, location: e.target.value })}
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-200">Skills</label>
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  {availableSkills.map((skill) => (
-                    <label
-                      key={skill}
-                      className="flex cursor-pointer items-center gap-2 rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-200"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={signupForm.skills.includes(skill)}
-                        onChange={() => setSignupForm({ ...signupForm, skills: toggleSkill(signupForm.skills, skill) })}
-                        className="h-4 w-4 rounded border-slate-600 bg-slate-800"
-                      />
-                      {skill}
-                    </label>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label htmlFor="signup-traits" className="block text-sm font-medium text-slate-200">
-                  Key traits
-                </label>
-                <input
-                  id="signup-traits"
-                  type="text"
-                  value={signupForm.traits}
-                  onChange={(e) => setSignupForm({ ...signupForm, traits: e.target.value })}
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-                />
-              </div>
-              <div>
-                <label htmlFor="signup-summary" className="block text-sm font-medium text-slate-200">
-                  Summary
-                </label>
-                <textarea
-                  id="signup-summary"
-                  rows="3"
-                  value={signupForm.summary}
-                  onChange={(e) => setSignupForm({ ...signupForm, summary: e.target.value })}
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-                  placeholder="Brief profile summary"
-                />
-              </div>
-
               <div className="flex gap-2">
-                <button type="submit" className="flex-1 rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950">
+                <button type="submit" className="auth-primary-button auth-account-submit">
                   Create account
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setAuthView("login")}
-                  className="flex-1 rounded-2xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm text-slate-200"
-                >
+                <button type="button" onClick={() => setAuthView("login")} className="auth-secondary-button">
                   Back to sign in
                 </button>
               </div>
@@ -851,27 +1086,37 @@ const [authView, setAuthView] = useState("login")
   }
 
   const navItems = navigationByRole[activeRole] || []
-  const portalNavItems = navItems.filter((item) => item.id !== "profile")
+  const employerApproved = activeRole !== 'Employer' || !currentUser?.verificationStatus || currentUser.verificationStatus === 'approved'
+  const portalNavItems = navItems.filter((item) => item.id !== "profile" && (activeRole !== 'Employer' || employerApproved || ['dashboard', 'profile'].includes(item.id)))
   const showProfileTab = ["Applicant", "Employer"].includes(activeRole)
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      <header className="border-b border-slate-800 bg-slate-900/80 px-6 py-5">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4">
-          <div>
-            <p className="text-sm uppercase tracking-[0.35em] text-cyan-300">PESO Portal</p>
-            <h1 className="text-2xl font-semibold text-white">Online Employment Services Platform</h1>
+    <div className={`portal-shell portal-shell-${activeRole.toLowerCase()}`}>
+      <header className="portal-header">
+        <div className="portal-header-inner">
+          <div className="portal-brand">
+            <span className="portal-brand-fallback" aria-hidden="true">P</span>
+            <img
+              src="/peso-logo.png"
+              alt="PESO logo"
+              onLoad={(event) => { event.currentTarget.previousElementSibling.style.display = 'none' }}
+              onError={(event) => { event.currentTarget.style.display = 'none' }}
+            />
+            <div>
+              <p>PESO PORTAL</p>
+              <h1>Online Employment Services Platform</h1>
+            </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="portal-header-actions flex items-center gap-3">
             {showProfileTab && (
               <button
                 type="button"
                 onClick={() => setActiveView("profile")}
-                className={`inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-medium transition-colors ${
+                className={`portal-profile-button inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-medium transition-colors ${
                   activeView === "profile" ? "bg-cyan-500 text-slate-950" : "text-slate-200"
                 }`}
               >
-                <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-cyan-500 text-lg text-slate-950">
+                <span className="portal-profile-icon inline-flex h-9 w-9 items-center justify-center rounded-full bg-cyan-500 text-lg text-slate-950">
                   👤
                 </span>
                 <span>Profile</span>
@@ -880,7 +1125,7 @@ const [authView, setAuthView] = useState("login")
             <button
               type="button"
               onClick={handleLogout}
-              className="rounded-full border border-slate-700 bg-slate-800 px-4 py-2 text-sm text-slate-200"
+              className="portal-logout"
             >
               Logout
             </button>
@@ -888,45 +1133,110 @@ const [authView, setAuthView] = useState("login")
         </div>
       </header>
 
-      <div className="mx-auto max-w-7xl px-6 py-6">
-        <div className="mb-6 flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-          <div className="min-w-[240px] rounded-2xl border border-slate-800 bg-slate-950/80 p-4 shadow-lg shadow-slate-900/20">
-            <p className="text-xs uppercase tracking-[0.35em] text-cyan-300">Session</p>
-            <p className="mt-3 text-sm text-slate-400">Signed in as</p>
-            <p className="text-lg font-semibold text-white">{currentUser?.email}</p>
-            <p className="text-sm text-slate-400">Role: {activeRole}</p>
+      <div className="portal-layout">
+        <aside className="portal-sidebar">
+          <div className="portal-session">
+            <p className="portal-eyebrow">Session</p>
+            <p>Signed in as</p>
+            <strong>{currentUser?.email}</strong>
+            <span>Role</span>
+            <strong>{activeRole}</strong>
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            {portalNavItems.map((item) => (
+          <nav className="portal-nav" aria-label={`${activeRole} navigation`}>
+            {portalNavItems.map((item, index) => (
               <button
-                key={item.id}
+                key={`${item.id}-${item.label}-${index}`}
                 type="button"
                 onClick={() => setActiveView(item.id)}
-                className={`rounded-full px-3 py-2 text-sm font-medium ${
-                  activeView === item.id ? "bg-cyan-500 text-slate-950" : "bg-slate-800 text-slate-200"
+                className={`portal-nav-item ${
+                  activeView === item.id ? "is-active" : ""
                 }`}
               >
                 {item.label}
               </button>
             ))}
-          </div>
-        </div>
+          </nav>
+        </aside>
 
-        {currentUser?.role === "Admin" && (
-          <section className="mb-6 rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-            <h2 className="text-xl font-semibold text-white">Access Control</h2>
-            <p className="mt-2 text-sm text-slate-400">Admin can switch the portal role instantly.</p>
+        <div className="portal-content">
+          {accountNeedsVerification && (
+            <div className="portal-verification-notice" role="status">
+              <div>
+                <strong>Account is unverified</strong>
+                <span>Verification is required before all account features become available.</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setVerificationEmail(currentUser?.email || '')
+                  setShowVerificationModal(true)
+                }}
+                className="portal-verify-button"
+              >
+                Verify now
+              </button>
+            </div>
+          )}
+
+          {showVerificationModal && (
+            <div
+              className="portal-verification-overlay"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="verify-email-title"
+              onClick={() => setShowVerificationModal(false)}
+            >
+              <form
+                className="portal-verification-modal"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  setCurrentUser((current) => ({ ...current, verificationStatus: 'approved' }))
+                  setShowVerificationModal(false)
+                }}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <h2 id="verify-email-title">Verify your email</h2>
+                <p>Enter your email address to continue verification.</p>
+                <label htmlFor="verification-email">Email address</label>
+                <input
+                  id="verification-email"
+                  type="email"
+                  value={verificationEmail}
+                  onChange={(event) => setVerificationEmail(event.target.value)}
+                  required
+                />
+                <label htmlFor="verification-code">Verification code</label>
+                <input
+                  id="verification-code"
+                  type="text"
+                  value={verificationCode}
+                  onChange={(event) => setVerificationCode(event.target.value)}
+                />
+                <div className="portal-verification-actions">
+                  <button type="submit" className="portal-verify-submit">Verify email</button>
+                  <button type="button" onClick={() => setShowVerificationModal(false)} className="portal-verify-cancel">
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {currentUser?.role === "Admin" && (
+          <section className="portal-card access-card">
+            <h2 className="text-xl font-semibold text-black">Access Control</h2>
+            <p className="mt-2 text-sm text-black">Admin can switch the portal role instantly.</p>
             <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-[220px]">
-                <label htmlFor="admin-role" className="block text-sm font-medium text-slate-300">
+                <label htmlFor="admin-role" className="block text-sm font-medium text-black">
                   Selected role
                 </label>
                 <select
                   id="admin-role"
                   value={adminSelectedRole}
                   onChange={(event) => setAdminSelectedRole(event.target.value)}
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                  className="portal-control"
                 >
                   <option value="Admin">Admin</option>
                   <option value="Employer">Employer</option>
@@ -940,35 +1250,127 @@ const [authView, setAuthView] = useState("login")
                   const nextItems = navigationByRole[adminSelectedRole] || []
                   setActiveView(nextItems[0]?.id || "dashboard")
                 }}
-                className="inline-flex items-center justify-center rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
+                className="portal-primary-button"
               >
                 Apply Role
               </button>
             </div>
-            <p className="mt-4 text-sm text-slate-400">Current portal role: {activeRole}</p>
+            <p className="mt-4 text-sm text-black">Current portal role: {activeRole}</p>
           </section>
-        )}
+          )}
 
-        <main className="space-y-6">
+          <main className="space-y-6">
+          {appMessage && (
+            <div
+              role="status"
+              className={`flex items-center justify-between gap-4 rounded-2xl border px-4 py-3 text-sm ${
+                appMessage.type === 'error'
+                  ? 'border-rose-400/40 bg-rose-950/40 text-rose-200'
+                  : 'border-cyan-400/40 bg-cyan-950/40 text-cyan-200'
+              }`}
+            >
+              <p>{appMessage.text}</p>
+              <button
+                type="button"
+                onClick={() => setAppMessage(null)}
+                className="rounded-full border border-current px-3 py-1 text-xs font-semibold"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
           {activeView === "dashboard" && (
-            <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-              <h2 className="text-xl font-semibold text-white">Dashboard</h2>
-              {activeRole === 'Employer' ? (
+            <section className="admin-requests-card portal-card rounded-2xl border border-slate-300 bg-white p-6 text-black">
+              <h2 className="text-xl font-semibold text-black">Dashboard</h2>
+              {activeRole === 'Employer' && !employerApproved ? (
+                <div className="mt-4 rounded-2xl border border-amber-400/40 bg-slate-950/80 p-5">
+                  <h3 className="text-lg font-semibold text-white">Employer verification</h3>
+                  <p className="mt-2 text-sm text-slate-300">
+                    Your account is active, but employer tools stay locked until the admin approves your NSRP registration form.
+                  </p>
+                  <p className="mt-3 text-sm text-amber-300">Status: {currentUser.verificationStatus.replace('_', ' ')}</p>
+                  {currentUser.verificationStatus === 'declined' && (
+                    <div className="mt-3 rounded-xl border border-rose-400/40 bg-rose-950/30 p-3">
+                      <p className="text-sm font-semibold text-rose-300">Admin review message</p>
+                      <p className="mt-1 text-sm text-slate-200">{currentUser.verificationReason || 'Please submit a corrected NSRP registration form for another review.'}</p>
+                    </div>
+                  )}
+                  {currentUser.requirementsFile && (
+                    <div className="mt-5 rounded-xl border border-slate-700 bg-slate-900 p-3">
+                      <p className="text-sm font-semibold text-white">Submitted PDF</p>
+                      <p className="mt-1 text-xs text-slate-400">{currentUser.requirementsFile.originalName}</p>
+                      <button
+                        type="button"
+                        onClick={handleViewOwnRequirements}
+                        className="mt-3 rounded-2xl bg-cyan-500 px-3 py-2 text-sm font-semibold text-slate-950"
+                      >
+                        View submitted PDF
+                      </button>
+                    </div>
+                  )}
+                  {currentUser.verificationStatus === 'under_review' ? (
+                    <p className="mt-5 text-sm text-amber-300">Your PDF is waiting for admin review. You cannot submit another file until this review is complete.</p>
+                  ) : (
+                    <form className="mt-5 space-y-3" onSubmit={handleSubmitEmployerRequirements}>
+                      <label htmlFor="requirements-pdf" className="block text-sm font-medium text-slate-200">
+                        {currentUser.verificationStatus === 'declined' ? 'Submit a corrected NSRP registration form (PDF, max 10 MB)' : 'NSRP registration form (PDF, max 10 MB)'}
+                      </label>
+                      <input
+                        id="requirements-pdf"
+                        type="file"
+                        accept="application/pdf,.pdf"
+                        onChange={(event) => setRequirementsFile(event.target.files?.[0] || null)}
+                        className="block w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                      />
+                      <button type="submit" className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950">
+                        Submit for review
+                      </button>
+                    </form>
+                  )}
+                </div>
+              ) : activeRole === 'Employer' ? (
                 <>
-                  <p className="mt-3 text-slate-400">Employer dashboard — quick overview of your postings.</p>
+                  <p className="mt-3 text-black">Employer dashboard — quick overview of your postings.</p>
                   <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-                    <div className="rounded-2xl border border-slate-700 bg-slate-900 p-4">
-                      <p className="text-sm text-slate-400">My job requests</p>
-                      <p className="mt-2 text-2xl font-semibold text-white">{myJobs.length}</p>
+                    <div className="rounded-2xl border border-slate-300 bg-white p-4">
+                      <p className="text-sm text-black">My job requests</p>
+                      <p className="mt-2 text-2xl font-semibold text-black">{myJobs.length}</p>
                     </div>
-                    <div className="rounded-2xl border border-slate-700 bg-slate-900 p-4">
-                      <p className="text-sm text-slate-400">Pending approvals</p>
-                      <p className="mt-2 text-2xl font-semibold text-white">{pendingJobs.length}</p>
+                    <div className="rounded-2xl border border-slate-300 bg-white p-4">
+                      <p className="text-sm text-black">Pending approvals</p>
+                      <p className="mt-2 text-2xl font-semibold text-black">{pendingJobs.length}</p>
                     </div>
-                    <div className="rounded-2xl border border-slate-700 bg-slate-900 p-4">
-                      <p className="text-sm text-slate-400">Total applicants</p>
-                      <p className="mt-2 text-2xl font-semibold text-white">{myJobs.reduce((acc, j) => acc + (j.applicants ? j.applicants.length : 0), 0)}</p>
+                    <div className="rounded-2xl border border-slate-300 bg-white p-4">
+                      <p className="text-sm text-black">Total applicants</p>
+                      <p className="mt-2 text-2xl font-semibold text-black">{myJobs.reduce((acc, j) => acc + (j.applicants ? j.applicants.length : 0), 0)}</p>
                     </div>
+                  </div>
+
+                  <div className="employer-dashboard-postings">
+                    <div className="employer-dashboard-postings-heading">
+                      <div>
+                        <h3>Approved Job Postings</h3>
+                        <p>All approved vacancies currently visible to applicants.</p>
+                      </div>
+                      <span>{myJobs.filter((job) => job.status === 'approved').length} approved</span>
+                    </div>
+                    {myJobs.filter((job) => job.status === 'approved').length === 0 ? (
+                      <p className="employer-dashboard-empty">No approved job postings yet.</p>
+                    ) : (
+                      <div className="employer-dashboard-posting-list">
+                        {myJobs.filter((job) => job.status === 'approved').map((job) => (
+                          <article key={job._id} className="employer-dashboard-posting">
+                            <div>
+                              <h4>{job.title}</h4>
+                              <p>{job.company} · {job.location || 'Remote'}</p>
+                              <p>Salary: {job.salary || 'Not specified'}</p>
+                              <p>Skills: {Array.isArray(job.skills) ? job.skills.join(', ') : job.skills || 'None specified'}</p>
+                            </div>
+                            <span>{job.applicants?.length || 0} applicant{job.applicants?.length === 1 ? '' : 's'}</span>
+                          </article>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   <div className="mt-6 flex gap-3">
@@ -982,9 +1384,9 @@ const [authView, setAuthView] = useState("login")
                     <button
                       type="button"
                       onClick={() => setActiveView('jobs')}
-                      className="rounded-2xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm text-slate-200"
+                      className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-black"
                     >
-                      Post a Vacancy
+                      Job Request
                     </button>
                   </div>
                 </>
@@ -992,71 +1394,134 @@ const [authView, setAuthView] = useState("login")
                 <p className="mt-3 text-slate-400">Welcome to the portal dashboard.</p>
               )}
 
-                {activeView === "records" && activeRole === "Admin" && (
-                  <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-                    <h2 className="text-xl font-semibold text-white">Accounts</h2>
-                    <p className="mt-2 text-sm text-slate-400">List of accounts across Applicant, Employer, and Admin collections.</p>
 
-                    <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                      <div className="rounded-2xl border border-slate-700 bg-slate-950/80 p-4">
-                        <h3 className="text-lg font-semibold text-white">Accounts</h3>
-                        {adminUsers.length === 0 ? (
-                          <p className="mt-3 text-slate-400">No accounts found. Click Refresh to load.</p>
-                        ) : (
-                          <ul className="mt-4 space-y-2">
-                            {adminUsers.map((u) => (
-                              <li key={u.id} className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-900 p-3">
-                                <div>
-                                  <p className="text-sm font-medium text-white">{u.email}</p>
-                                  <p className="text-xs text-slate-400">{u.role} • {u.companyName || u.profile?.name || '—'}</p>
-                                </div>
-                                <div className="flex gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => setSelectedUser(u)}
-                                    className="rounded-2xl bg-cyan-500 px-3 py-1 text-sm font-semibold text-slate-950"
-                                  >
-                                    View
-                                  </button>
-                                </div>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                        <div className="mt-4">
-                          <button type="button" onClick={fetchAdminUsers} className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950">Refresh</button>
-                        </div>
-                      </div>
-
-                      <div className="rounded-2xl border border-slate-700 bg-slate-950/80 p-4">
-                        <h3 className="text-lg font-semibold text-white">Details</h3>
-                        {!selectedUser ? (
-                          <p className="mt-3 text-slate-400">Select an account to view details.</p>
-                        ) : (
-                          <div className="mt-3 text-sm text-slate-300">
-                            <p><strong>Email:</strong> {selectedUser.email}</p>
-                            <p><strong>Role:</strong> {selectedUser.role}</p>
-                            {selectedUser.companyName && <p><strong>Company:</strong> {selectedUser.companyName}</p>}
-                            {selectedUser.contactName && <p><strong>Contact:</strong> {selectedUser.contactName}</p>}
-                            {selectedUser.phone && <p><strong>Phone:</strong> {selectedUser.phone}</p>}
-                            {selectedUser.website && <p><strong>Website:</strong> {selectedUser.website}</p>}
-                            <p className="mt-2"><strong>Profile:</strong></p>
-                            <pre className="mt-2 whitespace-pre-wrap text-xs text-slate-300">{JSON.stringify(selectedUser.profile || {}, null, 2)}</pre>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </section>
-                )}
             </section>
           )}
 
+                {["employers", "applicants"].includes(activeView) && activeRole === "Admin" && (
+                  <section className="portal-card directory-card">
+                    <h2 className="text-xl font-semibold text-white">{activeView === "employers" ? "Employers" : "Applicants"}</h2>
+                    <p className="mt-2 text-sm text-slate-400">Review employer approval status and applicant contact information.</p>
+
+                    {activeView === 'employers' && (
+                      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_180px]">
+                        <input
+                          type="search"
+                          value={adminEmployerSearchTerm}
+                          onChange={(event) => setAdminEmployerSearchTerm(event.target.value)}
+                          placeholder="Search company, email, contact, phone, or status"
+                          aria-label="Search employers"
+                          className="portal-control w-full"
+                        />
+                        <select
+                          value={adminEmployerStatusFilter}
+                          onChange={(event) => setAdminEmployerStatusFilter(event.target.value)}
+                          aria-label="Filter employers by status"
+                          className="portal-control w-full"
+                        >
+                          <option value="all">All statuses</option>
+                          <option value="pending">Pending</option>
+                          <option value="under_review">Under review</option>
+                          <option value="approved">Approved</option>
+                          <option value="declined">Declined</option>
+                        </select>
+                      </div>
+                    )}
+
+                    <div className="portal-directory-wrap">
+                      {[
+                        { role: 'Employer', title: 'Employers', view: 'employers' },
+                        { role: 'Applicant', title: 'Applicants', view: 'applicants' },
+                      ].filter((directory) => directory.view === activeView).map((directory) => {
+                        const normalizedEmployerSearch = adminEmployerSearchTerm.trim().toLowerCase()
+                        const users = adminUsers
+                          .filter((user) => user.role === directory.role)
+                          .filter((user) => {
+                            if (directory.role !== 'Employer' || !normalizedEmployerSearch) return true
+                            return [user.companyName, user.email, user.contactName, user.phone, user.approvalStatus]
+                              .filter((value) => typeof value === 'string')
+                              .some((value) => value.toLowerCase().includes(normalizedEmployerSearch))
+                          })
+                              .filter((user) => directory.role !== 'Employer' || adminEmployerStatusFilter === 'all' || user.approvalStatus === adminEmployerStatusFilter)
+                          .sort((userA, userB) => {
+                            if (directory.role !== 'Employer') return 0
+                            const pendingA = ['pending', 'under_review'].includes(userA.approvalStatus)
+                            const pendingB = ['pending', 'under_review'].includes(userB.approvalStatus)
+                            return Number(pendingB) - Number(pendingA)
+                          })
+                        return (
+                          <div key={directory.role}>
+                            <h3 className="portal-section-title">{directory.title}</h3>
+                            {users.length === 0 ? (
+                              <p className="portal-empty">No {directory.title.toLowerCase()} found.</p>
+                            ) : (
+                              <div className="portal-table-scroll">
+                                <table className={`portal-table ${directory.role === 'Employer' ? 'portal-employers-table' : ''}`}>
+                                  <thead>
+                                    <tr>
+                                      <th>{directory.role === 'Employer' ? 'Company' : 'Name'}</th>
+                                      <th>Email</th>
+                                      <th>{directory.role === 'Employer' ? 'Contact' : 'Location'}</th>
+                                      <th>{directory.role === 'Employer' ? 'Phone' : 'Skills'}</th>
+                                      {directory.role === 'Employer' && <th>Status</th>}
+                                      <th>Actions</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {users.map((user) => (
+                                      <tr key={user.id}>
+                                        <td><strong>{directory.role === 'Employer' ? user.companyName || 'Unnamed employer' : user.profile?.name || 'Unnamed applicant'}</strong></td>
+                                        <td>{user.email}</td>
+                                        <td>{directory.role === 'Employer' ? user.contactName || 'N/A' : user.profile?.location || 'N/A'}</td>
+                                        <td>{directory.role === 'Employer' ? user.phone || 'N/A' : Array.isArray(user.profile?.skills) ? user.profile.skills.join(', ') : user.profile?.skills || 'N/A'}</td>
+                                        {directory.role === 'Employer' && <td><span className={`portal-status status-${user.approvalStatus || 'pending'}`}>{user.approvalStatus || 'pending'}</span></td>}
+                                        <td>
+                                          <button type="button" className="portal-table-action" onClick={() => setSelectedDirectoryUser({ ...user, directoryRole: directory.role })}>View</button>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </section>
+                )}
+
           {activeView === "profile" && (
-            <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+            <section className={`${activeRole === 'Employer' ? 'employer-profile-card portal-card' : activeRole === 'Applicant' ? 'applicant-profile-card portal-card' : ''} rounded-2xl border border-slate-800 bg-slate-900/70 p-6`}>
               {activeRole === 'Applicant' ? (
                 <>
                   <h2 className="text-xl font-semibold text-white">Applicant Profile</h2>
                   <p className="mt-3 text-slate-400">Update your traits and personal information.</p>
+
+                  <div className="applicant-profile-summary mt-6 rounded-2xl border border-slate-700 bg-slate-950/80 p-4">
+                    <div className="flex items-center gap-4">
+                      <div className="applicant-profile-avatar flex h-16 w-16 items-center justify-center rounded-full bg-cyan-500 text-lg font-bold text-slate-950">
+                        {applicantProfileInitials}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xl font-semibold text-white">{profileData.name || 'Your name'}</p>
+                        <p className="text-sm text-slate-400">{profileData.location || 'Add your location'}</p>
+                        <p className="mt-1 text-sm text-cyan-300">{profileData.traits || 'Add a few key traits'}</p>
+                      </div>
+                    </div>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {profileData.skills.length > 0 ? (
+                        profileData.skills.map((skill) => (
+                          <span key={skill} className="rounded-full border border-cyan-500/40 bg-cyan-500/10 px-3 py-1 text-xs font-medium text-cyan-200">
+                            {skill}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-sm text-slate-400">Choose your skills to show on your profile.</span>
+                      )}
+                    </div>
+                  </div>
+
                   <form className="mt-6 space-y-4" onSubmit={(event) => event.preventDefault()}>
                     <div>
                       <label htmlFor="name" className="block text-sm font-medium text-slate-300">
@@ -1068,6 +1533,19 @@ const [authView, setAuthView] = useState("login")
                         value={profileData.name}
                         onChange={(event) => setProfileData({ ...profileData, name: event.target.value })}
                         className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="summary" className="block text-sm font-medium text-slate-300">
+                        About me
+                      </label>
+                      <textarea
+                        id="summary"
+                        rows="4"
+                        value={profileData.summary}
+                        onChange={(event) => setProfileData({ ...profileData, summary: event.target.value })}
+                        className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                        placeholder="Write a brief profile summary."
                       />
                     </div>
                     <div>
@@ -1083,25 +1561,6 @@ const [authView, setAuthView] = useState("login")
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-slate-300">Skills</label>
-                      <div className="mt-2 grid grid-cols-2 gap-2">
-                        {availableSkills.map((skill) => (
-                          <label
-                            key={skill}
-                            className="flex cursor-pointer items-center gap-2 rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-200"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={profileData.skills.includes(skill)}
-                              onChange={() => setProfileData({ ...profileData, skills: toggleSkill(profileData.skills, skill) })}
-                              className="h-4 w-4 rounded border-slate-600 bg-slate-800"
-                            />
-                            {skill}
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                    <div>
                       <label htmlFor="traits" className="block text-sm font-medium text-slate-300">
                         Key Traits
                       </label>
@@ -1115,37 +1574,30 @@ const [authView, setAuthView] = useState("login")
                       />
                     </div>
                     <div>
-                      <label htmlFor="summary" className="block text-sm font-medium text-slate-300">
-                        Summary
-                      </label>
-                      <textarea
-                        id="summary"
-                        rows="4"
-                        value={profileData.summary}
-                        onChange={(event) => setProfileData({ ...profileData, summary: event.target.value })}
-                        className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-                        placeholder="Write a brief profile summary."
-                      />
+                      <label className="block text-sm font-medium text-slate-300">Skills</label>
+                      <div className="mt-2 grid grid-cols-2 gap-2">
+                        {availableSkills.map((skill) => (
+                          <label
+                            key={skill}
+                            className="applicant-profile-skill-option flex cursor-pointer items-center gap-2 rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-200"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={profileData.skills.includes(skill)}
+                              onChange={() => setProfileData({ ...profileData, skills: toggleSkill(profileData.skills, skill) })}
+                              className="applicant-profile-skill-checkbox h-4 w-4 rounded border-slate-600 bg-slate-800"
+                            />
+                            {skill}
+                          </label>
+                        ))}
+                      </div>
                     </div>
                     <button
                       type="button"
                       onClick={() => {
-                        // persist profile via API (protected with JWT)
-                        const token = currentUser?.token || localStorage.getItem('peso-token')
-                        fetch('http://localhost:4000/api/profile', {
-                          method: 'PUT',
-                          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                          body: JSON.stringify({ profile: profileData }),
+                        saveProfile(profileData).then((result) => {
+                          if (result.ok) alert('Profile saved!')
                         })
-                          .then((r) => r.json())
-                          .then((data) => {
-                            if (data.error) return alert(data.error)
-                            alert('Profile saved!')
-                          })
-                          .catch((err) => {
-                            console.error(err)
-                            alert('Save failed')
-                          })
                       }}
                       className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
                     >
@@ -1249,11 +1701,11 @@ const [authView, setAuthView] = useState("login")
           )}
 
           {activeView === "employer" && (
-            <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+            <section className="employer-module-card portal-card rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
               <h2 className="text-xl font-semibold text-white">Employer Module</h2>
-              <p className="mt-3 text-slate-400">Request job postings and manage your vacancies.</p>
+              <p className="mt-3 text-slate-400">Submit job requests and track pending approvals.</p>
 
-              <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-950/80 p-5">
+              <div className="employer-form-panel mt-6 rounded-2xl border border-slate-800 bg-slate-950/80 p-5">
                 <h3 className="text-lg font-semibold text-white">Request a Job Posting</h3>
                 <form className="space-y-4 mt-4" onSubmit={handleCreateJob}>
                   <div>
@@ -1324,7 +1776,7 @@ const [authView, setAuthView] = useState("login")
                       {availableSkills.map((skill) => (
                         <label
                           key={skill}
-                          className="flex cursor-pointer items-center gap-2 rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-200"
+                          className="employer-skill-option flex cursor-pointer items-center gap-2 rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-200"
                         >
                           <input
                             type="checkbox"
@@ -1358,21 +1810,21 @@ const [authView, setAuthView] = useState("login")
                 </form>
               </div>
 
-              <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-950/80 p-5">
-                <h3 className="text-lg font-semibold text-white">Your Job Postings</h3>
-                {myJobs.length === 0 ? (
-                  <p className="mt-3 text-slate-400">No job postings submitted yet.</p>
+              <div className="employer-pending-panel mt-6 rounded-2xl border border-slate-800 bg-slate-950/80 p-5">
+                <h3 className="text-lg font-semibold text-white">Pending Job Requests for Approval</h3>
+                {pendingJobs.length === 0 ? (
+                  <p className="mt-3 text-slate-400">No pending job requests right now.</p>
                 ) : (
                   <div className="mt-4 space-y-4">
-                    {myJobs.map((job) => (
-                      <div key={job._id} className="rounded-2xl border border-slate-700 bg-slate-900 p-4">
+                    {pendingJobs.map((job) => (
+                      <div key={job._id} className="employer-pending-item rounded-2xl border border-slate-700 bg-slate-900 p-4">
                         <div className="flex items-center justify-between gap-4">
                           <div>
                             <p className="text-lg font-semibold text-white">{job.title}</p>
                             <p className="text-sm text-slate-400">{job.company} • {job.location || 'Remote'}</p>
                           </div>
-                          <span className="rounded-full bg-slate-800 px-3 py-1 text-xs uppercase tracking-[0.2em] text-slate-300">
-                            {job.status}
+                          <span className="rounded-full bg-amber-400 px-3 py-1 text-xs uppercase tracking-[0.2em] text-slate-950">
+                            Pending
                           </span>
                         </div>
                         <p className="mt-3 text-sm text-slate-300">{job.description}</p>
@@ -1385,18 +1837,18 @@ const [authView, setAuthView] = useState("login")
           )}
 
           {activeView === "applications" && activeRole === "Applicant" && (
-            <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-              <h2 className="text-xl font-semibold text-white">My Applications</h2>
-              <p className="mt-3 text-slate-400">Jobs you applied to and their current posting status.</p>
+            <section className="applicant-applications-card portal-card rounded-2xl border border-slate-300 bg-white p-6 text-black">
+              <h2 className="text-xl font-semibold text-black">My Applications</h2>
+              <p className="mt-3 text-black">Jobs you applied to and their current posting status.</p>
 
               {appliedJobs.length === 0 ? (
-                <p className="mt-6 text-slate-400">You have not applied to any job offers yet.</p>
+                <p className="mt-6 text-black">You have not applied to any job offers yet.</p>
               ) : (
                 <div className="mt-6 space-y-3">
                   {appliedJobs.map((job) => {
                     const myApplication = (job.applicants || []).find((applicant) => applicant.email === currentUser?.email)
                     return (
-                      <div key={`applied-${job._id}`} className="rounded-2xl border border-slate-700 bg-slate-950/80 p-4">
+                      <div key={`applied-${job._id}`} className="applicant-application-item rounded-2xl border border-slate-700 bg-slate-950/80 p-4">
                         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                           <div>
                             <p className="text-base font-semibold text-white">{job.title}</p>
@@ -1418,287 +1870,83 @@ const [authView, setAuthView] = useState("login")
           )}
 
           {activeView === "jobs" && (
-            <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-              <h2 className="text-xl font-semibold text-white">Job Offers</h2>
-              <p className="mt-3 text-slate-400">View postings and manage approvals.</p>
-
-              {jobLoading && <p className="mt-4 text-slate-300">Loading jobs…</p>}
-
-              {activeRole === "Applicant" && (
-                <div className="mt-6 space-y-6">
-                  <div className="rounded-2xl border border-slate-800 bg-slate-950/80 p-4">
-                    <h3 className="text-lg font-semibold text-white">Search Job Offers</h3>
-                    <p className="mt-1 text-sm text-slate-400">Filter approved jobs by keyword, skill, and location.</p>
-                    <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                      <input
-                        type="text"
-                        value={jobSearchTerm}
-                        onChange={(event) => setJobSearchTerm(event.target.value)}
-                        placeholder="Search title, company, description"
-                        className="w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-                      />
-                      <select
-                        value={jobSkillFilter}
-                        onChange={(event) => setJobSkillFilter(event.target.value)}
-                        className="w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-                      >
-                        <option value="all">All skills</option>
-                        {availableSkills.map((skill) => (
-                          <option key={skill} value={skill}>{skill}</option>
-                        ))}
-                      </select>
-                      <select
-                        value={jobLocationFilter}
-                        onChange={(event) => setJobLocationFilter(event.target.value)}
-                        className="w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-                      >
-                        <option value="all">All locations</option>
-                        {locationFilterOptions.map((location) => (
-                          <option key={location} value={location}>{location}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border border-slate-800 bg-slate-950/80 p-4">
-                    <h3 className="text-lg font-semibold text-white">Available Job Offers</h3>
-                    {filteredApplicantJobs.length === 0 ? (
-                      <p className="mt-4 text-slate-400">No approved jobs are available yet.</p>
-                    ) : (
-                      <div className="mt-4 space-y-4">
-                        {filteredApplicantJobs.map((job) => {
-                          const alreadyApplied = appliedJobIds.has(String(job._id)) || job.applicants?.some((applicant) => applicant.email === currentUser?.email)
-                          const isSelected = selectedJob && String(selectedJob._id) === String(job._id)
-                          return (
-                            <div key={job._id} className="rounded-2xl border border-slate-700 bg-slate-900 p-5">
-                              <button
-                                type="button"
-                                onClick={() => setSelectedJob(job)}
-                                className="w-full text-left"
-                              >
-                                <div className="flex items-center justify-between gap-4">
-                                  <div>
-                                    <p className="text-lg font-semibold text-white">{job.title}</p>
-                                    <p className="text-sm text-slate-400">{job.company} • {job.location || 'Remote'}</p>
-                                  </div>
-                                  <span className="rounded-full bg-cyan-500 px-3 py-1 text-xs uppercase tracking-[0.2em] text-slate-950">
-                                    Approved
-                                  </span>
-                                </div>
-                                <p className="mt-3 text-sm text-slate-300">{job.description}</p>
-                              </button>
-                              <p className="mt-3 text-sm text-slate-400">{job.requirements}</p>
-                              <p className="mt-2 text-sm text-slate-400">Required skills: {Array.isArray(job.skills) ? job.skills.join(', ') : job.skills || 'None specified'}</p>
-                              <p className="mt-2 text-sm text-slate-400">Salary: {job.salary || 'Not specified'}</p>
-                              {isSelected && selectedJob && (
-                                <div className="mt-4 rounded-2xl border border-cyan-500/40 bg-slate-950/80 p-4">
-                                  <h4 className="text-sm font-semibold uppercase tracking-[0.25em] text-cyan-300">Job details</h4>
-                                  <p className="mt-3 text-sm text-slate-300">{selectedJob.description}</p>
-                                  <p className="mt-3 text-sm text-slate-400">Company: {selectedJob.company}</p>
-                                  <p className="mt-1 text-sm text-slate-400">Location: {selectedJob.location || 'Remote'}</p>
-                                  <p className="mt-1 text-sm text-slate-400">Requirements: {selectedJob.requirements}</p>
-                                  <p className="mt-1 text-sm text-slate-400">Skills: {Array.isArray(selectedJob.skills) ? selectedJob.skills.join(', ') : selectedJob.skills || 'None specified'}</p>
-                                  <p className="mt-1 text-sm text-slate-400">Salary: {selectedJob.salary || 'Not specified'}</p>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleApplyJob(selectedJob._id)}
-                                    disabled={alreadyApplied}
-                                    className={`mt-4 rounded-2xl px-4 py-2 text-sm font-semibold ${alreadyApplied ? 'bg-slate-700 text-slate-400' : 'bg-cyan-500 text-slate-950'}`}
-                                  >
-                                    {alreadyApplied ? 'Already applied' : 'Apply for this job'}
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          )
-                        })}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {(activeRole === "Admin" || activeRole === "Employer") && (
-                <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-950/80 p-5">
-                  {activeRole === "Admin" && (
-                    <div className="mb-6 rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-                      <h3 className="text-lg font-semibold text-white">Search Job Offers</h3>
-                      <p className="mt-1 text-sm text-slate-400">Find pending, approved, or declined postings by title, company, location, requester, or keywords.</p>
-                      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                        <input
-                          type="text"
-                          value={adminJobSearchTerm}
-                          onChange={(event) => setAdminJobSearchTerm(event.target.value)}
-                          placeholder="Search title, company, location, requester"
-                          className="w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white sm:col-span-2"
-                        />
-                        <select
-                          value={adminJobStatusFilter}
-                          onChange={(event) => setAdminJobStatusFilter(event.target.value)}
-                          className="w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-                        >
-                          <option value="all">All statuses</option>
-                          <option value="pending">Pending</option>
-                          <option value="approved">Approved</option>
-                          <option value="declined">Declined</option>
-                        </select>
-                      </div>
-                    </div>
-                  )}
-
-                  {(activeRole !== 'Admin' || showPendingAdminSection) && (
-                    <>
-                      <h3 className="text-lg font-semibold text-white">Pending Job Postings</h3>
-                      {filteredPendingJobs.length === 0 ? (
-                        <p className="mt-3 text-slate-400">No pending job postings matched your search.</p>
-                      ) : (
-                        <div className="mt-4 space-y-4">
-                          {filteredPendingJobs.map((job) => (
-                            <div key={job._id} className="rounded-2xl border border-slate-700 bg-slate-900 p-4">
-                              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                                <div>
-                                  <p className="text-lg font-semibold text-white">{job.title}</p>
-                                  <p className="text-sm text-slate-400">{job.company} • {job.location || 'Remote'}</p>
-                                  <p className="mt-2 text-sm text-slate-300">{job.description}</p>
-                                  <p className="mt-2 text-sm text-slate-400">{job.requirements}</p>
-                                  <p className="mt-2 text-sm text-slate-400">Salary: {job.salary || 'Not specified'}</p>
-                                  <p className="mt-2 text-sm text-slate-400">Requested by: {job.createdBy}</p>
-                                </div>
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleReviewJob(job._id, 'approved')}
-                                    className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
-                                  >
-                                    Approve
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleReviewJob(job._id, 'declined')}
-                                    className="rounded-2xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-200"
-                                  >
-                                    Decline
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </>
-                  )}
-
-                  {showPendingAdminSection && (showApprovedAdminSection || showDeclinedAdminSection) && <div className="mt-6 border-t border-slate-800" />}
-
-                  {activeRole === 'Admin' && showApprovedAdminSection && (
-                    <>
-                      <h3 className="mt-6 text-lg font-semibold text-white">Current Approved Job Offers</h3>
-                      {filteredApprovedJobs.length === 0 ? (
-                        <p className="mt-3 text-slate-400">No approved job offers matched your search.</p>
-                      ) : (
-                        <div className="mt-4 space-y-4">
-                          {filteredApprovedJobs.map((job) => (
-                            <div key={job._id} className="rounded-2xl border border-slate-700 bg-slate-900 p-4">
-                              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                                <div>
-                                  <p className="text-lg font-semibold text-white">{job.title}</p>
-                                  <p className="text-sm text-slate-400">{job.company} • {job.location || 'Remote'}</p>
-                                  <p className="mt-2 text-sm text-slate-300">{job.description}</p>
-                                  <p className="mt-2 text-sm text-slate-400">Salary: {job.salary || 'Not specified'}</p>
-                                  <p className="mt-2 text-sm text-slate-400">Posted by: {job.createdBy || 'N/A'}</p>
-                                </div>
-                                <span className="rounded-full bg-cyan-500 px-3 py-1 text-xs uppercase tracking-[0.2em] text-slate-950">
-                                  {(job.applicants || []).length} applicant{(job.applicants || []).length === 1 ? '' : 's'}
-                                </span>
-                              </div>
-
-                              {(job.applicants || []).length > 0 ? (
-                                <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/80 p-3">
-                                  <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-300">Applicants</p>
-                                  <ul className="mt-3 space-y-2">
-                                    {job.applicants.map((applicant) => (
-                                      <li
-                                        key={`${job._id}-${applicant.email}`}
-                                        className="rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-200"
-                                      >
-                                        <p>{applicant.email}</p>
-                                        <p className="text-xs text-slate-400">
-                                          Applied: {applicant.appliedAt ? new Date(applicant.appliedAt).toLocaleString() : 'N/A'}
-                                        </p>
-                                      </li>
-                                    ))}
-                                  </ul>
-                                </div>
-                              ) : (
-                                <p className="mt-3 text-sm text-slate-400">No applicants yet for this job offer.</p>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </>
-                  )}
-
-                  {showApprovedAdminSection && showDeclinedAdminSection && <div className="mt-6 border-t border-slate-800" />}
-
-                  {showDeclinedAdminSection && (
-                    <>
-                      <h3 className="mt-6 text-lg font-semibold text-white">Declined Job Offers</h3>
-                      {filteredDeclinedJobs.length === 0 ? (
-                        <p className="mt-3 text-slate-400">No declined job offers matched your search.</p>
-                      ) : (
-                        <div className="mt-4 space-y-4">
-                          {filteredDeclinedJobs.map((job) => (
-                            <div key={job._id} className="rounded-2xl border border-slate-700 bg-slate-900 p-4">
-                              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                                <div>
-                                  <p className="text-lg font-semibold text-white">{job.title}</p>
-                                  <p className="text-sm text-slate-400">{job.company} • {job.location || 'Remote'}</p>
-                                  <p className="mt-2 text-sm text-slate-300">{job.description}</p>
-                                  <p className="mt-2 text-sm text-slate-400">Salary: {job.salary || 'Not specified'}</p>
-                                  <p className="mt-2 text-sm text-slate-400">Requested by: {job.createdBy || 'N/A'}</p>
-                                </div>
-                                <span className="rounded-full bg-slate-700 px-3 py-1 text-xs uppercase tracking-[0.2em] text-slate-200">
-                                  Declined
-                                </span>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
-            </section>
+            <JobsView
+              activeRole={activeRole}
+              jobLoading={jobLoading}
+              jobSearchTerm={jobSearchTerm}
+              setJobSearchTerm={setJobSearchTerm}
+              jobSkillFilter={jobSkillFilter}
+              setJobSkillFilter={setJobSkillFilter}
+              availableSkills={availableSkills}
+              jobLocationFilter={jobLocationFilter}
+              setJobLocationFilter={setJobLocationFilter}
+              locationFilterOptions={locationFilterOptions}
+              filteredApplicantJobs={filteredApplicantJobs}
+              appliedJobIds={appliedJobIds}
+              currentUser={currentUser}
+              selectedJob={selectedJob}
+              setSelectedJob={setSelectedJob}
+              handleApplyJob={handleApplyJob}
+              adminJobSearchTerm={adminJobSearchTerm}
+              setAdminJobSearchTerm={setAdminJobSearchTerm}
+              adminJobStatusFilter={adminJobStatusFilter}
+              setAdminJobStatusFilter={setAdminJobStatusFilter}
+              filteredPendingJobs={filteredPendingJobs}
+              handleReviewJob={handleReviewJob}
+              showPendingAdminSection={showPendingAdminSection}
+              showApprovedAdminSection={showApprovedAdminSection}
+              filteredApprovedJobs={filteredApprovedJobs}
+              showDeclinedAdminSection={showDeclinedAdminSection}
+              filteredDeclinedJobs={filteredDeclinedJobs}
+              adminUsers={adminUsers}
+              referredApplicantIdsByJob={referredApplicantIdsByJob}
+              handleReferApplicantFromJob={handleReferApplicantFromJob}
+            />
           )}
+
+          {activeView === "referrals" && activeRole === "Employer" && (
+            <ReferralList
+              token={getToken()}
+              employerId={currentUser?._id || currentUser?.id || currentUser?.employerId}
+            />
+          )}
+
           {activeView === "notify" && (
-            <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-              <h2 className="text-xl font-semibold text-white">Notifications</h2>
-              <p className="mt-3 text-slate-400">Updates about your job posting approvals and other account activity.</p>
+            <section className="notifications-module employer-notifications-card portal-card rounded-2xl border border-slate-300 bg-white p-6 text-black">
+              <h2 className="text-xl font-semibold text-black">Notifications</h2>
+              <p className="mt-3 text-black">Updates about your job posting approvals and other account activity.</p>
 
               {notifications.length === 0 ? (
-                <p className="mt-6 text-slate-400">You have no notifications yet.</p>
+                <p className="mt-6 text-black">You have no notifications yet.</p>
               ) : (
                 <>
-                  <p className="mt-6 text-sm text-slate-400">Click a notification to enlarge and view full details.</p>
+                  <p className="mt-6 text-sm text-black">Click a notification to enlarge and view full details.</p>
                   <div className="mt-3 space-y-3">
                     {notifications.map((notification) => (
                       <button
                         key={notification._id}
                         type="button"
-                        onClick={() => setSelectedNotification(notification)}
-                        className="w-full rounded-2xl border border-slate-700 bg-slate-950/80 p-4 text-left"
+                        onClick={() => handleNotificationClick(notification)}
+                        className={`${activeRole === 'Employer' ? 'employer-notification-item' : ''} w-full rounded-2xl border bg-white p-4 text-left ${isNewApplicationNotification(notification) && !notification.read ? 'border-cyan-500/50' : 'border-slate-300'}`}
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div>
-                            <p className="text-base font-semibold text-white">{notification.title}</p>
-                            <p className="mt-2 line-clamp-2 text-sm text-slate-300">{notification.message}</p>
+                            <p className="text-base font-semibold text-black">{notification.title}</p>
+                            <p className="mt-2 line-clamp-2 text-sm text-black">{notification.message}</p>
+                            {activeRole === 'Admin' && isNewApplicationNotification(notification) && (
+                              <>
+                                <p className="mt-2 text-sm text-black">Applicant: {notification.applicantName || 'Unknown applicant'}</p>
+                                <p className="mt-1 text-sm text-black">Job: {notification.jobTitle || 'Unknown job'} • Employer: {notification.employerName || 'Unknown employer'}</p>
+                              </>
+                            )}
                             {activeRole === 'Admin' && ((notification.actionable && notification.status === 'pending') || String(notification._id || '').startsWith('job-pending-')) && (
                               <p className="mt-2 text-xs uppercase tracking-[0.2em] text-cyan-300">Action available</p>
                             )}
+                            {activeRole === 'Admin' && isNewApplicationNotification(notification) && !notification.read && (
+                              <p className="mt-2 text-xs uppercase tracking-[0.2em] text-cyan-300">Unread application alert</p>
+                            )}
                           </div>
-                          <span className="text-xs uppercase tracking-[0.2em] text-slate-400">
+                          <span className="text-xs uppercase tracking-[0.2em] text-black">
                             {notification.createdAt ? new Date(notification.createdAt).toLocaleString() : 'Just now'}
                           </span>
                         </div>
@@ -1711,50 +1959,263 @@ const [authView, setAuthView] = useState("login")
             </section>
           )}
 
-          {selectedNotification && (
+          {showSkillPrompt && activeRole === 'Applicant' && (
             <div
               className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4"
               role="dialog"
               aria-modal="true"
-              onClick={() => setSelectedNotification(null)}
+              aria-labelledby="skill-prompt-title"
+              onClick={() => setShowSkillPrompt(false)}
             >
               <div
-                className="w-full max-w-2xl rounded-2xl border border-cyan-500/40 bg-slate-900 p-6 shadow-2xl"
+                className="applicant-skill-modal w-full max-w-xl rounded-2xl border border-slate-300 bg-white p-6 shadow-2xl"
                 onClick={(event) => event.stopPropagation()}
               >
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <h3 className="text-lg font-semibold text-white">Notification details</h3>
-                    <p className="mt-2 text-sm font-semibold text-white">{selectedNotification.title}</p>
+                    <h3 id="skill-prompt-title" className="text-xl font-semibold text-slate-900">Tell us about your skills</h3>
+                    <p className="mt-2 text-sm text-slate-600">Choose the skills that match your experience so employers can see them on your profile.</p>
                   </div>
                   <button
                     type="button"
-                    onClick={() => setSelectedNotification(null)}
-                    className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-sm text-slate-200"
+                    onClick={() => setShowSkillPrompt(false)}
+                    className="rounded-2xl border border-slate-300 bg-slate-100 px-3 py-1 text-sm text-slate-700"
                   >
                     Close
                   </button>
                 </div>
 
-                <p className="mt-4 text-sm text-slate-300">{selectedNotification.message}</p>
-                <p className="mt-2 text-sm text-slate-400">
+                <div className="mt-5 grid grid-cols-2 gap-2">
+                  {availableSkills.map((skill) => (
+                    <label
+                      key={skill}
+                      className="applicant-profile-skill-option flex cursor-pointer items-center gap-2 rounded-2xl border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-800"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={profileData.skills.includes(skill)}
+                        onChange={() => setProfileData({ ...profileData, skills: toggleSkill(profileData.skills, skill) })}
+                        className="applicant-profile-skill-checkbox h-4 w-4 rounded border-slate-400 bg-white"
+                      />
+                      {skill}
+                    </label>
+                  ))}
+                </div>
+
+                <div className="mt-6 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowSkillPrompt(false)
+                      saveProfile(profileData).then((result) => {
+                        if (result.ok) setActiveView('profile')
+                      })
+                    }}
+                    className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
+                  >
+                    Continue
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {selectedDirectoryUser && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="directory-user-title"
+              onClick={() => setSelectedDirectoryUser(null)}
+            >
+              <div
+                className="admin-directory-modal w-full max-w-md rounded-2xl border border-cyan-500/40 bg-slate-900 p-6 shadow-2xl"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h2 id="directory-user-title" className="text-lg font-semibold text-white">
+                      {selectedDirectoryUser.directoryRole} details
+                    </h2>
+                    <p className="mt-2 text-sm text-cyan-300">{selectedDirectoryUser.email}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDirectoryUser(null)}
+                    className="admin-modal-close rounded-2xl border border-slate-700 bg-slate-800 px-3 py-1 text-sm text-slate-200"
+                  >
+                    Close
+                  </button>
+                </div>
+
+                <div className="admin-modal-details mt-5 space-y-2 rounded-2xl border border-slate-800 bg-slate-950/80 p-4 text-sm text-slate-300">
+                  {selectedDirectoryUser.directoryRole === 'Employer' ? (
+                    <>
+                      <p><span className="font-semibold text-white">Company:</span> {selectedDirectoryUser.companyName || 'N/A'}</p>
+                      <p><span className="font-semibold text-white">Contact:</span> {selectedDirectoryUser.contactName || 'N/A'}</p>
+                      <p><span className="font-semibold text-white">Phone:</span> {selectedDirectoryUser.phone || 'N/A'}</p>
+                      <p><span className="font-semibold text-white">Location:</span> {selectedDirectoryUser.profile?.location || 'N/A'}</p>
+                      <p><span className="font-semibold text-white">About me:</span> {selectedDirectoryUser.profile?.summary || 'N/A'}</p>
+                      <p><span className="font-semibold text-white">Status:</span> {selectedDirectoryUser.approvalStatus || 'approved'}</p>
+                    </>
+                  ) : (
+                    <>
+                      <p><span className="font-semibold text-white">Name:</span> {selectedDirectoryUser.profile?.name || 'N/A'}</p>
+                      <p><span className="font-semibold text-white">Location:</span> {selectedDirectoryUser.profile?.location || 'N/A'}</p>
+                      <p><span className="font-semibold text-white">Phone:</span> {selectedDirectoryUser.phone || selectedDirectoryUser.profile?.phone || 'N/A'}</p>
+                      <p><span className="font-semibold text-white">Skills:</span> {Array.isArray(selectedDirectoryUser.profile?.skills) ? selectedDirectoryUser.profile.skills.join(', ') : selectedDirectoryUser.profile?.skills || 'N/A'}</p>
+                      <p><span className="font-semibold text-white">Traits:</span> {selectedDirectoryUser.profile?.traits || 'N/A'}</p>
+                      <p><span className="font-semibold text-white">About me:</span> {selectedDirectoryUser.profile?.summary || 'N/A'}</p>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {approveRequestTarget && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="approve-request-title"
+              onClick={() => setApproveRequestTarget(null)}
+            >
+              <div
+                className="w-full max-w-md rounded-2xl border border-cyan-500/40 bg-slate-900 p-6 shadow-2xl"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h2 id="approve-request-title" className="text-lg font-semibold text-white">Approve employer request</h2>
+                    <p className="mt-2 text-sm text-slate-400">{approveRequestTarget.companyName}</p>
+                  </div>
+                </div>
+                <p className="mt-5 text-sm text-slate-300">Approve this employer? They will gain access to employer features.</p>
+                <div className="mt-5 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setApproveRequestTarget(null)}
+                    className="rounded-2xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm text-slate-200"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const requestId = approveRequestTarget._id
+                      setApproveRequestTarget(null)
+                      handleReviewEmployerRequest(requestId, 'approved')
+                    }}
+                    className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
+                  >
+                    Confirm approval
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {declineRequestTarget && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="decline-request-title"
+              onClick={() => setDeclineRequestTarget(null)}
+            >
+              <form
+                className="w-full max-w-md rounded-2xl border border-cyan-500/40 bg-slate-900 p-6 shadow-2xl"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  const requestId = declineRequestTarget._id
+                  setDeclineRequestTarget(null)
+                  setDeclineReason('')
+                  handleReviewEmployerRequest(requestId, 'declined')
+                }}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h2 id="decline-request-title" className="text-lg font-semibold text-white">Decline employer request</h2>
+                    <p className="mt-2 text-sm text-slate-400">{declineRequestTarget.companyName}</p>
+                  </div>
+                </div>
+                <label htmlFor="decline-reason" className="mt-5 block text-sm font-medium text-slate-200">
+                  Reason for declining
+                </label>
+                <textarea
+                  id="decline-reason"
+                  value={declineReason}
+                  onChange={(event) => setDeclineReason(event.target.value)}
+                  rows="4"
+                  required
+                  placeholder="Explain what the employer needs to correct before resubmitting."
+                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                />
+                <div className="mt-5 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDeclineRequestTarget(null)}
+                    className="rounded-2xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm text-slate-200"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="rounded-2xl bg-rose-400 px-4 py-2 text-sm font-semibold text-slate-950"
+                  >
+                    Confirm decline
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {selectedNotification && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4"
+              role="dialog"
+              aria-modal="true"
+              onClick={() => setSelectedNotification(null)}
+            >
+              <div
+                className="w-full max-w-2xl rounded-2xl border border-slate-300 bg-white p-6 shadow-2xl"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h3 className="text-lg font-semibold text-black">Notification details</h3>
+                    <p className="mt-2 text-sm font-semibold text-black">{selectedNotification.title}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedNotification(null)}
+                    className="rounded-full border border-slate-300 bg-white px-3 py-1 text-sm font-semibold text-black"
+                  >
+                    Close
+                  </button>
+                </div>
+
+                <p className="mt-4 text-sm text-black">{selectedNotification.message}</p>
+                <p className="mt-2 text-sm text-black">
                   Time: {selectedNotification.createdAt ? new Date(selectedNotification.createdAt).toLocaleString() : 'Just now'}
                 </p>
 
                 {selectedNotification.company && (
-                  <p className="mt-2 text-sm text-slate-400">Company: {selectedNotification.company}</p>
+                  <p className="mt-2 text-sm text-black">Company: {selectedNotification.company}</p>
                 )}
                 {selectedNotification.location && (
-                  <p className="mt-1 text-sm text-slate-400">Location: {selectedNotification.location}</p>
+                  <p className="mt-1 text-sm text-black">Location: {selectedNotification.location}</p>
                 )}
                 {selectedNotification.salary && (
-                  <p className="mt-1 text-sm text-slate-400">Salary: {selectedNotification.salary}</p>
+                  <p className="mt-1 text-sm text-black">Salary: {selectedNotification.salary}</p>
                 )}
                 {selectedNotification.requirements && (
-                  <p className="mt-1 text-sm text-slate-400">Requirements: {selectedNotification.requirements}</p>
+                  <p className="mt-1 text-sm text-black">Requirements: {selectedNotification.requirements}</p>
                 )}
                 {selectedNotification.description && (
-                  <p className="mt-1 text-sm text-slate-400">Description: {selectedNotification.description}</p>
+                  <p className="mt-1 text-sm text-black">Description: {selectedNotification.description}</p>
                 )}
 
                 {activeRole === 'Admin' && selectedNotificationJobId && selectedNotificationIsPending && (
@@ -1769,7 +2230,7 @@ const [authView, setAuthView] = useState("login")
                     <button
                       type="button"
                       onClick={() => handleReviewJob(selectedNotificationJobId, 'declined')}
-                      className="rounded-2xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-200"
+                      className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-black"
                     >
                       Decline here
                     </button>
@@ -1780,16 +2241,16 @@ const [authView, setAuthView] = useState("login")
           )}
 
           {activeView === "requests" && activeRole === "Admin" && (
-            <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-              <h2 className="text-xl font-semibold text-white">Employer Requests</h2>
-              <p className="mt-3 text-slate-400">Review pending employer account requests.</p>
+            <section className="admin-requests-card rounded-2xl border border-slate-300 bg-white p-6 text-black">
+              <h2 className="text-xl font-semibold text-black">Employer Requests</h2>
+              <p className="mt-3 text-black">Review pending employer account requests.</p>
 
               {employerRequests.length === 0 ? (
-                <p className="mt-4 text-slate-400">No pending employer requests.</p>
+                <p className="mt-4 text-black">No pending employer requests.</p>
               ) : (
                 <div className="mt-6 space-y-4">
                   {employerRequests.map((request) => (
-                    <div key={request._id} className="rounded-2xl border border-slate-700 bg-slate-950/80 p-5">
+                    <div key={request._id} className="admin-request-item rounded-2xl border border-slate-700 bg-slate-950/80 p-5">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div>
                           <p className="text-lg font-semibold text-white">{request.companyName}</p>
@@ -1798,18 +2259,41 @@ const [authView, setAuthView] = useState("login")
                           <p className="text-sm text-slate-400">Location: {request.location || 'N/A'}</p>
                           <p className="text-sm text-slate-400">Phone: {request.phone || 'N/A'}</p>
                           <p className="mt-2 text-sm text-slate-300">{request.message || 'No additional message provided.'}</p>
+                          <p className="mt-2 text-sm text-amber-300">Status: {request.status.replace('_', ' ')}</p>
+                          {request.reviewReason && <p className="mt-1 text-sm text-rose-300">Previous review note: {request.reviewReason}</p>}
+                          {request.requirementsFile && (
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleViewRequirements(request._id)}
+                                className="rounded-2xl bg-cyan-500 px-3 py-2 text-sm font-semibold text-slate-950"
+                              >
+                                View NSRP PDF
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadRequirements(request._id, request.requirementsFile.originalName)}
+                                className="rounded-2xl border border-cyan-500/50 bg-slate-800 px-3 py-2 text-sm font-semibold text-cyan-300"
+                              >
+                                Download PDF
+                              </button>
+                            </div>
+                          )}
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => handleReviewEmployerRequest(request._id, 'approved')}
+                            onClick={() => setApproveRequestTarget(request)}
                             className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
                           >
                             Approve
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleReviewEmployerRequest(request._id, 'declined')}
+                            onClick={() => {
+                              setDeclineRequestTarget(request)
+                              setDeclineReason('')
+                            }}
                             className="rounded-2xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-200"
                           >
                             Decline
@@ -1822,7 +2306,18 @@ const [authView, setAuthView] = useState("login")
               )}
             </section>
           )}
-        </main>
+
+          {activeView === "peso-referrals" && activeRole === "Admin" && (
+            <PesoReferralPanel
+              token={getToken()}
+              adminUsers={adminUsers}
+              onLoadApplicants={fetchAdminUsers}
+              initialJobId={referralPrefill.jobId}
+              initialApplicantIds={referralPrefill.applicantIds}
+            />
+          )}
+          </main>
+        </div>
       </div>
     </div>
   )

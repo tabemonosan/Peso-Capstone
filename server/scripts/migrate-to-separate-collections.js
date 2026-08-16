@@ -1,8 +1,8 @@
 import 'dotenv/config'
 import mongoose from 'mongoose'
 import fs from 'fs'
-import './models/User.js'
-import { Applicant, Employer, Admin, findUserByEmail, createUserInRole } from './models/collections.js'
+import '../models/User.js'
+import { Applicant, Employer, Admin, findUserByEmail, createUserInRole } from '../models/collections.js'
 
 const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://localhost:27017/peso-portal'
 
@@ -55,9 +55,9 @@ async function run() {
   console.log(`Migration complete. Migrated ${migrated} users.`)
   // Write a small migration report
   const report = { migrated, total: users.length, timestamp: new Date().toISOString() }
-  fs.writeFileSync('migration-report.json', JSON.stringify(report, null, 2))
+  fs.writeFileSync(new URL('../reports/migration-report.json', import.meta.url), JSON.stringify(report, null, 2))
 
-  console.log('Wrote migration-report.json. Review target collections before dropping legacy `users` collection.')
+  console.log('Wrote server/reports/migration-report.json. Review target collections before dropping legacy `users` collection.')
   await mongoose.disconnect()
   process.exit(0)
 }

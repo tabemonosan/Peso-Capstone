@@ -4,7 +4,10 @@ import mongoose from 'mongoose'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import cors from 'cors'
-import { Applicant, Employer, Admin, Notification, findUserByEmail, createUserInRole, updateUserProfileByEmail } from './models/collections.js'
+import multer from 'multer'
+import fs from 'fs'
+import path from 'path'
+import { Applicant, Employer, Admin, Notification, Referral, HireReport, Rating, findUserByEmail, createUserInRole, updateUserProfileByEmail } from './models/collections.js'
 
 const app = express()
 const PORT = process.env.PORT || 4000
@@ -62,12 +65,51 @@ const employerRequestSchema = new Schema({
   location: String,
   phone: String,
   message: String,
-  status: { type: String, enum: ['pending', 'approved', 'declined'], default: 'pending' },
+  status: { type: String, enum: ['pending', 'under_review', 'approved', 'declined'], default: 'pending' },
+  requirementsFile: {
+    filename: String,
+    originalName: String,
+    path: String,
+    mimetype: String,
+    size: Number,
+  },
+  requirementsSubmittedAt: Date,
+  reviewReason: String,
   approvedBy: String,
   approvedAt: Date,
   createdAt: { type: Date, default: Date.now },
 })
 const EmployerRequest = mongoose.model('EmployerRequest', employerRequestSchema)
+
+const requirementsDirectory = path.join(process.cwd(), 'server', 'uploads', 'employer-requirements')
+fs.mkdirSync(requirementsDirectory, { recursive: true })
+const requirementsUpload = multer({
+  dest: requirementsDirectory,
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, callback) => {
+    if (file.mimetype !== 'application/pdf' || path.extname(file.originalname).toLowerCase() !== '.pdf') {
+      return callback(new Error('Only PDF files are accepted'))
+    }
+    callback(null, true)
+  },
+})
+
+async function requireApprovedEmployer(decoded, res) {
+  if (decoded.role !== 'Employer') {
+    res.status(403).json({ error: 'Forbidden' })
+    return false
+  }
+  const employer = await Employer.findOne({ email: decoded.email }).select('verificationStatus').lean()
+  if (!employer) {
+    res.status(404).json({ error: 'Employer not found' })
+    return false
+  }
+  if (employer.verificationStatus && employer.verificationStatus !== 'approved') {
+    res.status(403).json({ error: 'Employer verification is required before using this feature' })
+    return false
+  }
+  return true
+}
 
 app.get('/', (req, res) => res.json({ ok: true }))
 app.get('/ping', (req, res) => {
@@ -86,7 +128,7 @@ app.post('/api/signup', async (req, res) => {
     const passwordHash = await bcrypt.hash(password, 10)
     const user = await createUserInRole('Applicant', { email, passwordHash, profile: { name, location, skills, traits, summary } })
 
-    const safe = { email: user.email, role: 'Applicant', profile: user.profile }
+    const safe = { id: String(user._id), email: user.email, role: 'Applicant', profile: user.profile }
     const token = jwt.sign({ email: user.email, role: 'Applicant' }, jwtSecret, { expiresIn: '7d' })
     res.json({ user: safe, token })
   } catch (err) {
@@ -103,11 +145,12 @@ app.post('/api/login', async (req, res) => {
     const found = await findUserByEmail(email)
     if (!found) return res.status(401).json({ error: 'Invalid credentials' })
     const { user, type } = found
+    const requirements = type === 'Employer' ? await EmployerRequest.findOne({ email: user.email }).lean() : null
 
     const ok = await bcrypt.compare(password, user.passwordHash)
     if (!ok) return res.status(401).json({ error: 'Invalid credentials' })
 
-    const safe = { email: user.email, role: type, profile: user.profile }
+    const safe = { id: String(user._id), email: user.email, role: type, profile: user.profile, verificationStatus: ['Employer', 'Applicant'].includes(type) ? (user.verificationStatus || 'approved') : undefined, verificationReason: ['Employer', 'Applicant'].includes(type) ? user.verificationReason : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size } : undefined }
     const token = jwt.sign({ email: user.email, role: type }, jwtSecret, { expiresIn: '7d' })
     res.json({ user: safe, token })
   } catch (err) {
@@ -126,7 +169,8 @@ app.get('/api/profile', async (req, res) => {
     const found = await findUserByEmail(decoded.email)
     if (!found) return res.status(404).json({ error: 'Not found' })
     const { user, type } = found
-    res.json({ email: user.email, role: type, profile: user.profile })
+    const requirements = type === 'Employer' ? await EmployerRequest.findOne({ email: user.email }).lean() : null
+    res.json({ id: String(user._id), email: user.email, role: type, profile: user.profile, verificationStatus: ['Employer', 'Applicant'].includes(type) ? (user.verificationStatus || 'approved') : undefined, verificationReason: ['Employer', 'Applicant'].includes(type) ? user.verificationReason : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size } : undefined })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Server error' })
@@ -157,7 +201,7 @@ app.post('/api/jobs', async (req, res) => {
     if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
     const token = auth.split(' ')[1]
     const decoded = jwt.verify(token, jwtSecret)
-    if (decoded.role !== 'Employer') return res.status(403).json({ error: 'Forbidden' })
+    if (!(await requireApprovedEmployer(decoded, res))) return
     const { title, company, location, description, requirements, salary, skills } = req.body || {}
     if (!title || !company || !description) return res.status(400).json({ error: 'Missing required fields' })
     if (!Array.isArray(skills) || skills.length === 0) return res.status(400).json({ error: 'Select at least one skill' })
@@ -191,7 +235,7 @@ app.get('/api/jobs', async (req, res) => {
       if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
       const token = auth.split(' ')[1]
       const decoded = jwt.verify(token, jwtSecret)
-      if (!['Admin', 'Employer'].includes(decoded.role)) return res.status(403).json({ error: 'Forbidden' })
+      if (decoded.role !== 'Admin') return res.status(403).json({ error: 'Forbidden' })
       const jobs = await JobPosting.find({ status: 'pending' }).sort({ createdAt: -1 })
       return res.json(jobs)
     }
@@ -200,7 +244,7 @@ app.get('/api/jobs', async (req, res) => {
       if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
       const token = auth.split(' ')[1]
       const decoded = jwt.verify(token, jwtSecret)
-      if (decoded.role !== 'Employer') return res.status(403).json({ error: 'Forbidden' })
+      if (!(await requireApprovedEmployer(decoded, res))) return
       const jobs = await JobPosting.find({ createdBy: decoded.email }).sort({ createdAt: -1 })
       return res.json(jobs)
     }
@@ -237,7 +281,7 @@ app.put('/api/jobs/:id/status', async (req, res) => {
     if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
     const token = auth.split(' ')[1]
     const decoded = jwt.verify(token, jwtSecret)
-    if (!['Admin', 'Employer'].includes(decoded.role)) return res.status(403).json({ error: 'Forbidden' })
+    if (decoded.role !== 'Admin') return res.status(403).json({ error: 'Forbidden' })
     const { status } = req.body || {}
     if (!['approved', 'declined'].includes(status)) return res.status(400).json({ error: 'Invalid status' })
     const job = await JobPosting.findById(req.params.id)
@@ -291,12 +335,364 @@ app.post('/api/jobs/:id/apply', async (req, res) => {
     const job = await JobPosting.findById(req.params.id)
     if (!job) return res.status(404).json({ error: 'Job not found' })
     if (job.status !== 'approved') return res.status(400).json({ error: 'Job is not available' })
-    if (job.applicants.some((applicant) => applicant.email === decoded.email)) {
-      return res.status(400).json({ error: 'Already applied' })
-    }
+
+    const applicant = await Applicant.findOne({ email: decoded.email }).lean()
+    if (!applicant) return res.status(404).json({ error: 'Applicant not found' })
+
     job.applicants.push({ email: decoded.email, appliedAt: new Date() })
     await job.save()
+
+    const admins = await Admin.find().lean()
+    if (admins.length > 0) {
+      const employer = await Employer.findOne({ email: job.createdBy }).lean()
+      const applicantName = applicant?.profile?.name || applicant.email
+      const employerName = employer?.companyName || job.company || job.createdBy || 'Unknown employer'
+
+      await Notification.insertMany(
+        admins.map((admin) => ({
+          recipientEmail: admin.email,
+          title: 'New applicant needs referral review',
+          message: `${applicantName} applied to "${job.title}" at ${employerName}. Review and decide whether to refer.`,
+          type: 'new_application',
+          kind: 'new_application',
+          read: false,
+          linkPath: '/peso-referrals',
+          actionable: true,
+          applicantId: applicant._id,
+          jobId: job._id,
+          employerId: employer?._id,
+          applicantName,
+          jobTitle: job.title,
+          employerName,
+        })),
+      )
+    }
+
     res.json({ success: true, job })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Server error' })
+  }
+})
+
+app.post('/api/referrals', async (req, res) => {
+  try {
+    const auth = req.headers.authorization
+    if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
+    const token = auth.split(' ')[1]
+    const decoded = jwt.verify(token, jwtSecret)
+    if (decoded.role !== 'Admin') return res.status(403).json({ error: 'Forbidden' })
+
+    const { jobId, applicantIds } = req.body || {}
+    if (!jobId || !Array.isArray(applicantIds) || applicantIds.length === 0) {
+      return res.status(400).json({ error: 'jobId and applicantIds are required' })
+    }
+
+    const job = await JobPosting.findById(jobId)
+    if (!job) return res.status(404).json({ error: 'Job not found' })
+
+    const employer = await Employer.findOne({ email: job.createdBy }).lean()
+    if (!employer) return res.status(404).json({ error: 'Employer for job not found' })
+
+    const admin = await Admin.findOne({ email: decoded.email }).lean()
+    if (!admin) return res.status(404).json({ error: 'Admin not found' })
+
+    const normalizedApplicantIds = applicantIds
+      .filter((id) => typeof id === 'string' || typeof id === 'number' || (id && typeof id === 'object'))
+      .map((id) => String(id))
+
+    if (normalizedApplicantIds.length === 0) {
+      return res.status(400).json({ error: 'No valid applicantIds provided' })
+    }
+
+    const existingApplicants = await Applicant.find({ _id: { $in: normalizedApplicantIds } }).select('_id').lean()
+    const existingApplicantIds = new Set(existingApplicants.map((a) => String(a._id)))
+
+    const existingReferrals = await Referral.find({
+      jobId: job._id,
+      applicantId: { $in: normalizedApplicantIds },
+    }).select('applicantId').lean()
+    const alreadyReferredApplicantIds = new Set(existingReferrals.map((referral) => String(referral.applicantId)))
+
+    const referralsPayload = normalizedApplicantIds
+      .filter((applicantId) =>
+        existingApplicantIds.has(applicantId) && !alreadyReferredApplicantIds.has(applicantId),
+      )
+      .map((applicantId) => ({
+        jobId: job._id,
+        applicantId,
+        employerId: employer._id,
+        referredBy: admin._id,
+        status: 'pending',
+      }))
+
+    if (referralsPayload.length === 0) {
+      return res.json({ createdCount: 0, referrals: [], message: 'Applicants already referred for this job' })
+    }
+
+    const created = await Referral.insertMany(referralsPayload)
+    res.json({ createdCount: created.length, referrals: created })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Server error' })
+  }
+})
+
+app.delete('/api/referrals', async (req, res) => {
+  try {
+    const auth = req.headers.authorization
+    if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
+    const token = auth.split(' ')[1]
+    const decoded = jwt.verify(token, jwtSecret)
+    if (decoded.role !== 'Admin') return res.status(403).json({ error: 'Forbidden' })
+
+    const { jobId, applicantIds } = req.body || {}
+    const applicantId = Array.isArray(applicantIds) ? applicantIds[0] : null
+    if (!jobId || !applicantId) return res.status(400).json({ error: 'jobId and applicantId are required' })
+
+    const deleted = await Referral.deleteOne({ jobId, applicantId: String(applicantId) })
+    res.json({ deletedCount: deleted.deletedCount || 0 })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Server error' })
+  }
+})
+
+app.get('/api/referrals/admin', async (req, res) => {
+  try {
+    const auth = req.headers.authorization
+    if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
+    const token = auth.split(' ')[1]
+    const decoded = jwt.verify(token, jwtSecret)
+    if (decoded.role !== 'Admin') return res.status(403).json({ error: 'Forbidden' })
+
+    const referrals = await Referral.find().select('jobId applicantId').lean()
+    res.json(referrals)
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Server error' })
+  }
+})
+
+app.get('/api/referrals/employer/:employerId', async (req, res) => {
+  try {
+    const auth = req.headers.authorization
+    if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
+    const token = auth.split(' ')[1]
+    const decoded = jwt.verify(token, jwtSecret)
+    if (!['Admin', 'Employer'].includes(decoded.role)) return res.status(403).json({ error: 'Forbidden' })
+
+    if (decoded.role === 'Employer') {
+      if (!(await requireApprovedEmployer(decoded, res))) return
+      const employer = await Employer.findOne({ email: decoded.email }).lean()
+      if (!employer) return res.status(404).json({ error: 'Employer not found' })
+      if (String(employer._id) !== String(req.params.employerId)) return res.status(403).json({ error: 'Forbidden' })
+    }
+
+    const referrals = await Referral.find({ employerId: req.params.employerId })
+      .sort({ createdAt: -1 })
+      .populate({ path: 'applicantId', select: 'email profile' })
+      .populate({
+        path: 'jobId',
+        model: JobPosting,
+        select: 'title company location description requirements salary status createdBy createdAt',
+      })
+
+    res.json(referrals)
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Server error' })
+  }
+})
+
+app.put('/api/referrals/:id/respond', async (req, res) => {
+  try {
+    const auth = req.headers.authorization
+    if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
+    const token = auth.split(' ')[1]
+    const decoded = jwt.verify(token, jwtSecret)
+    if (!(await requireApprovedEmployer(decoded, res))) return
+
+    const { status } = req.body || {}
+    if (!['accepted', 'declined'].includes(status)) return res.status(400).json({ error: 'Invalid status' })
+
+    const employer = await Employer.findOne({ email: decoded.email }).lean()
+    if (!employer) return res.status(404).json({ error: 'Employer not found' })
+
+    const referral = await Referral.findById(req.params.id)
+    if (!referral) return res.status(404).json({ error: 'Referral not found' })
+    if (String(referral.employerId) !== String(employer._id)) return res.status(403).json({ error: 'Forbidden' })
+
+    referral.status = status
+    await referral.save()
+
+    res.json(referral)
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Server error' })
+  }
+})
+
+app.post('/api/hire-reports', async (req, res) => {
+  try {
+    const auth = req.headers.authorization
+    if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
+    const token = auth.split(' ')[1]
+    const decoded = jwt.verify(token, jwtSecret)
+    if (decoded.role !== 'Employer') return res.status(403).json({ error: 'Forbidden' })
+
+    const { applicantId, jobId, status, referralId } = req.body || {}
+    if (!applicantId || !jobId || !status) {
+      return res.status(400).json({ error: 'applicantId, jobId, and status are required' })
+    }
+    if (!['hired', 'deployed'].includes(status)) return res.status(400).json({ error: 'Invalid status' })
+
+    const employer = await Employer.findOne({ email: decoded.email }).lean()
+    if (!employer) return res.status(404).json({ error: 'Employer not found' })
+
+    const job = await JobPosting.findById(jobId)
+    if (!job) return res.status(404).json({ error: 'Job not found' })
+    if (job.createdBy !== decoded.email) return res.status(403).json({ error: 'Forbidden' })
+
+    const applicant = await Applicant.findById(applicantId).lean()
+    if (!applicant) return res.status(404).json({ error: 'Applicant not found' })
+
+    let referral = null
+    if (referralId) {
+      referral = await Referral.findById(referralId)
+      if (!referral) return res.status(404).json({ error: 'Referral not found' })
+      if (String(referral.employerId) !== String(employer._id)) return res.status(403).json({ error: 'Forbidden' })
+      if (String(referral.applicantId) !== String(applicantId) || String(referral.jobId) !== String(jobId)) {
+        return res.status(400).json({ error: 'Referral does not match applicant/job' })
+      }
+    }
+
+    const hireReport = await HireReport.create({
+      referralId: referral ? referral._id : undefined,
+      applicantId,
+      employerId: employer._id,
+      jobId,
+      status,
+    })
+
+    res.json(hireReport)
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Server error' })
+  }
+})
+
+app.get('/api/hire-reports', async (req, res) => {
+  try {
+    const auth = req.headers.authorization
+    if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
+    const token = auth.split(' ')[1]
+    const decoded = jwt.verify(token, jwtSecret)
+    if (decoded.role !== 'Admin') return res.status(403).json({ error: 'Forbidden' })
+
+    const { employerId, status, from, to } = req.query || {}
+    const filter = {}
+
+    if (employerId) filter.employerId = employerId
+    if (status) {
+      if (!['hired', 'deployed'].includes(status)) return res.status(400).json({ error: 'Invalid status' })
+      filter.status = status
+    }
+
+    if (from || to) {
+      const reportedAt = {}
+      if (from) {
+        const fromDate = new Date(from)
+        if (Number.isNaN(fromDate.getTime())) return res.status(400).json({ error: 'Invalid from date' })
+        reportedAt.$gte = fromDate
+      }
+      if (to) {
+        const toDate = new Date(to)
+        if (Number.isNaN(toDate.getTime())) return res.status(400).json({ error: 'Invalid to date' })
+        reportedAt.$lte = toDate
+      }
+      filter.reportedAt = reportedAt
+    }
+
+    const hireReports = await HireReport.find(filter).sort({ reportedAt: -1 })
+    res.json(hireReports)
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Server error' })
+  }
+})
+
+app.post('/api/ratings', async (req, res) => {
+  try {
+    const auth = req.headers.authorization
+    if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
+    const token = auth.split(' ')[1]
+    const decoded = jwt.verify(token, jwtSecret)
+
+    const { toUserId, toRole, hireReportId, score, comment } = req.body || {}
+    if (!toUserId || !toRole || !hireReportId || score === undefined || score === null) {
+      return res.status(400).json({ error: 'toUserId, toRole, hireReportId, and score are required' })
+    }
+
+    const numericScore = Number(score)
+    if (!Number.isFinite(numericScore) || numericScore < 1 || numericScore > 5) {
+      return res.status(400).json({ error: 'Invalid score' })
+    }
+
+    const hireReport = await HireReport.findById(hireReportId)
+    if (!hireReport) return res.status(404).json({ error: 'Hire report not found' })
+
+    let fromUser = null
+    let fromRole = null
+    if (decoded.role === 'Employer') {
+      if (!(await requireApprovedEmployer(decoded, res))) return
+      fromUser = await Employer.findOne({ email: decoded.email }).select('_id').lean()
+      fromRole = 'employer'
+      if (!fromUser) return res.status(404).json({ error: 'Employer not found' })
+      if (String(hireReport.employerId) !== String(fromUser._id)) return res.status(403).json({ error: 'Forbidden' })
+      if (String(toUserId) !== String(hireReport.applicantId)) return res.status(400).json({ error: 'toUserId does not match hire report' })
+    } else if (decoded.role === 'Applicant') {
+      fromUser = await Applicant.findOne({ email: decoded.email }).select('_id').lean()
+      fromRole = 'applicant'
+      if (!fromUser) return res.status(404).json({ error: 'Applicant not found' })
+      if (String(hireReport.applicantId) !== String(fromUser._id)) return res.status(403).json({ error: 'Forbidden' })
+      if (String(toUserId) !== String(hireReport.employerId)) return res.status(400).json({ error: 'toUserId does not match hire report' })
+    } else {
+      return res.status(403).json({ error: 'Forbidden' })
+    }
+
+    const existingRating = await Rating.findOne({ fromUserId: fromUser._id, hireReportId })
+    if (existingRating) return res.status(400).json({ error: 'Rating already exists for this hire report' })
+
+    const rating = await Rating.create({
+      fromUserId: fromUser._id,
+      fromRole,
+      toUserId,
+      toRole,
+      hireReportId,
+      score: numericScore,
+      comment,
+    })
+
+    res.json(rating)
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Server error' })
+  }
+})
+
+app.get('/api/ratings/:userId', async (req, res) => {
+  try {
+    const ratings = await Rating.find({ toUserId: req.params.userId }).sort({ createdAt: -1 })
+    const total = ratings.reduce((sum, item) => sum + Number(item.score || 0), 0)
+    const averageScore = ratings.length > 0 ? total / ratings.length : 0
+
+    res.json({
+      userId: req.params.userId,
+      averageScore,
+      totalRatings: ratings.length,
+      ratings,
+    })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Server error' })
@@ -312,6 +708,9 @@ app.get('/api/notifications', async (req, res) => {
     if (!decoded.email) return res.status(401).json({ error: 'Invalid token payload' })
 
     const storedNotifications = await Notification.find({ recipientEmail: decoded.email }).sort({ createdAt: -1 }).lean()
+    const filteredStoredNotifications = decoded.role === 'Admin'
+      ? storedNotifications.filter((item) => !(item.title === 'New job posting pending review' && item.kind === 'job-review'))
+      : storedNotifications
 
     // Derive notifications from job records so historic approve/decline events still appear.
     let derivedNotifications = []
@@ -391,10 +790,37 @@ app.get('/api/notifications', async (req, res) => {
       derivedNotifications = [...pendingItems, ...reviewedItems]
     }
 
-    const merged = [...storedNotifications, ...derivedNotifications]
+    const merged = [...filteredStoredNotifications, ...derivedNotifications]
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
 
     res.json(merged)
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Server error' })
+  }
+})
+
+app.put('/api/notifications/:id/read', async (req, res) => {
+  try {
+    const auth = req.headers.authorization
+    if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
+    const token = auth.split(' ')[1]
+    const decoded = jwt.verify(token, jwtSecret)
+    if (!decoded.email) return res.status(401).json({ error: 'Invalid token payload' })
+
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid notification id' })
+    }
+
+    const updated = await Notification.findOneAndUpdate(
+      { _id: req.params.id, recipientEmail: decoded.email },
+      { read: true },
+      { new: true },
+    ).lean()
+
+    if (!updated) return res.status(404).json({ error: 'Notification not found' })
+
+    res.json({ success: true, notification: updated })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Server error' })
@@ -412,6 +838,14 @@ app.post('/api/employer-requests', async (req, res) => {
     if (existingRequest) return res.status(409).json({ error: 'Employer request already submitted' })
 
     const passwordHash = await bcrypt.hash(password, 10)
+    await createUserInRole('Employer', {
+      email,
+      passwordHash,
+      verificationStatus: 'pending_verification',
+      companyName,
+      contactName,
+      profile: { name: contactName, location, summary: companyName },
+    })
     const request = new EmployerRequest({ email, passwordHash, companyName, contactName, location, phone, message })
     await request.save()
     res.json({ success: true, request: { email: request.email, companyName, contactName, location, phone, message, status: request.status } })
@@ -429,11 +863,124 @@ app.get('/api/employer-requests', async (req, res) => {
     const decoded = jwt.verify(token, jwtSecret)
     if (decoded.role !== 'Admin') return res.status(403).json({ error: 'Forbidden' })
 
-    const requests = await EmployerRequest.find({ status: 'pending' }).sort({ createdAt: -1 })
+    const requests = await EmployerRequest.find({ status: { $in: ['pending', 'under_review'] } }).sort({ createdAt: -1 })
     res.json(requests)
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Server error' })
+  }
+})
+
+app.post('/api/employer-requirements', requirementsUpload.single('requirements'), async (req, res) => {
+  try {
+    const auth = req.headers.authorization
+    if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
+    const token = auth.split(' ')[1]
+    const decoded = jwt.verify(token, jwtSecret)
+    if (decoded.role !== 'Employer') return res.status(403).json({ error: 'Forbidden' })
+    if (!req.file) return res.status(400).json({ error: 'An NSRP registration PDF is required' })
+
+    const request = await EmployerRequest.findOne({ email: decoded.email })
+    if (!request) return res.status(404).json({ error: 'Employer request not found' })
+    if (!['pending', 'declined'].includes(request.status)) {
+      return res.status(400).json({ error: 'This employer request has already been approved' })
+    }
+
+    if (request.requirementsFile?.path && fs.existsSync(request.requirementsFile.path)) {
+      fs.unlinkSync(request.requirementsFile.path)
+    }
+
+    request.requirementsFile = {
+      filename: req.file.filename,
+      originalName: req.file.originalname,
+      path: req.file.path,
+      mimetype: req.file.mimetype,
+      size: req.file.size,
+    }
+    request.requirementsSubmittedAt = new Date()
+    request.status = 'under_review'
+    request.reviewReason = undefined
+    await request.save()
+    await Employer.updateOne({ email: decoded.email }, {
+      $set: { verificationStatus: 'under_review', requirementsSubmittedAt: request.requirementsSubmittedAt },
+      $unset: { verificationReason: 1 },
+    })
+
+    const admins = await Admin.find().select('email').lean()
+    if (admins.length > 0) {
+      await Notification.insertMany(admins.map((admin) => ({
+        recipientEmail: admin.email,
+        title: 'Employer requirements submitted',
+        message: `${decoded.email} submitted an NSRP registration form for review.`,
+        type: 'employer_requirements',
+        kind: 'employer-requirements',
+        actionable: true,
+        linkPath: '/requests',
+      })))
+    }
+
+    res.json({ success: true, status: request.status, submittedAt: request.requirementsSubmittedAt })
+  } catch (err) {
+    console.error(err)
+    res.status(err?.code === 'LIMIT_FILE_SIZE' ? 413 : 500).json({ error: err?.message || 'Failed to submit requirements' })
+  }
+})
+
+app.get('/api/employer-requirements/current/view', async (req, res) => {
+  try {
+    const auth = req.headers.authorization
+    if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
+    const token = auth.split(' ')[1]
+    const decoded = jwt.verify(token, jwtSecret)
+    if (decoded.role !== 'Employer') return res.status(403).json({ error: 'Forbidden' })
+    const request = await EmployerRequest.findOne({ email: decoded.email }).lean()
+    if (!request?.requirementsFile?.path || !fs.existsSync(request.requirementsFile.path)) {
+      return res.status(404).json({ error: 'Requirements PDF not found' })
+    }
+    res.type('application/pdf')
+    res.set('Content-Disposition', 'inline')
+    res.sendFile(path.resolve(request.requirementsFile.path))
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Failed to view requirements' })
+  }
+})
+
+app.get('/api/employer-requirements/:id/download', async (req, res) => {
+  try {
+    const auth = req.headers.authorization
+    if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
+    const token = auth.split(' ')[1]
+    const decoded = jwt.verify(token, jwtSecret)
+    if (decoded.role !== 'Admin') return res.status(403).json({ error: 'Forbidden' })
+    const request = await EmployerRequest.findById(req.params.id).lean()
+    if (!request?.requirementsFile?.path || !fs.existsSync(request.requirementsFile.path)) {
+      return res.status(404).json({ error: 'Requirements PDF not found' })
+    }
+    res.download(request.requirementsFile.path, request.requirementsFile.originalName || 'nsrp-registration-form.pdf')
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Failed to download requirements' })
+  }
+})
+
+app.get('/api/employer-requirements/:id/view', async (req, res) => {
+  try {
+    const auth = req.headers.authorization
+    if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
+    const token = auth.split(' ')[1]
+    const decoded = jwt.verify(token, jwtSecret)
+    if (decoded.role !== 'Admin') return res.status(403).json({ error: 'Forbidden' })
+    const request = await EmployerRequest.findById(req.params.id).lean()
+    if (!request?.requirementsFile?.path || !fs.existsSync(request.requirementsFile.path)) {
+      return res.status(404).json({ error: 'Requirements PDF not found' })
+    }
+    res.type('application/pdf')
+    res.set('Content-Disposition', 'inline')
+    res.sendFile(path.resolve(request.requirementsFile.path))
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Failed to view requirements' })
   }
 })
 
@@ -449,7 +996,7 @@ app.put('/api/employer-requests/:id/status', async (req, res) => {
 
     const request = await EmployerRequest.findById(req.params.id)
     if (!request) return res.status(404).json({ error: 'Request not found' })
-    if (request.status !== 'pending') return res.status(400).json({ error: 'Request already processed' })
+    if (!['pending', 'under_review'].includes(request.status)) return res.status(400).json({ error: 'Request already processed' })
 
     request.status = status
     if (status === 'approved') {
@@ -458,18 +1005,13 @@ app.put('/api/employer-requests/:id/status', async (req, res) => {
     }
     await request.save()
 
-    if (status === 'approved') {
-      const existingUser2 = await findUserByEmail(request.email)
-      if (!existingUser2) {
-        await createUserInRole('Employer', {
-          email: request.email,
-          passwordHash: request.passwordHash,
-          companyName: request.companyName,
-          contactName: request.contactName,
-          profile: { name: request.contactName, location: request.location, summary: request.companyName },
-        })
-      }
-    }
+    const reviewReason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : ''
+    request.reviewReason = reviewReason || undefined
+    await request.save()
+    const employerUpdate = reviewReason
+      ? { $set: { verificationStatus: status, verificationReason: reviewReason } }
+      : { $set: { verificationStatus: status }, $unset: { verificationReason: 1 } }
+    await Employer.updateOne({ email: request.email }, employerUpdate)
 
     res.json(request)
   } catch (err) {
@@ -490,12 +1032,22 @@ app.get('/api/admin/users', async (req, res) => {
     const admins = await Admin.find().lean()
     const employers = await Employer.find().lean()
     const applicants = await Applicant.find().lean()
+    const employerRequests = await EmployerRequest.find().lean()
+    const requestByEmail = new Map(employerRequests.map((request) => [request.email.toLowerCase(), request]))
 
     const mapAdmin = admins.map((u) => ({ id: u._id, email: u.email, role: 'Admin', profile: u.profile, createdAt: u.createdAt }))
-    const mapEmployer = employers.map((u) => ({ id: u._id, email: u.email, role: 'Employer', companyName: u.companyName, contactName: u.contactName, phone: u.phone, website: u.website, profile: u.profile, createdAt: u.createdAt }))
-    const mapApplicant = applicants.map((u) => ({ id: u._id, email: u.email, role: 'Applicant', profile: u.profile, createdAt: u.createdAt }))
+    const mapEmployer = employers.map((u) => {
+      const request = requestByEmail.get(u.email.toLowerCase())
+      return { id: u._id, email: u.email, role: 'Employer', companyName: u.companyName, contactName: u.contactName, phone: u.phone || request?.phone, website: u.website, profile: u.profile, approvalStatus: request?.status || 'approved', createdAt: u.createdAt }
+    })
+    const employerAccountEmails = new Set(employers.map((u) => u.email.toLowerCase()))
+    const mapEmployerRequests = employerRequests.filter((request) => !employerAccountEmails.has(request.email.toLowerCase())).map((request) => ({
+      id: request._id, email: request.email, role: 'Employer', companyName: request.companyName, contactName: request.contactName, phone: request.phone,
+      profile: { location: request.location, summary: request.message }, approvalStatus: request.status, createdAt: request.createdAt,
+    }))
+    const mapApplicant = applicants.map((u) => ({ id: u._id, email: u.email, role: 'Applicant', phone: u.phone || u.profile?.phone, profile: u.profile, createdAt: u.createdAt }))
 
-    const combined = [...mapAdmin, ...mapEmployer, ...mapApplicant]
+    const combined = [...mapAdmin, ...mapEmployer, ...mapEmployerRequests, ...mapApplicant]
     res.json(combined)
   } catch (err) {
     console.error(err)

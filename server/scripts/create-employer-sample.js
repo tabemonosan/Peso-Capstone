@@ -1,7 +1,7 @@
 import 'dotenv/config'
 import mongoose from 'mongoose'
 import bcrypt from 'bcryptjs'
-import { Employer, findUserByEmail, createUserInRole } from './models/collections.js'
+import { Employer, findUserByEmail, createUserInRole } from '../models/collections.js'
 
 const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://localhost:27017/peso-portal'
 
