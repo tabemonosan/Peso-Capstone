@@ -31,8 +31,12 @@ function JobsView({
   adminUsers,
   referredApplicantIdsByJob,
   handleReferApplicantFromJob,
+  handleEditPendingJob,
 }) {
   const [selectedApprovedJob, setSelectedApprovedJob] = useState(null)
+  const [applicationJob, setApplicationJob] = useState(null)
+  const [applicationFile, setApplicationFile] = useState(null)
+  const [applicationSubmitting, setApplicationSubmitting] = useState(false)
 
   const findApplicantByEmail = (email) =>
     (Array.isArray(adminUsers) ? adminUsers : []).find(
@@ -123,7 +127,10 @@ function JobsView({
                           <p className="mt-1 text-sm text-slate-400">Salary: {selectedJob.salary || 'Not specified'}</p>
                           <button
                             type="button"
-                            onClick={() => handleApplyJob(selectedJob._id)}
+                            onClick={() => {
+                              setApplicationJob(selectedJob)
+                              setApplicationFile(null)
+                            }}
                             disabled={alreadyApplied}
                             className={`mt-4 rounded-2xl px-4 py-2 text-sm font-semibold ${alreadyApplied ? 'bg-slate-700 text-slate-400' : 'bg-cyan-500 text-slate-950'}`}
                           >
@@ -137,6 +144,85 @@ function JobsView({
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {applicationJob && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="job-application-title"
+          onClick={() => !applicationSubmitting && setApplicationJob(null)}
+        >
+          <form
+            className="w-full max-w-md rounded-2xl border border-slate-300 bg-white p-6 text-black shadow-2xl"
+            onSubmit={async (event) => {
+              event.preventDefault()
+              if (!applicationFile) return
+              setApplicationSubmitting(true)
+              const submitted = await handleApplyJob(applicationJob._id, applicationFile)
+              setApplicationSubmitting(false)
+              if (submitted) {
+                setApplicationJob(null)
+                setApplicationFile(null)
+              }
+            }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 id="job-application-title" className="text-lg font-semibold text-black">Apply for {applicationJob.title}</h2>
+                <p className="mt-2 text-sm text-black">Download the NSRP form, complete it, then upload the PDF to apply.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setApplicationJob(null)}
+                disabled={applicationSubmitting}
+                className="rounded-full border border-slate-300 bg-white px-3 py-1 text-sm font-semibold text-black"
+              >
+                Close
+              </button>
+            </div>
+
+            <a
+              href="/MSRP_testFile.pdf"
+              download="MSRP_testFile.pdf"
+              className="mt-5 inline-flex rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
+            >
+              Download NSRP form
+            </a>
+
+            <label htmlFor="job-application-file" className="mt-5 block text-sm font-medium text-black">
+              Upload completed NSRP form (PDF)
+            </label>
+            <input
+              id="job-application-file"
+              type="file"
+              accept="application/pdf,.pdf"
+              required
+              onChange={(event) => setApplicationFile(event.target.files?.[0] || null)}
+              className="mt-2 block w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-black file:mr-3 file:rounded-xl file:border-0 file:bg-cyan-500 file:px-3 file:py-2 file:font-semibold file:text-slate-950"
+            />
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setApplicationJob(null)}
+                disabled={applicationSubmitting}
+                className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm text-black"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={!applicationFile || applicationSubmitting}
+                className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+              >
+                {applicationSubmitting ? 'Submitting...' : 'Submit application'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
 
@@ -176,7 +262,19 @@ function JobsView({
               ) : (
                 <div className="mt-4 space-y-4">
                   {filteredPendingJobs.map((job) => (
-                    <div key={job._id} className="rounded-2xl border border-slate-700 bg-slate-900 p-4">
+                    <div
+                      key={job._id}
+                      className={`rounded-2xl border border-slate-700 bg-slate-900 p-4 ${activeRole === 'Employer' ? 'cursor-pointer' : ''}`}
+                      role={activeRole === 'Employer' ? 'button' : undefined}
+                      tabIndex={activeRole === 'Employer' ? 0 : undefined}
+                      onClick={activeRole === 'Employer' ? () => handleEditPendingJob(job) : undefined}
+                      onKeyDown={activeRole === 'Employer' ? (event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault()
+                          handleEditPendingJob(job)
+                        }
+                      } : undefined}
+                    >
                       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                         <div>
                           <p className="text-lg font-semibold text-white">{job.title}</p>
@@ -268,6 +366,7 @@ function JobsView({
                           <p className="mt-2 text-sm text-slate-300">{job.description}</p>
                           <p className="mt-2 text-sm text-slate-400">Salary: {job.salary || 'Not specified'}</p>
                           <p className="mt-2 text-sm text-slate-400">Requested by: {job.createdBy || 'N/A'}</p>
+                          {job.reviewReason && <p className="mt-2 text-sm text-rose-300">Reason: {job.reviewReason}</p>}
                         </div>
                         <span className="rounded-full bg-slate-700 px-3 py-1 text-xs uppercase tracking-[0.2em] text-slate-200">
                           Declined

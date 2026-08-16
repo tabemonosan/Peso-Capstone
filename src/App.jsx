@@ -63,6 +63,7 @@ function App() {
     typeof window !== "undefined" && Boolean(localStorage.getItem("peso-portal-remembered-email")),
   )
   const [showPassword, setShowPassword] = useState(false)
+  const [showEmployerPasswords, setShowEmployerPasswords] = useState(false)
   const [adminSelectedRole, setAdminSelectedRole] = useState("Admin")
   const [profileData, setProfileData] = useState({
     name: "",
@@ -135,6 +136,7 @@ const [authView, setAuthView] = useState("login")
   const [employerRequestForm, setEmployerRequestForm] = useState({
     email: "",
     password: "",
+    confirmPassword: "",
     companyName: "",
     contactName: "",
     location: "",
@@ -151,6 +153,18 @@ const [authView, setAuthView] = useState("login")
     description: "",
     requirements: "",
     salary: "",
+    skills: [],
+  })
+  const [showCreateJobPosting, setShowCreateJobPosting] = useState(false)
+  const [editingJob, setEditingJob] = useState(null)
+  const [editingJobCanSave, setEditingJobCanSave] = useState(false)
+  const [editingJobForm, setEditingJobForm] = useState({
+    title: '',
+    company: '',
+    location: '',
+    description: '',
+    requirements: '',
+    salary: '',
     skills: [],
   })
   const [availableJobs, setAvailableJobs] = useState([])
@@ -175,6 +189,8 @@ const [authView, setAuthView] = useState("login")
   const [appMessage, setAppMessage] = useState(null)
   const [declineRequestTarget, setDeclineRequestTarget] = useState(null)
   const [declineReason, setDeclineReason] = useState('')
+  const [declineJobTarget, setDeclineJobTarget] = useState(null)
+  const [declineJobReason, setDeclineJobReason] = useState('')
   const [approveRequestTarget, setApproveRequestTarget] = useState(null)
   const [selectedDirectoryUser, setSelectedDirectoryUser] = useState(null)
   const [showVerificationModal, setShowVerificationModal] = useState(false)
@@ -358,6 +374,7 @@ const [authView, setAuthView] = useState("login")
       .then((data) => {
         if (data.error) return alert(data.error)
         setJobForm({ title: '', company: '', location: '', description: '', requirements: '', salary: '', skills: [] })
+        setShowCreateJobPosting(false)
         fetchJobs()
         fetchNotifications()
         alert('Job request submitted for review')
@@ -368,15 +385,70 @@ const [authView, setAuthView] = useState("login")
       })
   }
 
-  const handleReviewJob = (jobId, status) => {
+  const openEditJob = (job, canSave = true) => {
+    setEditingJob(job)
+    setEditingJobCanSave(canSave)
+    setEditingJobForm({
+      title: job.title || '',
+      company: job.company || '',
+      location: job.location || '',
+      description: job.description || '',
+      requirements: job.requirements || '',
+      salary: job.salary || '',
+      skills: Array.isArray(job.skills) ? job.skills : [],
+    })
+  }
+
+  const handleSaveEditedJob = async (event) => {
+    event.preventDefault()
+    if (!editingJob || !editingJobCanSave) return
+    if (!editingJobForm.title || !editingJobForm.company || !editingJobForm.description) {
+      return alert('Title, company, and description are required')
+    }
+    if (!Array.isArray(editingJobForm.skills) || editingJobForm.skills.length === 0) {
+      return alert('Please select at least one skill for the job')
+    }
+    if (!window.confirm('Save these changes to the approved job posting?')) return
+
     const token = getToken()
     if (!token) return alert('Not authenticated')
-    if (status === 'declined' && !window.confirm('Decline this job posting?')) return
+
+    try {
+      const response = await fetch(`http://localhost:4000/api/jobs/${editingJob._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(editingJobForm),
+      })
+      const data = await response.json().catch(() => null)
+      if (!response.ok || data?.error) throw new Error(data?.error || `Request failed: ${response.status}`)
+
+      setEditingJob(null)
+      fetchJobs()
+      fetchNotifications()
+      alert('Job posting updated successfully')
+    } catch (err) {
+      console.error(err)
+      alert(err?.message || 'Failed to update job posting')
+    }
+  }
+
+  const handleReviewJob = (jobId, status, options = {}) => {
+    const token = getToken()
+    if (!token) return alert('Not authenticated')
+    const declineReasonValue = typeof options.reason === 'string' ? options.reason.trim() : ''
+    if (status === 'declined' && !Object.prototype.hasOwnProperty.call(options, 'reason')) {
+      const allKnownJobs = [...pendingJobs, ...approvedJobs, ...declinedJobs]
+      const matchedJob = allKnownJobs.find((job) => String(job?._id) === String(jobId))
+      setDeclineJobTarget(matchedJob || { _id: jobId, title: 'this job posting' })
+      setDeclineJobReason('')
+      setSelectedNotification(null)
+      return
+    }
 
     fetch(`http://localhost:4000/api/jobs/${jobId}/status`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ status, reason: status === 'declined' ? declineReasonValue : '' }),
     })
       .then((r) => r.json())
       .then((data) => {
@@ -384,6 +456,10 @@ const [authView, setAuthView] = useState("login")
         fetchJobs()
         fetchNotifications()
         setSelectedNotification(null)
+        if (status === 'declined') {
+          setDeclineJobTarget(null)
+          setDeclineJobReason('')
+        }
         alert(`Job ${status}`)
       })
       .catch((err) => {
@@ -392,30 +468,47 @@ const [authView, setAuthView] = useState("login")
       })
   }
 
-  const handleApplyJob = (jobId) => {
+  const handleApplyJob = async (jobId, applicationFile) => {
     const token = getToken()
-    if (!token) return alert('Not authenticated')
+    if (!token) {
+      alert('Not authenticated')
+      return false
+    }
+    if (!applicationFile) {
+      alert('Please upload the completed NSRP PDF')
+      return false
+    }
 
-    fetch(`http://localhost:4000/api/jobs/${jobId}/apply`, {
+    const payload = new FormData()
+    payload.append('nsrp', applicationFile)
+
+    try {
+      const response = await fetch(`http://localhost:4000/api/jobs/${jobId}/apply`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.error) return alert(data.error)
-        fetchJobs()
-        alert('Application submitted')
+        headers: { Authorization: `Bearer ${token}` },
+        body: payload,
       })
-      .catch((err) => {
-        console.error(err)
-        alert('Failed to apply')
-      })
+      const data = await response.json().catch(() => null)
+      if (!response.ok || data?.error) {
+        alert(data?.error || 'Failed to apply')
+        return false
+      }
+      fetchJobs()
+      alert('Application submitted')
+      return true
+    } catch (err) {
+      console.error(err)
+      alert('Failed to apply')
+      return false
+    }
   }
 
   const handleSubmitEmployerRequest = async (event) => {
     event.preventDefault()
-    const { email, password, companyName, contactName } = employerRequestForm
+    const { email, password, confirmPassword, companyName, contactName } = employerRequestForm
     if (!email || !password || !companyName || !contactName) return alert('Please fill in required fields')
+    if (password !== confirmPassword) return alert('Passwords do not match')
+    if (!/^\d{11}$/.test(employerRequestForm.phone)) return alert('Phone number must contain exactly 11 digits')
 
     try {
       const response = await fetch('http://localhost:4000/api/employer-requests', {
@@ -432,7 +525,7 @@ const [authView, setAuthView] = useState("login")
         return alert(message)
       }
 
-      setEmployerRequestForm({ email: '', password: '', companyName: '', contactName: '', location: '', phone: '', message: '' })
+      setEmployerRequestForm({ email: '', password: '', confirmPassword: '', companyName: '', contactName: '', location: '', phone: '', message: '' })
       setAuthView('login')
       alert('Employer account created. You can now sign in and submit your NSRP registration form for review.')
     } catch (err) {
@@ -814,6 +907,9 @@ const [authView, setAuthView] = useState("login")
   const filteredPendingJobs = pendingJobs.filter((job) => (activeRole === 'Admin' ? matchesAdminJobSearch(job) : true))
   const filteredApprovedJobs = approvedJobs.filter((job) => (activeRole === 'Admin' ? matchesAdminJobSearch(job) : true))
   const filteredDeclinedJobs = declinedJobs.filter((job) => (activeRole === 'Admin' ? matchesAdminJobSearch(job) : true))
+  const employerPendingJobs = myJobs.filter((job) => job.status === 'pending')
+  const employerDeclinedJobs = myJobs.filter((job) => job.status === 'declined')
+  const employerApprovedJobs = myJobs.filter((job) => job.status === 'approved')
   const showPendingAdminSection = activeRole === 'Admin' && (adminJobStatusFilter === 'all' || adminJobStatusFilter === 'pending')
   const showApprovedAdminSection = activeRole === 'Admin' && (adminJobStatusFilter === 'all' || adminJobStatusFilter === 'approved')
   const showDeclinedAdminSection = activeRole === 'Admin' && (adminJobStatusFilter === 'all' || adminJobStatusFilter === 'declined')
@@ -934,12 +1030,41 @@ const [authView, setAuthView] = useState("login")
                 </label>
                 <input
                   id="employer-password"
-                  type="password"
+                  type={showEmployerPasswords ? "text" : "password"}
                   value={employerRequestForm.password}
                   onChange={(e) => setEmployerRequestForm({ ...employerRequestForm, password: e.target.value })}
                   className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
                   required
                 />
+                <button
+                  type="button"
+                  aria-label={showEmployerPasswords ? "Hide passwords" : "Show passwords"}
+                  onClick={() => setShowEmployerPasswords((value) => !value)}
+                  className="auth-password-toggle"
+                >
+                  {showEmployerPasswords ? "◉" : "◌"}
+                </button>
+              </div>
+              <div>
+                <label htmlFor="employer-confirm-password" className="block text-sm font-medium text-slate-200">
+                  Confirm Password
+                </label>
+                <input
+                  id="employer-confirm-password"
+                  type={showEmployerPasswords ? "text" : "password"}
+                  value={employerRequestForm.confirmPassword}
+                  onChange={(e) => setEmployerRequestForm({ ...employerRequestForm, confirmPassword: e.target.value })}
+                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                  required
+                />
+                <button
+                  type="button"
+                  aria-label={showEmployerPasswords ? "Hide passwords" : "Show passwords"}
+                  onClick={() => setShowEmployerPasswords((value) => !value)}
+                  className="auth-password-toggle"
+                >
+                  {showEmployerPasswords ? "◉" : "◌"}
+                </button>
               </div>
               <div>
                 <label htmlFor="employer-company" className="block text-sm font-medium text-slate-200">
@@ -985,10 +1110,13 @@ const [authView, setAuthView] = useState("login")
                 </label>
                 <input
                   id="employer-phone"
-                  type="text"
+                  type="tel"
+                  inputMode="numeric"
+                  maxLength={11}
+                  pattern="[0-9]{11}"
                   value={employerRequestForm.phone}
-                  onChange={(e) => setEmployerRequestForm({ ...employerRequestForm, phone: e.target.value })}
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                  onChange={(e) => setEmployerRequestForm({ ...employerRequestForm, phone: e.target.value.replace(/\D/g, '').slice(0, 11) })}
+                  className="mt-2 w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-black"
                 />
               </div>
               <div>
@@ -1283,11 +1411,28 @@ const [authView, setAuthView] = useState("login")
             <section className="admin-requests-card portal-card rounded-2xl border border-slate-300 bg-white p-6 text-black">
               <h2 className="text-xl font-semibold text-black">Dashboard</h2>
               {activeRole === 'Employer' && !employerApproved ? (
-                <div className="mt-4 rounded-2xl border border-amber-400/40 bg-slate-950/80 p-5">
-                  <h3 className="text-lg font-semibold text-white">Employer verification</h3>
-                  <p className="mt-2 text-sm text-slate-300">
+                <div className="mt-4 rounded-2xl border border-amber-300 bg-white p-5">
+                  <h3 className="text-lg font-semibold text-black">Employer verification</h3>
+                  <p className="mt-2 text-sm text-black">
                     Your account is active, but employer tools stay locked until the admin approves your NSRP registration form.
                   </p>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <a
+                      href="/MSRP_testFile.pdf"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-black"
+                    >
+                      View MSRP form
+                    </a>
+                    <a
+                      href="/MSRP_testFile.pdf"
+                      download="MSRP_testFile.pdf"
+                      className="inline-flex rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-black"
+                    >
+                      Download MSRP form
+                    </a>
+                  </div>
                   <p className="mt-3 text-sm text-amber-300">Status: {currentUser.verificationStatus.replace('_', ' ')}</p>
                   {currentUser.verificationStatus === 'declined' && (
                     <div className="mt-3 rounded-xl border border-rose-400/40 bg-rose-950/30 p-3">
@@ -1296,9 +1441,9 @@ const [authView, setAuthView] = useState("login")
                     </div>
                   )}
                   {currentUser.requirementsFile && (
-                    <div className="mt-5 rounded-xl border border-slate-700 bg-slate-900 p-3">
-                      <p className="text-sm font-semibold text-white">Submitted PDF</p>
-                      <p className="mt-1 text-xs text-slate-400">{currentUser.requirementsFile.originalName}</p>
+                    <div className="mt-5 rounded-xl border border-slate-300 bg-slate-50 p-3">
+                      <p className="text-sm font-semibold text-black">Submitted PDF</p>
+                      <p className="mt-1 text-xs text-black">{currentUser.requirementsFile.originalName}</p>
                       <button
                         type="button"
                         onClick={handleViewOwnRequirements}
@@ -1312,7 +1457,7 @@ const [authView, setAuthView] = useState("login")
                     <p className="mt-5 text-sm text-amber-300">Your PDF is waiting for admin review. You cannot submit another file until this review is complete.</p>
                   ) : (
                     <form className="mt-5 space-y-3" onSubmit={handleSubmitEmployerRequirements}>
-                      <label htmlFor="requirements-pdf" className="block text-sm font-medium text-slate-200">
+                      <label htmlFor="requirements-pdf" className="block text-sm font-medium text-black">
                         {currentUser.verificationStatus === 'declined' ? 'Submit a corrected NSRP registration form (PDF, max 10 MB)' : 'NSRP registration form (PDF, max 10 MB)'}
                       </label>
                       <input
@@ -1320,7 +1465,7 @@ const [authView, setAuthView] = useState("login")
                         type="file"
                         accept="application/pdf,.pdf"
                         onChange={(event) => setRequirementsFile(event.target.files?.[0] || null)}
-                        className="block w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                        className="block w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-black"
                       />
                       <button type="submit" className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950">
                         Submit for review
@@ -1359,7 +1504,19 @@ const [authView, setAuthView] = useState("login")
                     ) : (
                       <div className="employer-dashboard-posting-list">
                         {myJobs.filter((job) => job.status === 'approved').map((job) => (
-                          <article key={job._id} className="employer-dashboard-posting">
+                          <article
+                            key={job._id}
+                            className="employer-dashboard-posting cursor-pointer"
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => openEditJob(job, false)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault()
+                                openEditJob(job, false)
+                              }
+                            }}
+                          >
                             <div>
                               <h4>{job.title}</h4>
                               <p>{job.company} · {job.location || 'Remote'}</p>
@@ -1644,9 +1801,12 @@ const [authView, setAuthView] = useState("login")
                       <label htmlFor="phone" className="block text-sm font-medium text-slate-300">Phone</label>
                       <input
                         id="phone"
-                        type="text"
+                        type="tel"
+                        inputMode="numeric"
+                        maxLength={11}
+                        pattern="[0-9]{11}"
                         value={profileData.phone}
-                        onChange={(e) => setProfileData({ ...profileData, phone: e.target.value })}
+                        onChange={(e) => setProfileData({ ...profileData, phone: e.target.value.replace(/\D/g, '').slice(0, 11) })}
                         className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
                       />
                     </div>
@@ -1674,6 +1834,10 @@ const [authView, setAuthView] = useState("login")
                     <button
                       type="button"
                       onClick={() => {
+                        if (!/^\d{11}$/.test(profileData.phone)) {
+                          alert('Phone number must contain exactly 11 digits')
+                          return
+                        }
                         const token = currentUser?.token || localStorage.getItem('peso-token')
                         fetch('http://localhost:4000/api/profile', {
                           method: 'PUT',
@@ -1703,10 +1867,38 @@ const [authView, setAuthView] = useState("login")
           {activeView === "employer" && (
             <section className="employer-module-card portal-card rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
               <h2 className="text-xl font-semibold text-white">Employer Module</h2>
-              <p className="mt-3 text-slate-400">Submit job requests and track pending approvals.</p>
+              <p className="mt-3 text-slate-400">Submit job requests and track their review status.</p>
 
-              <div className="employer-form-panel mt-6 rounded-2xl border border-slate-800 bg-slate-950/80 p-5">
-                <h3 className="text-lg font-semibold text-white">Request a Job Posting</h3>
+              <button
+                type="button"
+                onClick={() => setShowCreateJobPosting(true)}
+                className="mt-6 rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
+              >
+                Create Job Posting
+              </button>
+
+              {showCreateJobPosting && (
+                <div
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="create-job-posting-title"
+                  onClick={() => setShowCreateJobPosting(false)}
+                >
+                  <div
+                    className="employer-form-panel max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-slate-300 bg-white p-5 shadow-2xl"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <h3 id="create-job-posting-title" className="text-lg font-semibold text-black">Request a Job Posting</h3>
+                      <button
+                        type="button"
+                        onClick={() => setShowCreateJobPosting(false)}
+                        className="rounded-full border border-slate-300 bg-white px-3 py-1 text-sm font-semibold text-black"
+                      >
+                        Close
+                      </button>
+                    </div>
                 <form className="space-y-4 mt-4" onSubmit={handleCreateJob}>
                   <div>
                     <label htmlFor="job-title" className="block text-sm font-medium text-slate-200">
@@ -1809,30 +2001,41 @@ const [authView, setAuthView] = useState("login")
                   </button>
                 </form>
               </div>
+                </div>
+              )}
 
               <div className="employer-pending-panel mt-6 rounded-2xl border border-slate-800 bg-slate-950/80 p-5">
-                <h3 className="text-lg font-semibold text-white">Pending Job Requests for Approval</h3>
-                {pendingJobs.length === 0 ? (
-                  <p className="mt-3 text-slate-400">No pending job requests right now.</p>
+                <h3 className="text-lg font-semibold text-white">My Job Requests</h3>
+                {myJobs.length === 0 ? (
+                  <p className="mt-3 text-slate-400">No job requests submitted yet.</p>
                 ) : (
                   <div className="mt-4 space-y-4">
-                    {pendingJobs.map((job) => (
+                    {myJobs.map((job) => (
                       <div key={job._id} className="employer-pending-item rounded-2xl border border-slate-700 bg-slate-900 p-4">
                         <div className="flex items-center justify-between gap-4">
                           <div>
                             <p className="text-lg font-semibold text-white">{job.title}</p>
                             <p className="text-sm text-slate-400">{job.company} • {job.location || 'Remote'}</p>
                           </div>
-                          <span className="rounded-full bg-amber-400 px-3 py-1 text-xs uppercase tracking-[0.2em] text-slate-950">
-                            Pending
+                          <span className={`rounded-full px-3 py-1 text-xs uppercase tracking-[0.2em] ${job.status === 'approved' ? 'bg-cyan-500 text-slate-950' : job.status === 'declined' ? 'bg-rose-400 text-slate-950' : 'bg-amber-400 text-slate-950'}`}>
+                            {job.status || 'pending'}
                           </span>
                         </div>
                         <p className="mt-3 text-sm text-slate-300">{job.description}</p>
+                        {job.status === 'declined' && (
+                          <p className="mt-2 text-sm text-rose-300">Reason: {job.reviewReason || 'No reason provided.'}</p>
+                        )}
                       </div>
                     ))}
                   </div>
                 )}
               </div>
+
+              {(employerPendingJobs.length > 0 || employerApprovedJobs.length > 0 || employerDeclinedJobs.length > 0) && (
+                <p className="mt-4 text-xs uppercase tracking-[0.2em] text-slate-400">
+                  Pending: {employerPendingJobs.length} • Approved: {employerApprovedJobs.length} • Declined: {employerDeclinedJobs.length}
+                </p>
+              )}
             </section>
           )}
 
@@ -1901,6 +2104,7 @@ const [authView, setAuthView] = useState("login")
               adminUsers={adminUsers}
               referredApplicantIdsByJob={referredApplicantIdsByJob}
               handleReferApplicantFromJob={handleReferApplicantFromJob}
+              handleEditPendingJob={openEditJob}
             />
           )}
 
@@ -2020,6 +2224,106 @@ const [authView, setAuthView] = useState("login")
             </div>
           )}
 
+          {editingJob && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="edit-job-title"
+              onClick={() => setEditingJob(null)}
+            >
+              <form
+                className="w-full max-w-2xl rounded-2xl border border-slate-300 bg-white p-6 shadow-2xl"
+                onSubmit={handleSaveEditedJob}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h2 id="edit-job-title" className="text-lg font-semibold text-black">{editingJobCanSave ? 'Edit Job Posting' : 'Job Posting Details'}</h2>
+                    <p className="mt-1 text-sm text-black">{editingJobCanSave ? 'Update your pending job request before admin review.' : 'Approved postings are read-only.'}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setEditingJob(null)}
+                    className="rounded-full border border-slate-300 bg-white px-3 py-1 text-sm font-semibold text-black"
+                  >
+                    Cancel
+                  </button>
+                </div>
+
+                <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                  {[
+                    ['edit-job-title-input', 'Job title', 'title'],
+                    ['edit-job-company', 'Company', 'company'],
+                    ['edit-job-location', 'Location', 'location'],
+                    ['edit-job-salary', 'Salary', 'salary'],
+                  ].map(([id, label, field]) => (
+                    <label key={id} htmlFor={id} className="text-sm font-medium text-black">
+                      {label}
+                      <input
+                        id={id}
+                        value={editingJobForm[field]}
+                        disabled={!editingJobCanSave}
+                        onChange={(event) => setEditingJobForm({ ...editingJobForm, [field]: event.target.value })}
+                        className="mt-2 w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-black"
+                      />
+                    </label>
+                  ))}
+                  <label htmlFor="edit-job-description" className="text-sm font-medium text-black sm:col-span-2">
+                    Description
+                    <textarea
+                      id="edit-job-description"
+                      rows="3"
+                      value={editingJobForm.description}
+                      disabled={!editingJobCanSave}
+                      onChange={(event) => setEditingJobForm({ ...editingJobForm, description: event.target.value })}
+                      className="mt-2 w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-black"
+                    />
+                  </label>
+                  <label htmlFor="edit-job-requirements" className="text-sm font-medium text-black sm:col-span-2">
+                    Requirements
+                    <textarea
+                      id="edit-job-requirements"
+                      rows="2"
+                      value={editingJobForm.requirements}
+                      disabled={!editingJobCanSave}
+                      onChange={(event) => setEditingJobForm({ ...editingJobForm, requirements: event.target.value })}
+                      className="mt-2 w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-black"
+                    />
+                  </label>
+                </div>
+
+                <fieldset className="mt-4">
+                  <legend className="text-sm font-medium text-black">Skills</legend>
+                  <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {availableSkills.map((skill) => (
+                      <label key={skill} className="flex items-center gap-2 rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-black">
+                        <input
+                          type="checkbox"
+                          checked={editingJobForm.skills.includes(skill)}
+                          disabled={!editingJobCanSave}
+                          onChange={() => setEditingJobForm({ ...editingJobForm, skills: toggleSkill(editingJobForm.skills, skill) })}
+                        />
+                        {skill}
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+
+                {editingJobCanSave && (
+                  <div className="mt-5 flex justify-end gap-2">
+                    <button
+                      type="submit"
+                      className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
+                    >
+                      Save Changes
+                    </button>
+                  </div>
+                )}
+              </form>
+            </div>
+          )}
+
           {selectedDirectoryUser && (
             <div
               className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4"
@@ -2069,6 +2373,31 @@ const [authView, setAuthView] = useState("login")
                     </>
                   )}
                 </div>
+
+                {selectedDirectoryUser.directoryRole === 'Employer' && selectedDirectoryUser.requirementsFile && (
+                  <div className="mt-4 rounded-2xl border border-slate-300 bg-slate-50 p-4 text-sm text-black">
+                    <p className="font-semibold">Submitted MSRP file</p>
+                    <p className="mt-1">File: {selectedDirectoryUser.requirementsFile.originalName || 'MSRP form.pdf'}</p>
+                    <p className="mt-1">Size: {selectedDirectoryUser.requirementsFile.size ? `${Math.ceil(selectedDirectoryUser.requirementsFile.size / 1024)} KB` : 'N/A'}</p>
+                    <p className="mt-1">Submitted: {selectedDirectoryUser.requirementsFile.submittedAt ? new Date(selectedDirectoryUser.requirementsFile.submittedAt).toLocaleString() : 'N/A'}</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleViewRequirements(selectedDirectoryUser.requirementsFile.requestId)}
+                        className="rounded-2xl bg-cyan-500 px-3 py-2 text-sm font-semibold text-slate-950"
+                      >
+                        View MSRP PDF
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadRequirements(selectedDirectoryUser.requirementsFile.requestId, selectedDirectoryUser.requirementsFile.originalName)}
+                        className="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-black"
+                      >
+                        Download MSRP PDF
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -2157,6 +2486,62 @@ const [authView, setAuthView] = useState("login")
                   <button
                     type="button"
                     onClick={() => setDeclineRequestTarget(null)}
+                    className="rounded-2xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm text-slate-200"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="rounded-2xl bg-rose-400 px-4 py-2 text-sm font-semibold text-slate-950"
+                  >
+                    Confirm decline
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {declineJobTarget && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="decline-job-title"
+              onClick={() => setDeclineJobTarget(null)}
+            >
+              <form
+                className="w-full max-w-md rounded-2xl border border-cyan-500/40 bg-slate-900 p-6 shadow-2xl"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  const jobId = declineJobTarget._id
+                  handleReviewJob(jobId, 'declined', { reason: declineJobReason })
+                }}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h2 id="decline-job-title" className="text-lg font-semibold text-white">Decline job posting</h2>
+                    <p className="mt-2 text-sm text-slate-400">{declineJobTarget.title || 'Selected posting'}</p>
+                  </div>
+                </div>
+                <label htmlFor="decline-job-reason" className="mt-5 block text-sm font-medium text-slate-200">
+                  Reason for declining (optional)
+                </label>
+                <textarea
+                  id="decline-job-reason"
+                  value={declineJobReason}
+                  onChange={(event) => setDeclineJobReason(event.target.value)}
+                  rows="4"
+                  placeholder="Explain why this posting was declined."
+                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                />
+                <div className="mt-5 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDeclineJobTarget(null)
+                      setDeclineJobReason('')
+                    }}
                     className="rounded-2xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm text-slate-200"
                   >
                     Cancel

@@ -24,6 +24,7 @@ const employerSchema = new Schema({
   requirementsSubmittedAt: Date,
   companyName: String,
   contactName: String,
+  phone: String,
   profile: {
     location: String,
     summary: String,

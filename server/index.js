@@ -49,6 +49,7 @@ const jobSchema = new Schema({
   salary: String,
   skills: [String],
   status: { type: String, enum: ['pending', 'approved', 'declined'], default: 'pending' },
+  reviewReason: String,
   approvedBy: String,
   approvedAt: Date,
   createdBy: String,
@@ -56,6 +57,20 @@ const jobSchema = new Schema({
   createdAt: { type: Date, default: Date.now },
 })
 const JobPosting = mongoose.model('JobPosting', jobSchema)
+
+const jobApplicationSchema = new Schema({
+  jobId: { type: Schema.Types.ObjectId, ref: 'JobPosting', required: true },
+  applicantEmail: { type: String, required: true },
+  nsrpFile: {
+    originalName: String,
+    mimetype: String,
+    size: Number,
+    data: { type: Buffer, required: true, select: false },
+  },
+  submittedAt: { type: Date, default: Date.now },
+})
+jobApplicationSchema.index({ jobId: 1, applicantEmail: 1 }, { unique: true })
+const JobApplication = mongoose.model('JobApplication', jobApplicationSchema)
 
 const employerRequestSchema = new Schema({
   email: { type: String, required: true, unique: true },
@@ -72,6 +87,7 @@ const employerRequestSchema = new Schema({
     path: String,
     mimetype: String,
     size: Number,
+    data: { type: Buffer, select: false },
   },
   requirementsSubmittedAt: Date,
   reviewReason: String,
@@ -85,6 +101,16 @@ const requirementsDirectory = path.join(process.cwd(), 'server', 'uploads', 'emp
 fs.mkdirSync(requirementsDirectory, { recursive: true })
 const requirementsUpload = multer({
   dest: requirementsDirectory,
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, callback) => {
+    if (file.mimetype !== 'application/pdf' || path.extname(file.originalname).toLowerCase() !== '.pdf') {
+      return callback(new Error('Only PDF files are accepted'))
+    }
+    callback(null, true)
+  },
+})
+const applicationUpload = multer({
+  storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (_req, file, callback) => {
     if (file.mimetype !== 'application/pdf' || path.extname(file.originalname).toLowerCase() !== '.pdf') {
@@ -150,7 +176,7 @@ app.post('/api/login', async (req, res) => {
     const ok = await bcrypt.compare(password, user.passwordHash)
     if (!ok) return res.status(401).json({ error: 'Invalid credentials' })
 
-    const safe = { id: String(user._id), email: user.email, role: type, profile: user.profile, verificationStatus: ['Employer', 'Applicant'].includes(type) ? (user.verificationStatus || 'approved') : undefined, verificationReason: ['Employer', 'Applicant'].includes(type) ? user.verificationReason : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size } : undefined }
+    const safe = { id: String(user._id), email: user.email, role: type, companyName: type === 'Employer' ? (user.companyName || requirements?.companyName) : undefined, contactName: type === 'Employer' ? (user.contactName || requirements?.contactName) : undefined, phone: type === 'Employer' ? (user.phone || requirements?.phone) : undefined, profile: user.profile, verificationStatus: ['Employer', 'Applicant'].includes(type) ? (user.verificationStatus || 'approved') : undefined, verificationReason: ['Employer', 'Applicant'].includes(type) ? user.verificationReason : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size } : undefined }
     const token = jwt.sign({ email: user.email, role: type }, jwtSecret, { expiresIn: '7d' })
     res.json({ user: safe, token })
   } catch (err) {
@@ -170,7 +196,7 @@ app.get('/api/profile', async (req, res) => {
     if (!found) return res.status(404).json({ error: 'Not found' })
     const { user, type } = found
     const requirements = type === 'Employer' ? await EmployerRequest.findOne({ email: user.email }).lean() : null
-    res.json({ id: String(user._id), email: user.email, role: type, profile: user.profile, verificationStatus: ['Employer', 'Applicant'].includes(type) ? (user.verificationStatus || 'approved') : undefined, verificationReason: ['Employer', 'Applicant'].includes(type) ? user.verificationReason : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size } : undefined })
+    res.json({ id: String(user._id), email: user.email, role: type, companyName: type === 'Employer' ? (user.companyName || requirements?.companyName) : undefined, contactName: type === 'Employer' ? (user.contactName || requirements?.contactName) : undefined, phone: type === 'Employer' ? (user.phone || requirements?.phone) : undefined, profile: user.profile, verificationStatus: ['Employer', 'Applicant'].includes(type) ? (user.verificationStatus || 'approved') : undefined, verificationReason: ['Employer', 'Applicant'].includes(type) ? user.verificationReason : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size } : undefined })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Server error' })
@@ -219,6 +245,39 @@ app.post('/api/jobs', async (req, res) => {
         linkPath: '/jobs',
       })))
     }
+
+    res.json(job)
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Server error' })
+  }
+})
+
+app.put('/api/jobs/:id', async (req, res) => {
+  try {
+    const auth = req.headers.authorization
+    if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
+    const token = auth.split(' ')[1]
+    const decoded = jwt.verify(token, jwtSecret)
+    if (!(await requireApprovedEmployer(decoded, res))) return
+
+    const { title, company, location, description, requirements, salary, skills } = req.body || {}
+    if (!title || !company || !description) return res.status(400).json({ error: 'Missing required fields' })
+    if (!Array.isArray(skills) || skills.length === 0) return res.status(400).json({ error: 'Select at least one skill' })
+
+    const job = await JobPosting.findById(req.params.id)
+    if (!job) return res.status(404).json({ error: 'Job not found' })
+    if (job.createdBy !== decoded.email) return res.status(403).json({ error: 'Forbidden' })
+    if (job.status !== 'pending') return res.status(400).json({ error: 'Only pending job postings can be edited' })
+
+    job.title = title
+    job.company = company
+    job.location = location || ''
+    job.description = description
+    job.requirements = requirements || ''
+    job.salary = salary || ''
+    job.skills = skills.filter((skill) => typeof skill === 'string').map((skill) => skill.trim()).filter(Boolean)
+    await job.save()
 
     res.json(job)
   } catch (err) {
@@ -286,10 +345,14 @@ app.put('/api/jobs/:id/status', async (req, res) => {
     if (!['approved', 'declined'].includes(status)) return res.status(400).json({ error: 'Invalid status' })
     const job = await JobPosting.findById(req.params.id)
     if (!job) return res.status(404).json({ error: 'Job not found' })
+    const reviewReason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : ''
     job.status = status
     if (status === 'approved') {
       job.approvedBy = decoded.email
       job.approvedAt = new Date()
+      job.reviewReason = undefined
+    } else {
+      job.reviewReason = reviewReason || undefined
     }
     await job.save()
 
@@ -297,7 +360,7 @@ app.put('/api/jobs/:id/status', async (req, res) => {
       const reviewTitle = status === 'approved' ? 'Posting approved' : 'Posting declined'
       const reviewMessage = status === 'approved'
         ? `Your job posting “${job.title}” was approved by the admin.`
-        : `Your job posting “${job.title}” was declined by the admin.`
+        : `Your job posting “${job.title}” was declined by the admin.${reviewReason ? ` Reason: ${reviewReason}` : ''}`
       await Notification.create({
         recipientEmail: job.createdBy,
         title: reviewTitle,
@@ -325,7 +388,7 @@ app.put('/api/jobs/:id/status', async (req, res) => {
   }
 })
 
-app.post('/api/jobs/:id/apply', async (req, res) => {
+app.post('/api/jobs/:id/apply', applicationUpload.single('nsrp'), async (req, res) => {
   try {
     const auth = req.headers.authorization
     if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
@@ -338,6 +401,21 @@ app.post('/api/jobs/:id/apply', async (req, res) => {
 
     const applicant = await Applicant.findOne({ email: decoded.email }).lean()
     if (!applicant) return res.status(404).json({ error: 'Applicant not found' })
+    if (!req.file) return res.status(400).json({ error: 'Completed NSRP PDF is required' })
+    if (job.applicants.some((existingApplicant) => existingApplicant.email === decoded.email)) {
+      return res.status(409).json({ error: 'You have already applied for this job' })
+    }
+
+    await JobApplication.create({
+      jobId: job._id,
+      applicantEmail: decoded.email,
+      nsrpFile: {
+        originalName: req.file.originalname,
+        mimetype: req.file.mimetype,
+        size: req.file.size,
+        data: req.file.buffer,
+      },
+    })
 
     job.applicants.push({ email: decoded.email, appliedAt: new Date() })
     await job.save()
@@ -831,6 +909,7 @@ app.post('/api/employer-requests', async (req, res) => {
   try {
     const { email, password, companyName, contactName, location, phone, message } = req.body || {}
     if (!email || !password || !companyName || !contactName) return res.status(400).json({ error: 'Missing required fields' })
+    if (!/^\d{11}$/.test(String(phone || ''))) return res.status(400).json({ error: 'Phone number must contain exactly 11 digits' })
 
     const existingUser = await findUserByEmail(email)
     if (existingUser) return res.status(409).json({ error: 'Email already in use' })
@@ -844,6 +923,7 @@ app.post('/api/employer-requests', async (req, res) => {
       verificationStatus: 'pending_verification',
       companyName,
       contactName,
+      phone,
       profile: { name: contactName, location, summary: companyName },
     })
     const request = new EmployerRequest({ email, passwordHash, companyName, contactName, location, phone, message })
@@ -933,9 +1013,14 @@ app.get('/api/employer-requirements/current/view', async (req, res) => {
     const token = auth.split(' ')[1]
     const decoded = jwt.verify(token, jwtSecret)
     if (decoded.role !== 'Employer') return res.status(403).json({ error: 'Forbidden' })
-    const request = await EmployerRequest.findOne({ email: decoded.email }).lean()
-    if (!request?.requirementsFile?.path || !fs.existsSync(request.requirementsFile.path)) {
+    const request = await EmployerRequest.findOne({ email: decoded.email }).select('+requirementsFile.data').lean()
+    if (!request?.requirementsFile?.data && (!request?.requirementsFile?.path || !fs.existsSync(request.requirementsFile.path))) {
       return res.status(404).json({ error: 'Requirements PDF not found' })
+    }
+    if (request.requirementsFile.data) {
+      res.type('application/pdf')
+      res.set('Content-Disposition', 'inline')
+      return res.send(request.requirementsFile.data)
     }
     res.type('application/pdf')
     res.set('Content-Disposition', 'inline')
@@ -953,9 +1038,14 @@ app.get('/api/employer-requirements/:id/download', async (req, res) => {
     const token = auth.split(' ')[1]
     const decoded = jwt.verify(token, jwtSecret)
     if (decoded.role !== 'Admin') return res.status(403).json({ error: 'Forbidden' })
-    const request = await EmployerRequest.findById(req.params.id).lean()
-    if (!request?.requirementsFile?.path || !fs.existsSync(request.requirementsFile.path)) {
+    const request = await EmployerRequest.findById(req.params.id).select('+requirementsFile.data').lean()
+    if (!request?.requirementsFile?.data && (!request?.requirementsFile?.path || !fs.existsSync(request.requirementsFile.path))) {
       return res.status(404).json({ error: 'Requirements PDF not found' })
+    }
+    if (request.requirementsFile.data) {
+      res.type('application/pdf')
+      res.set('Content-Disposition', `attachment; filename="${request.requirementsFile.originalName || 'nsrp-registration-form.pdf'}"`)
+      return res.send(request.requirementsFile.data)
     }
     res.download(request.requirementsFile.path, request.requirementsFile.originalName || 'nsrp-registration-form.pdf')
   } catch (err) {
@@ -971,9 +1061,14 @@ app.get('/api/employer-requirements/:id/view', async (req, res) => {
     const token = auth.split(' ')[1]
     const decoded = jwt.verify(token, jwtSecret)
     if (decoded.role !== 'Admin') return res.status(403).json({ error: 'Forbidden' })
-    const request = await EmployerRequest.findById(req.params.id).lean()
-    if (!request?.requirementsFile?.path || !fs.existsSync(request.requirementsFile.path)) {
+    const request = await EmployerRequest.findById(req.params.id).select('+requirementsFile.data').lean()
+    if (!request?.requirementsFile?.data && (!request?.requirementsFile?.path || !fs.existsSync(request.requirementsFile.path))) {
       return res.status(404).json({ error: 'Requirements PDF not found' })
+    }
+    if (request.requirementsFile.data) {
+      res.type('application/pdf')
+      res.set('Content-Disposition', 'inline')
+      return res.send(request.requirementsFile.data)
     }
     res.type('application/pdf')
     res.set('Content-Disposition', 'inline')
@@ -1002,6 +1097,9 @@ app.put('/api/employer-requests/:id/status', async (req, res) => {
     if (status === 'approved') {
       request.approvedBy = decoded.email
       request.approvedAt = new Date()
+      if (!request.requirementsFile?.data && request.requirementsFile?.path && fs.existsSync(request.requirementsFile.path)) {
+        request.requirementsFile.data = fs.readFileSync(request.requirementsFile.path)
+      }
     }
     await request.save()
 
@@ -1038,7 +1136,24 @@ app.get('/api/admin/users', async (req, res) => {
     const mapAdmin = admins.map((u) => ({ id: u._id, email: u.email, role: 'Admin', profile: u.profile, createdAt: u.createdAt }))
     const mapEmployer = employers.map((u) => {
       const request = requestByEmail.get(u.email.toLowerCase())
-      return { id: u._id, email: u.email, role: 'Employer', companyName: u.companyName, contactName: u.contactName, phone: u.phone || request?.phone, website: u.website, profile: u.profile, approvalStatus: request?.status || 'approved', createdAt: u.createdAt }
+      return {
+        id: u._id,
+        email: u.email,
+        role: 'Employer',
+        companyName: u.companyName,
+        contactName: u.contactName,
+        phone: u.phone || request?.phone,
+        website: u.website,
+        profile: u.profile,
+        approvalStatus: request?.status || 'approved',
+        requirementsFile: request?.requirementsFile ? {
+          requestId: String(request._id),
+          originalName: request.requirementsFile.originalName,
+          size: request.requirementsFile.size,
+          submittedAt: request.requirementsSubmittedAt,
+        } : undefined,
+        createdAt: u.createdAt,
+      }
     })
     const employerAccountEmails = new Set(employers.map((u) => u.email.toLowerCase()))
     const mapEmployerRequests = employerRequests.filter((request) => !employerAccountEmails.has(request.email.toLowerCase())).map((request) => ({
