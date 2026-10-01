@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
+import { API_URL } from "../config"
 
 function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, initialApplicantIds = [] }) {
   const [jobs, setJobs] = useState([])
@@ -44,7 +45,7 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
 
     const headers = { Authorization: `Bearer ${token}` }
 
-    const jobsRequest = fetch("http://localhost:4000/api/jobs?status=approved", { headers })
+    const jobsRequest = fetch("${API_URL}/api/jobs?status=approved", { headers })
       .then(async (response) => {
         const data = await response.json().catch(() => null)
         if (!response.ok) throw new Error(data?.error || `Failed to load jobs (${response.status})`)
@@ -52,7 +53,7 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
       })
       .then((data) => setJobs(data))
 
-    const referralsRequest = fetch("http://localhost:4000/api/referrals/admin", { headers })
+    const referralsRequest = fetch("${API_URL}/api/referrals/admin", { headers })
       .then(async (response) => {
         const data = await response.json().catch(() => null)
         if (!response.ok) throw new Error(data?.error || `Failed to load referrals (${response.status})`)
@@ -72,7 +73,7 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
         setReferralStatusByJob(statusByJob)
       })
 
-    const hireReportsRequest = fetch("http://localhost:4000/api/hire-reports", { headers })
+    const hireReportsRequest = fetch("${API_URL}/api/hire-reports", { headers })
       .then(async (response) => {
         const data = await response.json().catch(() => null)
         if (!response.ok) throw new Error(data?.error || `Failed to load hire reports (${response.status})`)
@@ -120,7 +121,7 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
     }))
 
     try {
-      const response = await fetch("http://localhost:4000/api/referrals", {
+      const response = await fetch("${API_URL}/api/referrals", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

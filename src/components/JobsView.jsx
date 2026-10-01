@@ -121,7 +121,7 @@ function JobsView({
 
   const handleViewApplicantNsrp = async (jobId, applicantEmail) => {
     if (!token) return alert('Not authenticated')
-    const response = await fetch(`http://localhost:4000/api/job-applications/view?jobId=${encodeURIComponent(jobId)}&email=${encodeURIComponent(applicantEmail)}`, {
+    const response = await fetch(`${API_URL}/api/job-applications/view?jobId=${encodeURIComponent(jobId)}&email=${encodeURIComponent(applicantEmail)}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
     if (!response.ok) {
@@ -503,7 +503,7 @@ function JobsView({
                             if (!token) return alert('Not authenticated')
                             setApplicationSubmitting(true)
                             try {
-                              const response = await fetch('http://localhost:4000/api/nsrp/generate', {
+                              const response = await fetch('${API_URL}/api/nsrp/generate', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                                 body: JSON.stringify(nsrpAnswers),

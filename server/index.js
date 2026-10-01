@@ -14,7 +14,20 @@ import { Applicant, Employer, Admin, Notification, Referral, HireReport, Rating,
 const app = express()
 const PORT = process.env.PORT || 4000
 
-app.use(cors({ origin: 'http://localhost:5173' }))
+// Allow the deployed frontend plus local dev. Set FRONTEND_URL (e.g. https://your-app.vercel.app) in production.
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:4173',
+  process.env.FRONTEND_URL,
+].filter(Boolean)
+app.use(cors({
+  origin: (origin, callback) => {
+    // allow same-origin / curl (no origin) and any whitelisted origin
+    if (!origin || allowedOrigins.includes(origin)) return callback(null, true)
+    return callback(null, true) // permissive for now; tighten by returning an Error to block others
+  },
+  credentials: true,
+}))
 // Capture raw request body for debugging JSON parse issues
 app.use(express.json({
   limit: '8mb',

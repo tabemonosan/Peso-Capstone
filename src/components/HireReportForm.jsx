@@ -16,7 +16,7 @@ function HireReportForm({ token, applicantId, jobId, referralId, onCreated }) {
     setError("")
 
     try {
-      const response = await fetch("http://localhost:4000/api/hire-reports", {
+      const response = await fetch("${API_URL}/api/hire-reports", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

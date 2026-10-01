@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useState } from "react"
+import { API_URL } from "./config"
 import JobsView from "./components/JobsView"
 import ReferralList from "./components/ReferralList"
 import PesoReferralPanel from "./components/PesoReferralPanel"
@@ -1142,7 +1143,7 @@ const [authView, setAuthView] = useState("login")
     const token = currentUser?.token || localStorage.getItem('peso-token')
     if (!token) return Promise.resolve({ ok: false })
 
-    return fetch('http://localhost:4000/api/profile', {
+    return fetch('${API_URL}/api/profile', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ profile: nextProfile }),
@@ -1193,7 +1194,7 @@ const [authView, setAuthView] = useState("login")
     if (!applicantId) return alert('Applicant record not found')
     const preview = window.open('', '_blank')
     try {
-      const response = await fetch(`http://localhost:4000/api/applicants/${applicantId}/resume`, {
+      const response = await fetch(`${API_URL}/api/applicants/${applicantId}/resume`, {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (!response.ok) {
@@ -1217,7 +1218,7 @@ const [authView, setAuthView] = useState("login")
     const token = getToken()
     if (!token) return
 
-    fetch('http://localhost:4000/api/employer-requests', {
+    fetch('${API_URL}/api/employer-requests', {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((r) => r.json())
@@ -1229,7 +1230,7 @@ const [authView, setAuthView] = useState("login")
     const token = getToken()
     if (!token) return
 
-    fetch('http://localhost:4000/api/notifications', {
+    fetch('${API_URL}/api/notifications', {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((r) => r.json())
@@ -1255,12 +1256,12 @@ const [authView, setAuthView] = useState("login")
     const headers = { Authorization: `Bearer ${token}` }
     if (activeRole === "Applicant") {
       setJobLoading(true)
-      const approvedRequest = fetch('http://localhost:4000/api/jobs?status=approved', { headers })
+      const approvedRequest = fetch('${API_URL}/api/jobs?status=approved', { headers })
         .then((r) => r.json())
         .then((data) => setAvailableJobs(Array.isArray(data) ? sortJobsByMatch(data, profileData.skills) : []))
         .catch(() => setAvailableJobs([]))
 
-      const appliedRequest = fetch('http://localhost:4000/api/jobs?status=applied', { headers })
+      const appliedRequest = fetch('${API_URL}/api/jobs?status=applied', { headers })
         .then((r) => r.json())
         .then((data) => setAppliedJobs(Array.isArray(data) ? data : []))
         .catch(() => setAppliedJobs([]))
@@ -1271,7 +1272,7 @@ const [authView, setAuthView] = useState("login")
 
     if (activeRole === "Employer") {
       setJobLoading(true)
-      fetch('http://localhost:4000/api/jobs?status=mine', { headers })
+      fetch('${API_URL}/api/jobs?status=mine', { headers })
         .then((r) => r.json())
         .then((data) => {
           const jobs = Array.isArray(data) ? data : []
@@ -1285,17 +1286,17 @@ const [authView, setAuthView] = useState("login")
 
     if (activeRole === "Admin") {
       setJobLoading(true)
-      const pendingRequest = fetch('http://localhost:4000/api/jobs?status=pending', { headers })
+      const pendingRequest = fetch('${API_URL}/api/jobs?status=pending', { headers })
         .then((r) => r.json())
         .then((data) => setPendingJobs(Array.isArray(data) ? data : []))
         .catch(() => setPendingJobs([]))
 
-      const approvedRequest = fetch('http://localhost:4000/api/jobs?status=approved', { headers })
+      const approvedRequest = fetch('${API_URL}/api/jobs?status=approved', { headers })
         .then((r) => r.json())
         .then((data) => setApprovedJobs(Array.isArray(data) ? data : []))
         .catch(() => setApprovedJobs([]))
 
-      const declinedRequest = fetch('http://localhost:4000/api/jobs?status=declined', { headers })
+      const declinedRequest = fetch('${API_URL}/api/jobs?status=declined', { headers })
         .then((r) => r.json())
         .then((data) => setDeclinedJobs(Array.isArray(data) ? data : []))
         .catch(() => setDeclinedJobs([]))
@@ -1309,7 +1310,7 @@ const [authView, setAuthView] = useState("login")
   const fetchAdminUsers = () => {
     const token = getToken()
     if (!token) return
-    fetch('http://localhost:4000/api/admin/users', { headers: { Authorization: `Bearer ${token}` } })
+    fetch('${API_URL}/api/admin/users', { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => r.json())
       .then((data) => setAdminUsers(Array.isArray(data) ? data : []))
       .catch(() => setAdminUsers([]))
@@ -1319,7 +1320,7 @@ const [authView, setAuthView] = useState("login")
     const token = getToken()
     if (!token) return
 
-    fetch('http://localhost:4000/api/referrals/admin', { headers: { Authorization: `Bearer ${token}` } })
+    fetch('${API_URL}/api/referrals/admin', { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => r.json())
       .then((data) => {
         const referredByJob = (Array.isArray(data) ? data : []).reduce((current, referral) => {
@@ -1345,7 +1346,7 @@ const [authView, setAuthView] = useState("login")
     if (!title || !payload.company || !description) return alert('Title, company, and description are required')
     if (!Array.isArray(skills) || skills.length === 0) return alert('Please select at least one skill for the job')
 
-    fetch('http://localhost:4000/api/jobs', {
+    fetch('${API_URL}/api/jobs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify(payload),
@@ -1396,7 +1397,7 @@ const [authView, setAuthView] = useState("login")
     if (!token) return alert('Not authenticated')
 
     try {
-      const response = await fetch(`http://localhost:4000/api/jobs/${editingJob._id}`, {
+      const response = await fetch(`${API_URL}/api/jobs/${editingJob._id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(editingJobForm),
@@ -1434,7 +1435,7 @@ const [authView, setAuthView] = useState("login")
       if (!window.confirm(`Approve "${jobTitle}"? It will become visible to applicants.`)) return
     }
 
-    fetch(`http://localhost:4000/api/jobs/${jobId}/status`, {
+    fetch(`${API_URL}/api/jobs/${jobId}/status`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ status, reason: status === 'declined' ? declineReasonValue : '' }),
@@ -1466,7 +1467,7 @@ const [authView, setAuthView] = useState("login")
 
     try {
       const results = await Promise.all(ids.map((jobId) =>
-        fetch(`http://localhost:4000/api/jobs/${jobId}/status`, {
+        fetch(`${API_URL}/api/jobs/${jobId}/status`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
           body: JSON.stringify({ status }),
@@ -1501,7 +1502,7 @@ const [authView, setAuthView] = useState("login")
     payload.append('nsrp', applicationFile)
 
     try {
-      const response = await fetch(`http://localhost:4000/api/jobs/${jobId}/apply`, {
+      const response = await fetch(`${API_URL}/api/jobs/${jobId}/apply`, {
       method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
         body: payload,
@@ -1540,7 +1541,7 @@ const [authView, setAuthView] = useState("login")
     const payload = { ...employerRequestForm, location: addressParts.join(', ') }
 
     try {
-      const response = await fetch('http://localhost:4000/api/employer-requests', {
+      const response = await fetch('${API_URL}/api/employer-requests', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -1572,7 +1573,7 @@ const [authView, setAuthView] = useState("login")
     const payload = new FormData()
     payload.append('requirements', requirementsFile)
     try {
-      const response = await fetch('http://localhost:4000/api/employer-requirements', {
+      const response = await fetch('${API_URL}/api/employer-requirements', {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
         body: payload,
@@ -1581,7 +1582,7 @@ const [authView, setAuthView] = useState("login")
       if (!response.ok) return alert(data?.error || 'Failed to submit requirements')
       setRequirementsFile(null)
       alert('NSRP registration form submitted for admin review.')
-      const profileResponse = await fetch('http://localhost:4000/api/profile', { headers: { Authorization: `Bearer ${token}` } })
+      const profileResponse = await fetch('${API_URL}/api/profile', { headers: { Authorization: `Bearer ${token}` } })
       const profile = await profileResponse.json().catch(() => null)
       if (profile && !profile.error) setCurrentUser((current) => ({ ...current, verificationStatus: profile.verificationStatus, verificationReason: profile.verificationReason }))
       fetchEmployerRequests()
@@ -1594,7 +1595,7 @@ const [authView, setAuthView] = useState("login")
     const token = getToken()
     if (!token) return alert('Not authenticated')
     const reason = status === 'declined' ? (window.prompt('Reason for declining (optional)') || '') : ''
-    fetch(`http://localhost:4000/api/applicants/${applicantId}/verification`, {
+    fetch(`${API_URL}/api/applicants/${applicantId}/verification`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ status, reason }),
@@ -1614,7 +1615,7 @@ const [authView, setAuthView] = useState("login")
   const handleReviewEmployerRequest = (requestId, status) => {
     const token = getToken()
     if (!token) return alert('Not authenticated')
-    fetch(`http://localhost:4000/api/employer-requests/${requestId}/status`, {
+    fetch(`${API_URL}/api/employer-requests/${requestId}/status`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ status, reason: status === 'declined' ? declineReason.trim() : '' }),
@@ -1637,7 +1638,7 @@ const [authView, setAuthView] = useState("login")
   const handleDownloadRequirements = async (requestId, filename) => {
     const token = getToken()
     if (!token) return
-    const response = await fetch(`http://localhost:4000/api/employer-requirements/${requestId}/download`, {
+    const response = await fetch(`${API_URL}/api/employer-requirements/${requestId}/download`, {
       headers: { Authorization: `Bearer ${token}` },
     })
     if (!response.ok) return alert('Requirements PDF could not be downloaded')
@@ -1653,7 +1654,7 @@ const [authView, setAuthView] = useState("login")
     const token = getToken()
     if (!token) return
     const preview = window.open('', '_blank')
-    const response = await fetch(`http://localhost:4000/api/employer-requirements/${requestId}/view`, {
+    const response = await fetch(`${API_URL}/api/employer-requirements/${requestId}/view`, {
       headers: { Authorization: `Bearer ${token}` },
     })
     if (!response.ok) {
@@ -1672,7 +1673,7 @@ const [authView, setAuthView] = useState("login")
     if (!token) return alert('Not authenticated')
     const preview = window.open('', '_blank')
     try {
-      const response = await fetch(`http://localhost:4000/api/applicants/${applicantId}/resume`, {
+      const response = await fetch(`${API_URL}/api/applicants/${applicantId}/resume`, {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (!response.ok) {
@@ -1694,7 +1695,7 @@ const [authView, setAuthView] = useState("login")
     const token = getToken()
     if (!token) return
     const preview = window.open('', '_blank')
-    const response = await fetch('http://localhost:4000/api/employer-requirements/current/view', {
+    const response = await fetch('${API_URL}/api/employer-requirements/current/view', {
       headers: { Authorization: `Bearer ${token}` },
     })
     if (!response.ok) {
@@ -1730,7 +1731,7 @@ const [authView, setAuthView] = useState("login")
     if (!window.confirm(`${isReferred ? 'Cancel referral for' : 'Refer'} ${applicantName}${isReferred ? '?' : ' to this job?'}`)) return
 
     try {
-      const response = await fetch('http://localhost:4000/api/referrals', {
+      const response = await fetch('${API_URL}/api/referrals', {
         method: isReferred ? 'DELETE' : 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ jobId, applicantIds: [applicantId] }),
@@ -1762,7 +1763,7 @@ const [authView, setAuthView] = useState("login")
     if (!window.confirm(`Refer ${applicantIdsArray.length} selected applicant${applicantIdsArray.length === 1 ? '' : 's'} to this job?`)) return
 
     try {
-      const response = await fetch('http://localhost:4000/api/referrals', {
+      const response = await fetch('${API_URL}/api/referrals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ jobId, applicantIds: applicantIdsArray }),
@@ -1786,7 +1787,7 @@ const [authView, setAuthView] = useState("login")
     if (!token || !notificationId) return
 
     try {
-      const response = await fetch(`http://localhost:4000/api/notifications/${notificationId}/read`, {
+      const response = await fetch(`${API_URL}/api/notifications/${notificationId}/read`, {
         method: 'PUT',
         headers: { Authorization: `Bearer ${token}` },
       })
@@ -1848,7 +1849,7 @@ const [authView, setAuthView] = useState("login")
     const token = localStorage.getItem('peso-token')
     if (!token) return
 
-    fetch('http://localhost:4000/api/profile', {
+    fetch('${API_URL}/api/profile', {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((response) => response.json())
@@ -1876,7 +1877,7 @@ const [authView, setAuthView] = useState("login")
     const refreshEmployerVerification = () => {
       const token = getToken()
       if (!token) return
-      fetch('http://localhost:4000/api/profile', {
+      fetch('${API_URL}/api/profile', {
         headers: { Authorization: `Bearer ${token}` },
       })
         .then((response) => response.json())
@@ -1900,7 +1901,7 @@ const [authView, setAuthView] = useState("login")
   const handleLogin = (event) => {
     event.preventDefault()
     // call backend login
-    fetch('http://localhost:4000/api/login', {
+    fetch('${API_URL}/api/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: formData.email, password: formData.password }),
@@ -1939,7 +1940,7 @@ const [authView, setAuthView] = useState("login")
       return
     }
     // Call backend signup
-    fetch('http://localhost:4000/api/signup', {
+    fetch('${API_URL}/api/signup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -3022,7 +3023,7 @@ const [authView, setAuthView] = useState("login")
                                                               if (!token) return alert('Not authenticated')
                                                               const preview = window.open('', '_blank')
                                                               try {
-                                                                const response = await fetch(`http://localhost:4000/api/applicants/${user.id}/nsrp-verification`, { headers: { Authorization: `Bearer ${token}` } })
+                                                                const response = await fetch(`${API_URL}/api/applicants/${user.id}/nsrp-verification`, { headers: { Authorization: `Bearer ${token}` } })
                                                                 if (!response.ok) { preview?.close(); return alert('NSRP document could not be opened') }
                                                                 const blob = await response.blob()
                                                                 const url = URL.createObjectURL(blob)
@@ -3290,7 +3291,7 @@ const [authView, setAuthView] = useState("login")
                                 try {
                                   const formData = new FormData()
                                   formData.append('resume', resumeFile)
-                                  const response = await fetch('http://localhost:4000/api/profile/resume', {
+                                  const response = await fetch('${API_URL}/api/profile/resume', {
                                     method: 'POST',
                                     headers: { Authorization: `Bearer ${token}` },
                                     body: formData,
@@ -3332,7 +3333,7 @@ const [authView, setAuthView] = useState("login")
                               if (!token || !applicantId) return alert('Not authenticated')
                               const preview = window.open('', '_blank')
                               try {
-                                const response = await fetch(`http://localhost:4000/api/applicants/${applicantId}/nsrp-verification`, { headers: { Authorization: `Bearer ${token}` } })
+                                const response = await fetch(`${API_URL}/api/applicants/${applicantId}/nsrp-verification`, { headers: { Authorization: `Bearer ${token}` } })
                                 if (!response.ok) { preview?.close(); return alert('NSRP document could not be opened') }
                                 const blob = await response.blob()
                                 const url = URL.createObjectURL(blob)
@@ -3364,7 +3365,7 @@ const [authView, setAuthView] = useState("login")
                               try {
                                 const formData = new FormData()
                                 formData.append('nsrpVerification', nsrpVerificationFile)
-                                const response = await fetch('http://localhost:4000/api/profile/nsrp-verification', {
+                                const response = await fetch('${API_URL}/api/profile/nsrp-verification', {
                                   method: 'POST',
                                   headers: { Authorization: `Bearer ${token}` },
                                   body: formData,
@@ -3576,7 +3577,7 @@ const [authView, setAuthView] = useState("login")
                               if (!token) return alert('Not authenticated. Please log in again.')
                               // Preserve existing profile fields and update the editable ones, including top-level employer fields.
                               const editableProfile = { ...(currentUser?.profile || {}), location: profileData.location, website: profileData.website, summary: profileData.summary, profileImage: profileData.profileImage || '', bannerImage: profileData.bannerImage || '' }
-                              fetch('http://localhost:4000/api/profile', {
+                              fetch('${API_URL}/api/profile', {
                                 method: 'PUT',
                                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                                 body: JSON.stringify({ profile: editableProfile, companyName: profileData.companyName, contactName: profileData.contactName, phone: profileData.phone, website: profileData.website }),

@@ -17,7 +17,7 @@ function RatingForm({ token, toUserId, toRole, hireReportId, onCreated }) {
     setError("")
 
     try {
-      const response = await fetch("http://localhost:4000/api/ratings", {
+      const response = await fetch("${API_URL}/api/ratings", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
+import { API_URL } from "../config"
 import HireReportForm from "./HireReportForm"
 import RatingForm from "./RatingForm"
 
@@ -24,7 +25,7 @@ function ReferralList({ token, employerId }) {
     setLoading(true)
     setError("")
 
-    fetch(`http://localhost:4000/api/referrals/employer/${employerId}`, {
+    fetch(`${API_URL}/api/referrals/employer/${employerId}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then(async (response) => {
@@ -57,7 +58,7 @@ function ReferralList({ token, employerId }) {
     )
 
     try {
-      const response = await fetch(`http://localhost:4000/api/referrals/${referralId}/respond`, {
+      const response = await fetch(`${API_URL}/api/referrals/${referralId}/respond`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -87,7 +88,7 @@ function ReferralList({ token, employerId }) {
     if (!token || !applicantId) return
     const preview = window.open('', '_blank')
     try {
-      const response = await fetch(`http://localhost:4000/api/applicants/${applicantId}/resume`, {
+      const response = await fetch(`${API_URL}/api/applicants/${applicantId}/resume`, {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (!response.ok) {
