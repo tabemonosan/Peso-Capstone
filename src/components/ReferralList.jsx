@@ -8,6 +8,7 @@ function ReferralList({ token, employerId }) {
   const [error, setError] = useState("")
   const [hireReportsByReferral, setHireReportsByReferral] = useState({})
   const [ratedHireReports, setRatedHireReports] = useState({})
+  const [selectedProfile, setSelectedProfile] = useState(null)
 
   useEffect(() => {
     if (!token) {
@@ -43,13 +44,16 @@ function ReferralList({ token, employerId }) {
 
   const handleRespond = async (referralId, status) => {
     if (!token) return
-    if (status === "declined" && !window.confirm("Decline this referral?")) return
-
+    const action = status === 'accepted' ? 'Accept' : 'Decline'
+    if (!window.confirm(`${action} this referral?${status === 'declined' ? ' The applicant will be removed from this list.' : ''}`)) return
     const previous = referrals
     setError("")
 
+    // Declined referrals are removed from the employer's list; accepted stay and show as accepted
     setReferrals((current) =>
-      current.map((item) => (String(item._id) === String(referralId) ? { ...item, status } : item)),
+      status === 'declined'
+        ? current.filter((item) => String(item._id) !== String(referralId))
+        : current.map((item) => (String(item._id) === String(referralId) ? { ...item, status } : item)),
     )
 
     try {
@@ -67,12 +71,36 @@ function ReferralList({ token, employerId }) {
         throw new Error(data?.error || `Request failed: ${response.status}`)
       }
 
-      setReferrals((current) =>
-        current.map((item) => (String(item._id) === String(referralId) ? { ...item, ...data } : item)),
-      )
+      if (status !== 'declined') {
+        setReferrals((current) =>
+          current.map((item) => (String(item._id) === String(referralId) ? { ...item, ...data } : item)),
+        )
+      }
     } catch (err) {
       setReferrals(previous)
       setError(err?.message || "Failed to update referral status")
+    }
+  }
+
+  const handleViewResume = async (applicant) => {
+    const applicantId = applicant?._id || applicant?.id
+    if (!token || !applicantId) return
+    const preview = window.open('', '_blank')
+    try {
+      const response = await fetch(`http://localhost:4000/api/applicants/${applicantId}/resume`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!response.ok) {
+        preview?.close()
+        return alert('Resume could not be opened')
+      }
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      if (preview) preview.location.href = url
+      else window.open(url, '_blank')
+    } catch (err) {
+      preview?.close()
+      alert('Resume could not be opened')
     }
   }
 
@@ -114,6 +142,7 @@ function ReferralList({ token, employerId }) {
       groups.set(jobId, {
         jobId,
         jobTitle: referral.jobId?.title || "Untitled job",
+        job: referral.jobId || null,
         applicantIds: new Set([applicantId]),
         referrals: [referral],
       })
@@ -142,6 +171,15 @@ function ReferralList({ token, employerId }) {
               className="rounded-2xl border border-slate-300 bg-white p-4"
             >
               <h3 className="text-lg font-semibold text-black">{group.jobTitle}</h3>
+              {group.job && (
+                <div className="mt-2 space-y-1 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-black">
+                  <p>Company: {group.job.company || 'N/A'}</p>
+                  <p>Location: {group.job.location || 'Remote'}</p>
+                  <p>Salary: {group.job.salary || 'Not specified'}</p>
+                  {group.job.requirements && <p>Requirements: {group.job.requirements}</p>}
+                  {group.job.description && <p>Description: {group.job.description}</p>}
+                </div>
+              )}
               <div className="mt-4 space-y-4">
                 {group.referrals.map((referral) => {
             const applicantName =
@@ -162,15 +200,40 @@ function ReferralList({ token, employerId }) {
             return (
               <div
                 key={referral._id}
-                className="rounded-2xl border border-slate-300 bg-white p-5"
+                className="overflow-hidden rounded-2xl border border-slate-300 bg-white"
               >
+                {referral.applicantId?.profile?.bannerImage && (
+                  <div
+                    className="h-20 w-full bg-slate-200 bg-cover bg-center"
+                    style={{ backgroundImage: `url(${referral.applicantId.profile.bannerImage})` }}
+                  />
+                )}
+                <div className="p-5">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <p className="text-lg font-semibold text-black">{applicantName}</p>
-                    <p className="mt-1 text-sm text-black">Job: {jobTitle}</p>
-                    {referral.applicantId?.email && (
-                      <p className="mt-1 text-sm text-black">Email: {referral.applicantId.email}</p>
-                    )}
+                  <div className="flex items-start gap-3">
+                    <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full border border-slate-300 bg-cyan-100 text-lg font-bold text-cyan-800">
+                      {referral.applicantId?.profile?.profileImage ? (
+                        <img src={referral.applicantId.profile.profileImage} alt={applicantName} className="h-full w-full object-cover" />
+                      ) : (
+                        (applicantName || 'A').trim().charAt(0).toUpperCase()
+                      )}
+                    </span>
+                    <div>
+                      <p className="text-lg font-semibold text-black">{applicantName}</p>
+                      <p className="mt-1 text-sm text-black">Job: {jobTitle}</p>
+                      {referral.applicantId?.email && (
+                        <p className="mt-1 text-sm text-black">Email: {referral.applicantId.email}</p>
+                      )}
+                      {referral.applicantId && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedProfile(referral.applicantId)}
+                          className="mt-1 text-sm font-medium text-cyan-700 underline hover:text-cyan-900"
+                        >
+                          View profile
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <span
                     className={`inline-flex rounded-full px-3 py-1 text-xs uppercase tracking-[0.2em] ${getStatusClasses(status)}`}
@@ -225,12 +288,71 @@ function ReferralList({ token, employerId }) {
                     )}
                   </>
                 )}
+                </div>
               </div>
             )
                 })}
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {selectedProfile && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setSelectedProfile(null)}
+        >
+          <div
+            className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-300 bg-white text-black shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div
+              className="h-28 w-full bg-slate-200 bg-cover bg-center"
+              style={selectedProfile.profile?.bannerImage ? { backgroundImage: `url(${selectedProfile.profile.bannerImage})` } : undefined}
+            />
+            <div className="flex items-end gap-4 px-6">
+              <span className="-mt-10 flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl border-4 border-white bg-cyan-100 text-2xl font-bold text-cyan-800">
+                {selectedProfile.profile?.profileImage ? (
+                  <img src={selectedProfile.profile.profileImage} alt="Applicant" className="h-full w-full object-cover" />
+                ) : (
+                  (selectedProfile.profile?.name || selectedProfile.email || 'A').trim().charAt(0).toUpperCase()
+                )}
+              </span>
+              <h3 className="pb-1 text-lg font-semibold text-black">{selectedProfile.profile?.name || 'Applicant Profile'}</h3>
+            </div>
+            <div className="flex items-start justify-end px-6 pt-3">
+              <button
+                type="button"
+                onClick={() => setSelectedProfile(null)}
+                className="rounded-full border border-slate-300 bg-white px-3 py-1 text-sm font-semibold text-black"
+              >
+                Close
+              </button>
+            </div>
+            <div className="space-y-2 px-6 pb-6 pt-1 text-sm text-black">
+              <p><span className="font-semibold">Name:</span> {selectedProfile.profile?.name || 'N/A'}</p>
+              <p><span className="font-semibold">Email:</span> {selectedProfile.email || 'N/A'}</p>
+              <p><span className="font-semibold">Location:</span> {selectedProfile.profile?.location || 'N/A'}</p>
+              <p><span className="font-semibold">Skills:</span> {Array.isArray(selectedProfile.profile?.skills) && selectedProfile.profile.skills.length > 0 ? selectedProfile.profile.skills.join(', ') : 'N/A'}</p>
+              {selectedProfile.profile?.traits && <p><span className="font-semibold">Traits:</span> {selectedProfile.profile.traits}</p>}
+              {selectedProfile.profile?.summary && <p><span className="font-semibold">Summary:</span> {selectedProfile.profile.summary}</p>}
+              {selectedProfile.resumeFile?.originalName && (
+                <div className="pt-2">
+                  <p><span className="font-semibold">Resume:</span> {selectedProfile.resumeFile.originalName}{selectedProfile.resumeFile.uploadedAt ? ` • uploaded ${new Date(selectedProfile.resumeFile.uploadedAt).toLocaleDateString()}` : ''}</p>
+                  <button
+                    type="button"
+                    onClick={() => handleViewResume(selectedProfile)}
+                    className="mt-2 rounded-2xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-500"
+                  >
+                    View Resume (PDF)
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </section>

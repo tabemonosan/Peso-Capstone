@@ -6,13 +6,30 @@ const { Schema } = mongoose
 const applicantSchema = new Schema({
   email: { type: String, required: true, unique: true },
   passwordHash: { type: String, required: true },
-  verificationStatus: { type: String, enum: ['under_review', 'approved', 'declined'], default: 'approved' },
+  verificationStatus: { type: String, enum: ['under_review', 'approved', 'declined', 'restricted'], default: 'under_review' },
+  verificationReason: String,
   profile: {
     name: String,
     location: String,
     skills: [String],
     traits: String,
     summary: String,
+    profileImage: String,
+    bannerImage: String,
+  },
+  resumeFile: {
+    originalName: String,
+    mimetype: String,
+    size: Number,
+    uploadedAt: Date,
+    data: { type: Buffer, select: false },
+  },
+  nsrpVerificationFile: {
+    originalName: String,
+    mimetype: String,
+    size: Number,
+    uploadedAt: Date,
+    data: { type: Buffer, select: false },
   },
 }, { collection: 'applicants', timestamps: true })
 
@@ -28,6 +45,9 @@ const employerSchema = new Schema({
   profile: {
     location: String,
     summary: String,
+    website: String,
+    profileImage: String,
+    bannerImage: String,
   },
 }, { collection: 'employers', timestamps: true })
 

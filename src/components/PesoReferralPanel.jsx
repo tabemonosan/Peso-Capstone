@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, initialApplicantIds = [] }) {
   const [jobs, setJobs] = useState([])
   const [referredApplicantIdsByJob, setReferredApplicantIdsByJob] = useState({})
+  const [referralStatusByJob, setReferralStatusByJob] = useState({})
   const [hireReports, setHireReports] = useState([])
   const [loading, setLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -58,16 +59,17 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
         return Array.isArray(data) ? data : []
       })
       .then((data) => {
-        const referredByJob = data.reduce((current, referral) => {
+        const referredByJob = {}
+        const statusByJob = {}
+        data.forEach((referral) => {
           const jobId = String(referral.jobId || "")
           const applicantId = String(referral.applicantId || "")
-          if (!jobId || !applicantId) return current
-          return {
-            ...current,
-            [jobId]: [...new Set([...(current[jobId] || []), applicantId])],
-          }
-        }, {})
+          if (!jobId || !applicantId) return
+          referredByJob[jobId] = [...new Set([...(referredByJob[jobId] || []), applicantId])]
+          statusByJob[jobId] = { ...(statusByJob[jobId] || {}), [applicantId]: referral.status || 'pending' }
+        })
         setReferredApplicantIdsByJob(referredByJob)
+        setReferralStatusByJob(statusByJob)
       })
 
     const hireReportsRequest = fetch("http://localhost:4000/api/hire-reports", { headers })
@@ -178,9 +180,15 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
               const appliedApplicants = applicants.filter((applicant) =>
                 appliedApplicantEmails.has(String(applicant.email || '').toLowerCase()),
               )
-              const visibleApplicants = appliedApplicants.filter(
-                (applicant) => !referredApplicantIds.includes(String(applicant.id || applicant._id)),
-              )
+              const statusByApplicant = referralStatusByJob[jobId] || {}
+              // Keep declined applicants visible so admins see the employer declined them;
+              // hide applicants who are actively referred (pending/accepted).
+              const visibleApplicants = appliedApplicants.filter((applicant) => {
+                const applicantId = String(applicant.id || applicant._id)
+                const status = statusByApplicant[applicantId]
+                if (status === 'declined') return true
+                return !referredApplicantIds.includes(applicantId)
+              })
 
               return (
                 <div
@@ -249,6 +257,11 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
                                 {highlighted && (
                                   <span className="rounded-full bg-amber-400 px-2 py-0.5 text-xs font-semibold text-slate-950">
                                     New
+                                  </span>
+                                )}
+                                {referralStatusByJob[jobId]?.[applicantId] === 'declined' && (
+                                  <span className="rounded-full bg-red-500 px-2 py-0.5 text-xs font-semibold text-white">
+                                    Declined by employer
                                   </span>
                                 )}
                               </div>

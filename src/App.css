@@ -485,6 +485,35 @@
   color: #ffffff !important;
 }
 
+.portal-shell-admin .admin-jobs-panel button[class*="bg-green"] {
+  border-color: #15803d;
+  background: #16a34a !important;
+  color: #ffffff !important;
+}
+
+.portal-shell-admin .admin-jobs-panel button[class*="bg-red"] {
+  border-color: #b91c1c;
+  background: #dc2626 !important;
+  color: #ffffff !important;
+}
+
+.portal-shell-admin .admin-jobs-panel button[class*="bg-green"]:disabled,
+.portal-shell-admin .admin-jobs-panel button[class*="bg-red"]:disabled {
+  border-color: #c4d4e5 !important;
+  background: #e2e8f0 !important;
+  color: #64748b !important;
+}
+
+.portal-shell-admin .admin-jobs-panel .admin-bulk-review-bar {
+  border-color: #cbd5e1 !important;
+  background: #f1f5f9 !important;
+  color: #10233c !important;
+}
+
+.portal-shell-admin .admin-jobs-panel .admin-bulk-review-bar label {
+  color: #334155 !important;
+}
+
 .portal-shell-admin .admin-jobs-panel button[class*="bg-slate"],
 .portal-shell-admin .admin-referrals-panel button[class*="bg-slate"] {
   border-color: #8fa5ba !important;
@@ -742,6 +771,37 @@
   color: #000000;
 }
 
+/* Skill tag picker inside the white employer form panel */
+.portal-shell-employer .employer-form-panel input[type="text"],
+.portal-shell-employer .employer-form-panel input:not([type]) {
+  border-color: #9db1c5;
+  background: #ffffff;
+  color: #000000;
+}
+
+.portal-shell-employer .employer-form-panel span[class*="rounded-full"] {
+  border-color: #c4d4e5 !important;
+  background: #ffffff !important;
+  color: #000000 !important;
+}
+
+.portal-shell-employer .employer-form-panel span[class*="rounded-full"] button {
+  color: #5f7590 !important;
+}
+
+.portal-shell-employer .employer-form-panel div[class*="shadow-lg"] {
+  border-color: #c4d4e5 !important;
+  background: #ffffff !important;
+}
+
+.portal-shell-employer .employer-form-panel div[class*="shadow-lg"] button {
+  color: #000000 !important;
+}
+
+.portal-shell-employer .employer-form-panel div[class*="shadow-lg"] button:hover {
+  background: #eef3f9 !important;
+}
+
 .portal-shell-employer .employer-form-panel input::placeholder,
 .portal-shell-employer .employer-form-panel textarea::placeholder {
   color: #66809c;
@@ -913,9 +973,23 @@
 
 .portal-shell-applicant .applicant-job-search,
 .portal-shell-applicant .applicant-available-jobs,
+.portal-shell-applicant .applicant-applied-jobs,
 .portal-shell-applicant .applicant-job-item {
   border-color: #d2dfeb !important;
   background: #ffffff !important;
+}
+
+.portal-shell-applicant .applicant-applied-jobs h3 {
+  color: #10233c !important;
+}
+
+.portal-shell-applicant .applicant-applied-jobs p {
+  color: #5e748c !important;
+}
+
+.portal-shell-applicant .applicant-applied-jobs .applicant-application-item p:first-child,
+.portal-shell-applicant .applicant-applied-jobs .applicant-application-item p.text-base {
+  color: #10233c !important;
 }
 
 .portal-shell-applicant .applicant-job-search input,
@@ -931,9 +1005,38 @@
   color: #ffffff !important;
 }
 
-.portal-shell-applicant .applicant-job-item > div {
+.portal-shell-applicant .applicant-job-item > div:not(.employer-banner) {
   border-color: #d2dfeb !important;
   background: #f6f9fc !important;
+}
+
+.portal-shell-applicant .applicant-job-item p,
+.portal-shell-applicant .applicant-job-item span {
+  color: #29445f;
+}
+
+.portal-shell-applicant .applicant-job-item p.text-lg,
+.portal-shell-applicant .applicant-job-item p.font-semibold:first-of-type {
+  color: #10233c;
+}
+
+.portal-shell-applicant .applicant-job-item span[class*="text-cyan"] {
+  background: #d9efff !important;
+  border-color: #a9c7d9 !important;
+  color: #1263a7 !important;
+}
+
+.portal-shell-applicant .applicant-job-item span[class*="text-green"] {
+  color: #18804f !important;
+}
+
+.portal-shell-applicant .applicant-job-item span[class*="bg-green"] {
+  background: #18804f !important;
+}
+
+.portal-shell-applicant .applicant-job-item span[class*="bg-cyan-500\/15"] {
+  background: #d9efff !important;
+  color: #1263a7 !important;
 }
 
 .portal-shell-applicant .applicant-applications-card {
@@ -975,6 +1078,27 @@
   color: #000000;
 }
 
+.portal-shell-applicant .applicant-profile-card div[class*="bg-slate"]:not(.employer-banner) {
+  border-color: #d2dfeb !important;
+  background: #f6f9fc !important;
+  color: #000000 !important;
+}
+
+.portal-shell-applicant .applicant-profile-card .employer-banner {
+  background-color: #d7e3ee;
+}
+
+.portal-shell-applicant .applicant-profile-card input[type="file"] {
+  background: #ffffff;
+  color: #000000;
+}
+
+.portal-shell-applicant .applicant-profile-card input[type="file"]::file-selector-button {
+  border-color: #9db1c5;
+  background: #eaf7ff;
+  color: #1d2d3d;
+}
+
 .portal-shell-applicant .applicant-profile-card input::placeholder,
 .portal-shell-applicant .applicant-profile-card textarea::placeholder {
   color: #66809c;
@@ -1002,6 +1126,53 @@
   color: #ffffff;
 }
 
+/* Skill tag picker overrides (white cards) */
+.portal-shell-applicant .applicant-profile-card .skill-tag-chip,
+.portal-shell-employer .employer-form-panel .skill-tag-chip,
+.portal-shell-employer .employer-profile-card .skill-tag-chip {
+  border: 1px solid #c4d4e5 !important;
+  background: #ffffff !important;
+  color: #000000 !important;
+}
+
+.portal-shell-applicant .applicant-profile-card .skill-tag-remove,
+.portal-shell-employer .employer-form-panel .skill-tag-remove,
+.portal-shell-employer .employer-profile-card .skill-tag-remove {
+  border: none !important;
+  background: transparent !important;
+  color: #5f7590 !important;
+  padding: 0 !important;
+}
+
+.portal-shell-applicant .applicant-profile-card .skill-tag-input,
+.portal-shell-employer .employer-form-panel .skill-tag-input,
+.portal-shell-employer .employer-profile-card .skill-tag-input {
+  border-color: #9db1c5 !important;
+  background: #ffffff !important;
+  color: #000000 !important;
+}
+
+.portal-shell-applicant .applicant-profile-card .skill-tag-suggestions,
+.portal-shell-employer .employer-form-panel .skill-tag-suggestions,
+.portal-shell-employer .employer-profile-card .skill-tag-suggestions {
+  border-color: #c4d4e5 !important;
+  background: #ffffff !important;
+}
+
+.portal-shell-applicant .applicant-profile-card .skill-tag-suggestion,
+.portal-shell-employer .employer-form-panel .skill-tag-suggestion,
+.portal-shell-employer .employer-profile-card .skill-tag-suggestion {
+  border: none !important;
+  background: #ffffff !important;
+  color: #000000 !important;
+}
+
+.portal-shell-applicant .applicant-profile-card .skill-tag-suggestion:hover,
+.portal-shell-employer .employer-form-panel .skill-tag-suggestion:hover,
+.portal-shell-employer .employer-profile-card .skill-tag-suggestion:hover {
+  background: #eef3f9 !important;
+}
+
 .portal-shell-applicant .applicant-profile-summary {
   border-color: #d2dfeb;
   background: #f3f9fd;
@@ -1027,6 +1198,41 @@
 .portal-shell-applicant .applicant-skill-modal button {
   background: #22d3ee;
   color: #082f49;
+}
+
+/* Keep the tag picker white inside the skill modal */
+.portal-shell-applicant .applicant-skill-modal .skill-tag-chip {
+  border: 1px solid #c4d4e5 !important;
+  background: #ffffff !important;
+  color: #000000 !important;
+}
+
+.portal-shell-applicant .applicant-skill-modal .skill-tag-remove {
+  border: none !important;
+  background: transparent !important;
+  color: #000000 !important;
+  padding: 0 !important;
+}
+
+.portal-shell-applicant .applicant-skill-modal .skill-tag-input {
+  border-color: #9db1c5 !important;
+  background: #ffffff !important;
+  color: #000000 !important;
+}
+
+.portal-shell-applicant .applicant-skill-modal .skill-tag-suggestions {
+  border-color: #c4d4e5 !important;
+  background: #ffffff !important;
+}
+
+.portal-shell-applicant .applicant-skill-modal .skill-tag-suggestion {
+  border: none !important;
+  background: #ffffff !important;
+  color: #000000 !important;
+}
+
+.portal-shell-applicant .applicant-skill-modal .skill-tag-suggestion:hover {
+  background: #eef3f9 !important;
 }
 
 .portal-shell-applicant .applicant-skill-modal h3,

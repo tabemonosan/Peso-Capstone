@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react"
+import { Fragment, useEffect, useState } from "react"
 import JobsView from "./components/JobsView"
 import ReferralList from "./components/ReferralList"
 import PesoReferralPanel from "./components/PesoReferralPanel"
@@ -18,6 +18,7 @@ const navigationByRole = {
     { id: "peso-referrals", label: "Reports" },
   ],
   Employer: [
+    { id: "home", label: "Home" },
     { id: "dashboard", label: "Dashboard" },
     { id: "employer", label: "Job Postings" },
     { id: "referrals", label: "Reports" },
@@ -25,23 +26,859 @@ const navigationByRole = {
     { id: "notify", label: "Notifications" },
   ],
   Applicant: [
+    { id: "home", label: "Home" },
     { id: "jobs", label: "Jobs" },
-    { id: "applications", label: "Applied Jobs" },
     { id: "reputation", label: "Reviews" },
     { id: "notify", label: "Notifications" },
   ],
 }
 
 const availableSkills = [
-  "Cooking",
-  "Construction",
-  "Cleaning",
-  "Caregiving",
-  "Driving",
-  "Customer Service",
-  "Data Entry",
-  "Landscaping",
+  "Software Engineer",
+  "Frontend Developer",
+  "Backend Developer",
+  "Full-Stack Developer",
+  "Web Developer",
+  "Mobile Developer",
+  "DevOps Engineer",
+  "Data Analyst",
+  "Data Scientist",
+  "Machine Learning Engineer",
+  "Cybersecurity Analyst",
+  "IT Support Specialist",
+  "Network Engineer",
+  "Database Administrator",
+  "QA Engineer",
+  "UI/UX Designer",
+  "Product Manager",
+  "Project Manager",
+  "Business Analyst",
+  "Accountant",
+  "Financial Analyst",
+  "Bookkeeper",
+  "Human Resources Specialist",
+  "Recruiter",
+  "Sales Representative",
+  "Account Manager",
+  "Marketing Specialist",
+  "Digital Marketing Specialist",
+  "Social Media Manager",
+  "Content Writer",
+  "Copywriter",
+  "Graphic Designer",
+  "Video Editor",
+  "Customer Service Representative",
+  "Call Center Agent",
+  "Virtual Assistant",
+  "Administrative Assistant",
+  "Executive Assistant",
+  "Office Clerk",
+  "Data Entry Specialist",
+  "Operations Manager",
+  "Supply Chain Specialist",
+  "Logistics Coordinator",
+  "Warehouse Associate",
+  "Delivery Driver",
+  "Professional Driver",
+  "Security Guard",
+  "Cashier",
+  "Retail Associate",
+  "Store Manager",
+  "Chef",
+  "Cook",
+  "Baker",
+  "Waiter / Waitress",
+  "Barista",
+  "Housekeeper",
+  "Janitor",
+  "Caregiver",
+  "Nurse",
+  "Medical Technologist",
+  "Pharmacist",
+  "Teacher",
+  "Tutor",
+  "Electrician",
+  "Plumber",
+  "Carpenter",
+  "Welder",
+  "Mechanic",
+  "Construction Worker",
+  "Civil Engineer",
+  "Mechanical Engineer",
+  "Electrical Engineer",
+  "Architect",
+  "Landscaper",
+  "Farm Worker",
 ]
+
+// Format a salary value as Philippine pesos: digits only, ? prefix, thousand separators
+const formatPesoSalary = (value) => {
+  const digits = String(value).replace(/[^0-9]/g, "")
+  if (!digits) return ""
+  return `\u20B1$1`
+}
+
+// Municipalities/Cities of Albay with their barangays
+const albayLocations = {
+  "Bacacay": [
+    "Baclayon",
+    "Banao",
+    "Barangay 1 (Pob.)",
+    "Barangay 10 (Pob.)",
+    "Barangay 11 (Pob.)",
+    "Barangay 12 (Pob.)",
+    "Barangay 13 (Pob.)",
+    "Barangay 14 (Pob.)",
+    "Barangay 2 (Pob.)",
+    "Barangay 3 (Pob.)",
+    "Barangay 4 (Pob.)",
+    "Barangay 5 (Pob.)",
+    "Barangay 6 (Pob.)",
+    "Barangay 7 (Pob.)",
+    "Barangay 8 (Pob.)",
+    "Barangay 9 (Pob.)",
+    "Bariw",
+    "Basud",
+    "Bayandong",
+    "Bonga",
+    "Buang",
+    "Busdac",
+    "Cabasan",
+    "Cagbulacao",
+    "Cagraray",
+    "Cajogutan",
+    "Cawayan",
+    "Damacan",
+    "Gubat Ilawod",
+    "Gubat Iraya",
+    "Hindi",
+    "Igang",
+    "Langaton",
+    "Manaet",
+    "Mapulang Daga",
+    "Mataas",
+    "Misibis",
+    "Nahapunan",
+    "Namanday",
+    "Namantao",
+    "Napao",
+    "Panarayon",
+    "Pigcobohan",
+    "Pili Ilawod",
+    "Pili Iraya",
+    "Pongco",
+    "San Pablo",
+    "San Pedro",
+    "Sogod",
+    "Sula",
+    "Tambilagao",
+    "Tambongon",
+    "Tanagan",
+    "Uson",
+    "Vinisitahan-Basud",
+    "Vinisitahan-Napao",
+  ],
+  "Camalig": [
+    "Anoling",
+    "Baligang",
+    "Bantonan",
+    "Barangay 1 (Pob.)",
+    "Barangay 2 (Pob.)",
+    "Barangay 3 (Pob.)",
+    "Barangay 4 (Pob.)",
+    "Barangay 5 (Pob.)",
+    "Barangay 6 (Pob.)",
+    "Barangay 7 (Pob.)",
+    "Bariw",
+    "Binanderahan",
+    "Binitayan",
+    "Bongabong",
+    "Cabag\u2022an",
+    "Cabraran Peque\u2022o",
+    "Caguiba",
+    "Calabidongan",
+    "Comun",
+    "Cotmon",
+    "Del Rosario",
+    "Gapo",
+    "Gotob",
+    "Ilawod",
+    "Iluluan",
+    "Libod",
+    "Ligban",
+    "Mabunga",
+    "Magogon",
+    "Manawan",
+    "Maninila",
+    "Mina",
+    "Miti",
+    "Palanog",
+    "Panoypoy",
+    "Pariaan",
+    "Quinartilan",
+    "Quirangay",
+    "Quitinday",
+    "Salugan",
+    "Solong",
+    "Sua",
+    "Sumlang",
+    "Tagaytay",
+    "Tagoytoy",
+    "Taladong",
+    "Taloto",
+    "Taplacon",
+    "Tinago",
+    "Tumpa",
+  ],
+  "Daraga": [
+    "Alcala",
+    "Alobo",
+    "Anislag",
+    "Bagumbayan",
+    "Balinad",
+    "Ba\u2022adero",
+    "Ba\u2022ag",
+    "Bascaran",
+    "Bigao",
+    "Binitayan",
+    "Bongalon",
+    "Budiao",
+    "Burgos",
+    "Busay",
+    "Canarom",
+    "Cullat",
+    "Dela Paz",
+    "Dinoronan",
+    "Gabawan",
+    "Gapo",
+    "Ibaugan",
+    "Ilawod Area Pob.",
+    "Inarado",
+    "Kidaco",
+    "Kilicao",
+    "Kimantong",
+    "Kinawitan",
+    "Kiwalo",
+    "Lacag",
+    "Mabini",
+    "Malabog",
+    "Malobago",
+    "Maopi",
+    "Market Area Pob.",
+    "Maroroy",
+    "Matnog",
+    "Mayon",
+    "Mi-isi",
+    "Nabasan",
+    "Namantao",
+    "Pandan",
+    "Pe\u2022afrancia",
+    "Sagpon",
+    "Salvacion",
+    "San Rafael",
+    "San Ramon",
+    "San Roque",
+    "San Vicente Grande",
+    "San Vicente Peque\u2022o",
+    "Sipi",
+    "Tabon-tabon",
+    "Tagas",
+    "Talahib",
+    "Villahermosa",
+  ],
+  "Guinobatan": [
+    "Agpay",
+    "Balite",
+    "Banao",
+    "Batbat",
+    "Binogsacan Lower",
+    "Binogsacan Upper",
+    "Bololo",
+    "Bubulusan",
+    "Calzada",
+    "Catomag",
+    "Do\u2022a Mercedes",
+    "Do\u2022a Tomasa",
+    "Ilawod",
+    "Inamnan Grande",
+    "Inamnan Peque\u2022o",
+    "Inascan",
+    "Iraya",
+    "Lomacao",
+    "Maguiron",
+    "Maipon",
+    "Malabnig",
+    "Malipo",
+    "Malobago",
+    "Maninila",
+    "Mapaco",
+    "Marcial O. Ra\u2022ola",
+    "Masarawag",
+    "Mauraro",
+    "Minto",
+    "Morera",
+    "Muladbucad Grande",
+    "Muladbucad Peque\u2022o",
+    "Ongo",
+    "Palanas",
+    "Poblacion",
+    "Pood",
+    "Quibongbongan",
+    "Quitago",
+    "San Francisco",
+    "San Jose",
+    "San Rafael",
+    "Sinungtan",
+    "Tandarora",
+    "Travesia",
+  ],
+  "Jovellar": [
+    "Aurora Pob.",
+    "Bagacay",
+    "Bautista",
+    "Cabraran",
+    "Calzada Pob.",
+    "Del Rosario",
+    "Estrella",
+    "Florista",
+    "Mabini Pob.",
+    "Magsaysay Pob",
+    "Mamlad",
+    "Maogog",
+    "Mercado Pob.",
+    "Plaza Pob.",
+    "Quitinday Pob.",
+    "Rizal Pob.",
+    "Salvacion",
+    "San Isidro",
+    "San Roque",
+    "San Vicente",
+    "Sinagaran",
+    "Villa Paz",
+    "White Deer Pob.",
+  ],
+  "Legazpi City": [
+    "Bgy. 1 - Em's Barrio (Pob.)",
+    "Bgy. 10 - Cabugao",
+    "Bgy. 11 - Maoyod Pob.",
+    "Bgy. 12 - Tula-tula (Pob.)",
+    "Bgy. 13 - Ilawod West Pob.",
+    "Bgy. 14 - Ilawod Pob.",
+    "Bgy. 15 - Ilawod East Pob.",
+    "Bgy. 16 - Kawit-East Washington Drive (Pob.)",
+    "Bgy. 17 - Rizal Street., Ilawod (Pob.)",
+    "Bgy. 18 - Cabag\u2022an West (Pob.)",
+    "Bgy. 19 - Cabag\u2022an",
+    "Bgy. 2 - Em's Barrio South (Pob.)",
+    "Bgy. 20 - Cabag\u2022an East (Pob.)",
+    "Bgy. 21 - Binanuahan West (Pob.)",
+    "Bgy. 22 - Binanuahan East (Pob.)",
+    "Bgy. 23 - Imperial Court Subd. (Pob.)",
+    "Bgy. 24 - Rizal Street",
+    "Bgy. 25 - Lapu-lapu (Pob.)",
+    "Bgy. 26 - Dinagaan (Pob.)",
+    "Bgy. 27 - Victory Village South (Pob.)",
+    "Bgy. 28 - Victory Village North (Pob.)",
+    "Bgy. 29 - Sabang (Pob.)",
+    "Bgy. 3 - Em's Barrio East (Pob.)",
+    "Bgy. 30 - Pigcale (Pob.)",
+    "Bgy. 31 - Centro-Baybay (Pob.)",
+    "Bgy. 32 - San Roque",
+    "Bgy. 33 - PNR-Pe\u2022aranda St.-Iraya (Pob.)",
+    "Bgy. 34 - Oro Site-Magallanes St. (Pob.)",
+    "Bgy. 35 - Tinago (Pob.)",
+    "Bgy. 36 - Kapantawan (Pob.)",
+    "Bgy. 37 - Bitano (Pob.)",
+    "Bgy. 38 - Gogon",
+    "Bgy. 39 - Bonot (Pob.)",
+    "Bgy. 4 - Sagpon Pob.",
+    "Bgy. 40 - Cruzada",
+    "Bgy. 41 - Bogtong",
+    "Bgy. 42 - Rawis",
+    "Bgy. 43 - Tamaoyan",
+    "Bgy. 44 - Pawa",
+    "Bgy. 45 - Dita",
+    "Bgy. 46 - San Joaquin",
+    "Bgy. 47 - Arimbay",
+    "Bgy. 48 - Bagong Abre",
+    "Bgy. 49 - Bigaa",
+    "Bgy. 5 - Sagmin Pob.",
+    "Bgy. 50 - Padang",
+    "Bgy. 51 - Buyuan",
+    "Bgy. 52 - Matanag",
+    "Bgy. 53 - Bonga",
+    "Bgy. 54 - Mabinit",
+    "Bgy. 55 - Estanza",
+    "Bgy. 56 - Taysan",
+    "Bgy. 57 - Dap-dap",
+    "Bgy. 58 - Buragwis",
+    "Bgy. 59 - Puro",
+    "Bgy. 6 - Ba\u2022adero Pob.",
+    "Bgy. 60 - Lamba",
+    "Bgy. 61 - Maslog",
+    "Bgy. 62 - Homapon",
+    "Bgy. 63 - Mariawa",
+    "Bgy. 64 - Bagacay",
+    "Bgy. 65 - Imalnod",
+    "Bgy. 66 - Banquerohan",
+    "Bgy. 67 - Bariis",
+    "Bgy. 68 - San Francisco",
+    "Bgy. 69 - Buenavista",
+    "Bgy. 7 - Ba\u2022o (Pob.)",
+    "Bgy. 70 - Cagbacong",
+    "Bgy. 8 - Bagumbayan (Pob.)",
+    "Bgy. 9 - Pinaric (Pob.)",
+  ],
+  "Libon": [
+    "Alongong",
+    "Apud",
+    "Bacolod",
+    "Bariw",
+    "Bonbon",
+    "Buga",
+    "Bulusan",
+    "Burabod",
+    "Caguscos",
+    "East Carisac",
+    "Harigue",
+    "Libtong",
+    "Linao",
+    "Mabayawas",
+    "Macabugos",
+    "Magallang",
+    "Malabiga",
+    "Marayag",
+    "Matara",
+    "Molosbolos",
+    "Natasan",
+    "Ni\u2022o Jesus",
+    "Nogpo",
+    "Pantao",
+    "Rawis",
+    "Sagrada Familia",
+    "Salvacion",
+    "Sampongan",
+    "San Agustin",
+    "San Antonio",
+    "San Isidro",
+    "San Jose",
+    "San Pascual",
+    "San Ramon",
+    "San Vicente",
+    "Santa Cruz",
+    "Talin-talin",
+    "Tambo",
+    "Villa Petrona",
+    "West Carisac",
+    "Zone I (Pob.)",
+    "Zone II (Pob.)",
+    "Zone III (Pob.)",
+    "Zone IV (Pob.)",
+    "Zone V (Pob.)",
+    "Zone VI (Pob.)",
+    "Zone VII (Pob.)",
+  ],
+  "Ligao City": [
+    "Abella",
+    "Allang",
+    "Amtic",
+    "Bacong",
+    "Bagumbayan",
+    "Balanac",
+    "Baligang",
+    "Barayong",
+    "Basag",
+    "Batang",
+    "Bay",
+    "Binanowan",
+    "Binatagan (Pob.)",
+    "Bobonsuran",
+    "Bonga",
+    "Busac",
+    "Busay",
+    "Cabarian",
+    "Calzada (Pob.)",
+    "Catburawan",
+    "Cavasi",
+    "Culliat",
+    "Dunao",
+    "Francia",
+    "Guilid",
+    "Herrera",
+    "Layon",
+    "Macalidong",
+    "Mahaba",
+    "Malama",
+    "Maonon",
+    "Nabonton",
+    "Nasisi",
+    "Oma-oma",
+    "Palapas",
+    "Pandan",
+    "Paulba",
+    "Paulog",
+    "Pinamaniquian",
+    "Pinit",
+    "Ranao-ranao",
+    "San Vicente",
+    "Santa Cruz (Pob.)",
+    "Tagpo",
+    "Tambo",
+    "Tandarura",
+    "Tastas",
+    "Tinago",
+    "Tinampo",
+    "Tiongson",
+    "Tomolin",
+    "Tuburan",
+    "Tula-tula Grande",
+    "Tula-tula Peque\u2022o",
+    "Tupas",
+  ],
+  "Malilipot": [
+    "Barangay I (Pob.)",
+    "Barangay II (Pob.)",
+    "Barangay III (Pob.)",
+    "Barangay IV (Pob.)",
+    "Barangay V (Pob.)",
+    "Binitayan",
+    "Calbayog",
+    "Canaway",
+    "Salvacion",
+    "San Antonio Santicon (Pob.)",
+    "San Antonio Sulong",
+    "San Francisco",
+    "San Isidro Ilawod",
+    "San Isidro Iraya",
+    "San Jose",
+    "San Roque",
+    "Santa Cruz",
+    "Santa Teresa",
+  ],
+  "Malinao": [
+    "Awang",
+    "Bagatangki",
+    "Bagumbayan",
+    "Balading",
+    "Balza",
+    "Bariw",
+    "Baybay",
+    "Bulang",
+    "Burabod",
+    "Cabunturan",
+    "Comun",
+    "Diaro",
+    "Estancia",
+    "Jonop",
+    "Labnig",
+    "Libod",
+    "Malolos",
+    "Matalipni",
+    "Ogob",
+    "Pawa",
+    "Payahan",
+    "Poblacion",
+    "Quinarabasahan",
+    "Santa Elena",
+    "Soa",
+    "Sugcad",
+    "Tagoytoy",
+    "Tanawan",
+    "Tuliw",
+  ],
+  "Manito": [
+    "Balabagon",
+    "Balasbas",
+    "Bamban",
+    "Buyo",
+    "Cabacongan",
+    "Cabit",
+    "Cawayan",
+    "Cawit",
+    "Holugan",
+    "It-Ba (Pob.)",
+    "Malobago",
+    "Manumbalay",
+    "Nagotgot",
+    "Pawa",
+    "Tinapian",
+  ],
+  "Oas": [
+    "Badbad",
+    "Badian",
+    "Bagsa",
+    "Bagumbayan",
+    "Balogo",
+    "Banao",
+    "Bangiawon",
+    "Bogtong",
+    "Bongoran",
+    "Busac",
+    "Cadawag",
+    "Cagmanaba",
+    "Calaguimit",
+    "Calpi",
+    "Calzada",
+    "Camagong",
+    "Casinagan",
+    "Centro Poblacion",
+    "Coliat",
+    "Del Rosario",
+    "Gumabao",
+    "Ilaor Norte",
+    "Ilaor Sur",
+    "Iraya Norte",
+    "Iraya Sur",
+    "Manga",
+    "Maporong",
+    "Maramba",
+    "Matambo",
+    "Mayag",
+    "Mayao",
+    "Moroponros",
+    "Nagas",
+    "Obaliw-Rinas",
+    "Pistola",
+    "Ramay",
+    "Rizal",
+    "Saban",
+    "San Agustin",
+    "San Antonio",
+    "San Isidro",
+    "San Jose",
+    "San Juan",
+    "San Miguel",
+    "San Pascual",
+    "San Ramon",
+    "San Vicente",
+    "Tablon",
+    "Talisay",
+    "Talongog",
+    "Tapel",
+    "Tobgon",
+    "Tobog",
+  ],
+  "Pio Duran": [
+    "Agol",
+    "Alabangpuro",
+    "Banawan",
+    "Barangay I (Pob.)",
+    "Barangay II (Pob.)",
+    "Barangay III (Pob.)",
+    "Barangay IV (Pob.)",
+    "Barangay V (Pob.)",
+    "Basicao Coastal",
+    "Basicao Interior",
+    "Binodegahan",
+    "Buenavista",
+    "Buyo",
+    "Caratagan",
+    "Cuyaoyao",
+    "Flores",
+    "La Medalla",
+    "Lawinon",
+    "Macasitas",
+    "Malapay",
+    "Malidong",
+    "Mamlad",
+    "Marigondon",
+    "Matanglad",
+    "Nablangbulod",
+    "Oringon",
+    "Palapas",
+    "Panganiran",
+    "Rawis",
+    "Salvacion",
+    "Santo Cristo",
+    "Sukip",
+    "Tibabo",
+  ],
+  "Polangui": [
+    "Agos",
+    "Alnay",
+    "Alomon",
+    "Amoguis",
+    "Anopol",
+    "Apad",
+    "Balaba",
+    "Balangibang",
+    "Balinad",
+    "Basud",
+    "Binagbangan",
+    "Buyo",
+    "Centro Occidental (Pob.)",
+    "Centro Oriental (Pob.)",
+    "Cepres",
+    "Cotmon",
+    "Cotnogan",
+    "Danao",
+    "Gabon",
+    "Gamot",
+    "Itaran",
+    "Kinale",
+    "Kinuartilan",
+    "La Medalla",
+    "La Purisima",
+    "Lanigay",
+    "Lidong",
+    "Lourdes",
+    "Magpanambo",
+    "Magurang",
+    "Matacon",
+    "Maynaga",
+    "Maysua",
+    "Mendez",
+    "Napo",
+    "Pinagdapugan",
+    "Ponso",
+    "Salvacion",
+    "San Roque",
+    "Santa Cruz",
+    "Santa Teresita",
+    "Santicon",
+    "Sugcad",
+    "Ubaliw",
+  ],
+  "Rapu-Rapu": [
+    "Bagaobawan",
+    "Batan",
+    "Bilbao",
+    "Binosawan",
+    "Bogtong",
+    "Buenavista",
+    "Buhatan",
+    "Calanaga",
+    "Caracaran",
+    "Carogcog",
+    "Dap-dap",
+    "Gaba",
+    "Galicia",
+    "Guadalupe",
+    "Hamorawon",
+    "Lagundi",
+    "Liguan",
+    "Linao",
+    "Malobago",
+    "Mananao",
+    "Mancao",
+    "Manila",
+    "Masaga",
+    "Morocborocan",
+    "Nagcalsot",
+    "Pagcolbon",
+    "Poblacion",
+    "Sagrada",
+    "San Ramon",
+    "Santa Barbara",
+    "Tinocawan",
+    "Tinopan",
+    "Viga",
+    "Villahermosa",
+  ],
+  "Santo Domingo": [
+    "Alimsog",
+    "Bagong San Roque",
+    "Buhatan",
+    "Calayucay",
+    "Del Rosario Pob.",
+    "Fidel Surtida",
+    "Lidong",
+    "Market Site Pob.",
+    "Nagsiya Pob.",
+    "Pandayan Pob.",
+    "Salvacion",
+    "San Andres",
+    "San Fernando",
+    "San Francisco Pob.",
+    "San Isidro",
+    "San Juan Pob.",
+    "San Pedro Pob.",
+    "San Rafael Pob.",
+    "San Roque",
+    "San Vicente Pob.",
+    "Santa Misericordia",
+    "Santo Domingo Pob.",
+    "Santo Ni\u2022o",
+  ],
+  "Tabaco City": [
+    "Agnas",
+    "Bacolod",
+    "Bangkilingan",
+    "Bantayan",
+    "Baranghawon",
+    "Basagan",
+    "Basud (Pob.)",
+    "Bog\u2022abong",
+    "Bombon (Pob.)",
+    "Bonot",
+    "Buang",
+    "Buhian",
+    "Cabag\u2022an",
+    "Cobo",
+    "Comon",
+    "Cormidal",
+    "Divino Rostro (Pob.)",
+    "Fatima",
+    "Guinobat",
+    "Hacienda",
+    "Magapo",
+    "Mariroc",
+    "Matagbac",
+    "Oras",
+    "Oson",
+    "Panal",
+    "Pawa",
+    "Pinagbobong",
+    "Quinale Cabasan (Pob.)",
+    "Quinastillojan",
+    "Rawis",
+    "Sagurong",
+    "Salvacion",
+    "San Antonio",
+    "San Carlos",
+    "San Isidro",
+    "San Juan (Pob.)",
+    "San Lorenzo",
+    "San Ramon",
+    "San Roque",
+    "San Vicente",
+    "Santo Cristo (Pob.)",
+    "Sua-Igot",
+    "Tabiguian",
+    "Tagas",
+    "Tayhi (Pob.)",
+    "Visita",
+  ],
+  "Tiwi": [
+    "Bagumbayan",
+    "Bariis",
+    "Baybay",
+    "Belen",
+    "Biyong",
+    "Bolo",
+    "Cale",
+    "Cararayan",
+    "Coro-coro",
+    "Dap-dap",
+    "Gajo",
+    "Joroan",
+    "Libjo",
+    "Libtong",
+    "Matalibong",
+    "Maynonong",
+    "Mayong",
+    "Misibis",
+    "Naga",
+    "Nagas",
+    "Oyama",
+    "Putsan",
+    "San Bernardo",
+    "Sogod",
+    "Tigbi (Pob.)",
+  ],
+}
+
+const albayMunicipalities = Object.keys(albayLocations)
 
 const normalizeSkills = (skills) => {
   if (Array.isArray(skills)) return skills.filter((skill) => typeof skill === 'string' && skill.trim()).map((skill) => skill.trim())
@@ -63,6 +900,7 @@ function App() {
     typeof window !== "undefined" && Boolean(localStorage.getItem("peso-portal-remembered-email")),
   )
   const [showPassword, setShowPassword] = useState(false)
+  const [showSignupPassword, setShowSignupPassword] = useState(false)
   const [showEmployerPasswords, setShowEmployerPasswords] = useState(false)
   const [adminSelectedRole, setAdminSelectedRole] = useState("Admin")
   const [profileData, setProfileData] = useState({
@@ -76,6 +914,13 @@ function App() {
     phone: "",
     website: "",
   })
+  const [isEditingProfile, setIsEditingProfile] = useState(false)
+  const [resumeFile, setResumeFile] = useState(null)
+  const [resumeInfo, setResumeInfo] = useState(null)
+  const [nsrpVerificationInfo, setNsrpVerificationInfo] = useState(null)
+  const [nsrpVerificationFile, setNsrpVerificationFile] = useState(null)
+  const [nsrpVerificationUploading, setNsrpVerificationUploading] = useState(false)
+  const [resumeUploading, setResumeUploading] = useState(false)
 
   const normalizeProfile = (userObj = {}, role) => {
     const base = userObj.profile || {}
@@ -90,6 +935,8 @@ function App() {
         contactName: userObj.contactName || base.contactName || '',
         phone: userObj.phone || base.phone || '',
         website: userObj.website || base.website || '',
+        profileImage: base.profileImage || '',
+        bannerImage: base.bannerImage || '',
       }
     }
     // Applicant/Admin default mapping
@@ -103,6 +950,8 @@ function App() {
       contactName: base.contactName || '',
       phone: base.phone || '',
       website: base.website || '',
+      profileImage: base.profileImage || '',
+      bannerImage: base.bannerImage || '',
     }
   }
 
@@ -112,6 +961,76 @@ const toggleSkill = (selected, skill) => {
     return normalized.filter((item) => item !== skill)
   }
   return [...normalized, skill]
+}
+
+// Tag-style skill/title picker: selected items as removable chips + "Add title" search input
+function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }) {
+  const [query, setQuery] = useState('')
+  const normalized = Array.isArray(selected) ? selected : []
+  const trimmed = query.trim()
+  const suggestions = trimmed
+    ? availableSkills.filter((skill) => skill.toLowerCase().includes(trimmed.toLowerCase()) && !normalized.includes(skill)).slice(0, 8)
+    : []
+  const inputCls = theme === 'dark'
+    ? 'w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white'
+    : 'w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-black'
+  const suggestionCls = theme === 'dark'
+    ? 'cursor-pointer px-3 py-2 text-sm text-slate-200 hover:bg-slate-700'
+    : 'cursor-pointer px-3 py-2 text-sm text-black hover:bg-slate-100'
+  const chipCls = theme === 'dark'
+    ? 'inline-flex items-center gap-2 rounded-full border border-cyan-500/40 bg-cyan-500/10 px-3 py-1 text-sm font-medium text-cyan-200'
+    : 'inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1 text-sm font-medium text-black'
+  return (
+    <div className="skill-tag-picker mt-2 space-y-2">
+      {normalized.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {normalized.map((skill) => (
+            <span key={skill} className={`skill-tag-chip ${chipCls}`}>
+              {skill}
+              {!disabled && (
+                <button
+                  type="button"
+                  aria-label={`Remove ${skill}`}
+                  onClick={() => onChange(normalized.filter((item) => item !== skill))}
+                  className={`skill-tag-remove ${theme === 'dark' ? 'text-cyan-300 hover:text-white' : 'text-slate-500 hover:text-black'}`}
+                >
+                  ×
+                </button>
+              )}
+            </span>
+          ))}
+        </div>
+      )}
+      {!disabled && (
+        <div className="relative">
+          <input
+            type="text"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Add title"
+            className={`skill-tag-input ${inputCls}`}
+          />
+          {suggestions.length > 0 && (
+            <div className={`skill-tag-suggestions absolute z-20 mt-1 w-full overflow-hidden rounded-xl border ${theme === 'dark' ? 'border-slate-700 bg-slate-900' : 'border-slate-300 bg-white'} shadow-lg`}>
+              {suggestions.map((skill) => (
+                <button
+                  key={skill}
+                  type="button"
+                  onClick={() => {
+                    onChange([...normalized, skill])
+                    setQuery('')
+                  }}
+                  className={`skill-tag-suggestion block w-full text-left ${suggestionCls}`}
+                >
+                  {skill}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 const sortJobsByMatch = (jobs, userSkills) => {
@@ -143,6 +1062,13 @@ const [authView, setAuthView] = useState("login")
     phone: "",
     message: "",
   })
+  const [employerAddress, setEmployerAddress] = useState({
+    street: "",
+    subdivision: "",
+    municipality: "",
+    barangay: "",
+    landmark: "",
+  })
   const [requirementsFile, setRequirementsFile] = useState(null)
   const [employerRequests, setEmployerRequests] = useState([])
   const [adminUsers, setAdminUsers] = useState([])
@@ -153,9 +1079,12 @@ const [authView, setAuthView] = useState("login")
     description: "",
     requirements: "",
     salary: "",
+    locationType: "",
+    employmentType: "",
     skills: [],
   })
   const [showCreateJobPosting, setShowCreateJobPosting] = useState(false)
+  const [employerJobStatusFilter, setEmployerJobStatusFilter] = useState('all')
   const [editingJob, setEditingJob] = useState(null)
   const [editingJobCanSave, setEditingJobCanSave] = useState(false)
   const [editingJobForm, setEditingJobForm] = useState({
@@ -165,6 +1094,8 @@ const [authView, setAuthView] = useState("login")
     description: '',
     requirements: '',
     salary: '',
+    locationType: '',
+    employmentType: '',
     skills: [],
   })
   const [availableJobs, setAvailableJobs] = useState([])
@@ -182,6 +1113,8 @@ const [authView, setAuthView] = useState("login")
   const [adminJobStatusFilter, setAdminJobStatusFilter] = useState('all')
   const [jobSkillFilter, setJobSkillFilter] = useState('all')
   const [jobLocationFilter, setJobLocationFilter] = useState('all')
+  const [jobLocationTypeFilter, setJobLocationTypeFilter] = useState('all')
+  const [jobEmploymentTypeFilter, setJobEmploymentTypeFilter] = useState('all')
   const [jobLoading, setJobLoading] = useState(false)
   const [selectedJob, setSelectedJob] = useState(null)
   const [selectedNotification, setSelectedNotification] = useState(null)
@@ -192,7 +1125,7 @@ const [authView, setAuthView] = useState("login")
   const [declineJobTarget, setDeclineJobTarget] = useState(null)
   const [declineJobReason, setDeclineJobReason] = useState('')
   const [approveRequestTarget, setApproveRequestTarget] = useState(null)
-  const [selectedDirectoryUser, setSelectedDirectoryUser] = useState(null)
+  const [expandedDirectoryUserId, setExpandedDirectoryUserId] = useState(null)
   const [showVerificationModal, setShowVerificationModal] = useState(false)
   const [verificationEmail, setVerificationEmail] = useState('')
   const [verificationCode, setVerificationCode] = useState('')
@@ -245,6 +1178,41 @@ const [authView, setAuthView] = useState("login")
   const getToken = () =>
     currentUser?.token || (typeof window !== "undefined" ? localStorage.getItem('peso-token') : null)
 
+  const handleImageFile = (file, field) => {
+    if (!file) return
+    if (file.size > 2 * 1024 * 1024) return alert('Image must be under 2 MB')
+    const reader = new FileReader()
+    reader.onload = () => setProfileData((current) => ({ ...current, [field]: reader.result }))
+    reader.readAsDataURL(file)
+  }
+
+  const handleViewResume = async () => {
+    const token = getToken()
+    if (!token) return alert('Not authenticated')
+    const applicantId = currentUser?.id || currentUser?._id
+    if (!applicantId) return alert('Applicant record not found')
+    const preview = window.open('', '_blank')
+    try {
+      const response = await fetch(`http://localhost:4000/api/applicants/${applicantId}/resume`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!response.ok) {
+        preview?.close()
+        const data = await response.json().catch(() => null)
+        return alert(data?.error || 'Resume could not be opened')
+      }
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      if (preview) preview.location.href = url
+      else window.open(url, '_blank')
+      setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    } catch (err) {
+      preview?.close()
+      console.error(err)
+      alert('Failed to open resume')
+    }
+  }
+
   const fetchEmployerRequests = () => {
     const token = getToken()
     if (!token) return
@@ -265,7 +1233,18 @@ const [authView, setAuthView] = useState("login")
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((r) => r.json())
-      .then((data) => setNotifications(Array.isArray(data) ? data : []))
+      .then((data) => {
+        const list = Array.isArray(data) ? data : []
+        // Deduplicate by _id to guard against double-fetch (StrictMode / overlapping effects)
+        const seen = new Set()
+        const unique = list.filter((n) => {
+          const id = String(n?._id || n?.id || '')
+          if (!id || seen.has(id)) return false
+          seen.add(id)
+          return true
+        })
+        setNotifications(unique)
+      })
       .catch(() => setNotifications([]))
   }
 
@@ -362,18 +1341,19 @@ const [authView, setAuthView] = useState("login")
     const token = getToken()
     if (!token) return alert('Not authenticated')
     const { title, company, description, skills } = jobForm
-    if (!title || !company || !description) return alert('Title, company, and description are required')
+    const payload = { ...jobForm, company: company || profileData.companyName || '', location: jobForm.location || profileData.location || '' }
+    if (!title || !payload.company || !description) return alert('Title, company, and description are required')
     if (!Array.isArray(skills) || skills.length === 0) return alert('Please select at least one skill for the job')
 
     fetch('http://localhost:4000/api/jobs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify(jobForm),
+      body: JSON.stringify(payload),
     })
       .then((r) => r.json())
       .then((data) => {
         if (data.error) return alert(data.error)
-        setJobForm({ title: '', company: '', location: '', description: '', requirements: '', salary: '', skills: [] })
+        setJobForm({ title: '', company: '', location: '', description: '', requirements: '', salary: '', locationType: '', employmentType: '', skills: [] })
         setShowCreateJobPosting(false)
         fetchJobs()
         fetchNotifications()
@@ -395,6 +1375,8 @@ const [authView, setAuthView] = useState("login")
       description: job.description || '',
       requirements: job.requirements || '',
       salary: job.salary || '',
+      locationType: job.locationType || '',
+      employmentType: job.employmentType || '',
       skills: Array.isArray(job.skills) ? job.skills : [],
     })
   }
@@ -445,6 +1427,13 @@ const [authView, setAuthView] = useState("login")
       return
     }
 
+    if (status === 'approved') {
+      const allKnownJobs = [...pendingJobs, ...approvedJobs, ...declinedJobs]
+      const matchedJob = allKnownJobs.find((job) => String(job?._id) === String(jobId))
+      const jobTitle = matchedJob?.title || 'this job posting'
+      if (!window.confirm(`Approve "${jobTitle}"? It will become visible to applicants.`)) return
+    }
+
     fetch(`http://localhost:4000/api/jobs/${jobId}/status`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -468,6 +1457,35 @@ const [authView, setAuthView] = useState("login")
       })
   }
 
+  const handleBulkReviewJobs = async (jobIds, status) => {
+    const token = getToken()
+    if (!token) return alert('Not authenticated')
+    const ids = Array.isArray(jobIds) ? jobIds : []
+    if (ids.length === 0) return alert('Select at least one job posting first')
+    if (!window.confirm(`${status === 'approved' ? 'Approve' : 'Decline'} ${ids.length} selected job posting${ids.length === 1 ? '' : 's'}?`)) return
+
+    try {
+      const results = await Promise.all(ids.map((jobId) =>
+        fetch(`http://localhost:4000/api/jobs/${jobId}/status`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ status }),
+        }).then((r) => r.json()),
+      ))
+      const failed = results.filter((r) => r && r.error)
+      fetchJobs()
+      fetchNotifications()
+      if (failed.length > 0) {
+        alert(`${ids.length - failed.length} job(s) ${status}; ${failed.length} failed`)
+      } else {
+        alert(`${ids.length} job posting${ids.length === 1 ? '' : 's'} ${status}`)
+      }
+    } catch (err) {
+      console.error(err)
+      alert('Failed to update job statuses')
+    }
+  }
+
   const handleApplyJob = async (jobId, applicationFile) => {
     const token = getToken()
     if (!token) {
@@ -475,7 +1493,7 @@ const [authView, setAuthView] = useState("login")
       return false
     }
     if (!applicationFile) {
-      alert('Please upload the completed NSRP PDF')
+      alert('Please upload your completed NSRP form (PDF or DOCX)')
       return false
     }
 
@@ -509,12 +1527,23 @@ const [authView, setAuthView] = useState("login")
     if (!email || !password || !companyName || !contactName) return alert('Please fill in required fields')
     if (password !== confirmPassword) return alert('Passwords do not match')
     if (!/^\d{11}$/.test(employerRequestForm.phone)) return alert('Phone number must contain exactly 11 digits')
+    if (!employerAddress.municipality || !employerAddress.barangay) return alert('Please select your City/Municipality and Barangay')
+
+    const addressParts = [
+      employerAddress.street,
+      employerAddress.subdivision,
+      `Brgy. ${employerAddress.barangay}`,
+      employerAddress.municipality,
+      'Albay',
+      employerAddress.landmark ? `Landmark: ${employerAddress.landmark}` : '',
+    ].filter((part) => typeof part === 'string' && part.trim() !== '')
+    const payload = { ...employerRequestForm, location: addressParts.join(', ') }
 
     try {
       const response = await fetch('http://localhost:4000/api/employer-requests', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(employerRequestForm),
+        body: JSON.stringify(payload),
       })
 
       const contentType = response.headers.get('content-type') || ''
@@ -526,6 +1555,7 @@ const [authView, setAuthView] = useState("login")
       }
 
       setEmployerRequestForm({ email: '', password: '', confirmPassword: '', companyName: '', contactName: '', location: '', phone: '', message: '' })
+      setEmployerAddress({ street: '', subdivision: '', municipality: '', barangay: '', landmark: '' })
       setAuthView('login')
       alert('Employer account created. You can now sign in and submit your NSRP registration form for review.')
     } catch (err) {
@@ -560,10 +1590,30 @@ const [authView, setAuthView] = useState("login")
     }
   }
 
+  const handleReviewApplicantVerification = (applicantId, status) => {
+    const token = getToken()
+    if (!token) return alert('Not authenticated')
+    const reason = status === 'declined' ? (window.prompt('Reason for declining (optional)') || '') : ''
+    fetch(`http://localhost:4000/api/applicants/${applicantId}/verification`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ status, reason }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.error) return setAppMessage({ type: 'error', text: data.error })
+        fetchAdminUsers()
+        setAppMessage({ type: 'success', text: `Applicant ${status}.` })
+      })
+      .catch((err) => {
+        console.error(err)
+        setAppMessage({ type: 'error', text: err?.message || 'Failed to update applicant' })
+      })
+  }
+
   const handleReviewEmployerRequest = (requestId, status) => {
     const token = getToken()
     if (!token) return alert('Not authenticated')
-
     fetch(`http://localhost:4000/api/employer-requests/${requestId}/status`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -615,6 +1665,29 @@ const [authView, setAuthView] = useState("login")
     if (preview) preview.location.href = url
     else window.open(url, '_blank')
     setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  }
+
+  const handleViewApplicantResumeAdmin = async (applicantId) => {
+    const token = getToken()
+    if (!token) return alert('Not authenticated')
+    const preview = window.open('', '_blank')
+    try {
+      const response = await fetch(`http://localhost:4000/api/applicants/${applicantId}/resume`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!response.ok) {
+        preview?.close()
+        return alert('Resume could not be opened')
+      }
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      if (preview) preview.location.href = url
+      else window.open(url, '_blank')
+      setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    } catch (err) {
+      preview?.close()
+      alert('Resume could not be opened')
+    }
   }
 
   const handleViewOwnRequirements = async () => {
@@ -682,6 +1755,29 @@ const [authView, setAuthView] = useState("login")
     }
   }
 
+  const handleBulkReferApplicants = async (jobId, applicantIdsArray) => {
+    const token = getToken()
+    if (!token) return alert('Not authenticated')
+    if (!Array.isArray(applicantIdsArray) || applicantIdsArray.length === 0) return alert('Select at least one applicant to refer.')
+    if (!window.confirm(`Refer ${applicantIdsArray.length} selected applicant${applicantIdsArray.length === 1 ? '' : 's'} to this job?`)) return
+
+    try {
+      const response = await fetch('http://localhost:4000/api/referrals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ jobId, applicantIds: applicantIdsArray }),
+      })
+      const data = await response.json().catch(() => null)
+      if (!response.ok || data?.error) throw new Error(data?.error || `Request failed: ${response.status}`)
+      fetchJobs()
+      fetchNotifications()
+      alert(data?.createdCount === 0 ? 'Selected applicants were already referred' : `Referred ${data?.createdCount} applicant${data?.createdCount === 1 ? '' : 's'} successfully`)
+    } catch (err) {
+      console.error(err)
+      alert(err?.message || 'Failed to refer selected applicants')
+    }
+  }
+
   const isNewApplicationNotification = (notification) =>
     notification?.type === 'new_application' || notification?.kind === 'new_application'
 
@@ -733,8 +1829,11 @@ const [authView, setAuthView] = useState("login")
       fetchJobs()
       fetchNotifications()
     }
-    if (isLoggedIn && activeRole === 'Employer' && currentUser?.verificationStatus && currentUser.verificationStatus !== 'approved' && !['dashboard', 'profile'].includes(activeView)) {
-      setActiveView('dashboard')
+    if (isLoggedIn && activeRole === 'Employer' && currentUser?.verificationStatus && currentUser.verificationStatus !== 'approved' && !['home', 'dashboard', 'profile'].includes(activeView)) {
+      setActiveView('home')
+    }
+    if (isLoggedIn && activeRole === 'Applicant' && currentUser?.verificationStatus && currentUser.verificationStatus !== 'approved' && !['home', 'profile'].includes(activeView)) {
+      setActiveView('home')
     }
     if (isLoggedIn && activeRole === 'Admin' && ['records', 'employers', 'applicants', 'requests', 'jobs', 'peso-referrals'].includes(activeView)) fetchAdminUsers()
   }, [isLoggedIn, activeRole, activeView, currentUser?.verificationStatus, profileData.skills])
@@ -758,11 +1857,13 @@ const [authView, setAuthView] = useState("login")
           localStorage.removeItem('peso-token')
           return
         }
-        const norm = normalizeProfile({ profile: data.profile }, data.role)
-        setCurrentUser({ id: data.id, email: data.email, role: data.role, profile: data.profile, verificationStatus: data.verificationStatus, verificationReason: data.verificationReason, token })
+        const norm = normalizeProfile({ profile: data.profile, companyName: data.companyName, contactName: data.contactName, phone: data.phone }, data.role)
+        setCurrentUser({ id: data.id, email: data.email, role: data.role, companyName: data.companyName, contactName: data.contactName, phone: data.phone, profile: data.profile, verificationStatus: data.verificationStatus, verificationReason: data.verificationReason, token })
         setActiveRole(data.role)
         setIsLoggedIn(true)
         setProfileData(norm)
+        setResumeInfo(data.resumeFile || null)
+        setNsrpVerificationInfo(data.nsrpVerificationFile || null)
       })
       .catch(() => {
         localStorage.removeItem('peso-token')
@@ -818,9 +1919,12 @@ const [authView, setAuthView] = useState("login")
 
         setCurrentUser({ ...data.user, token: data.token })
         setActiveRole(data.user.role)
-        setActiveView(data.user.role === 'Employer' && data.user.verificationStatus !== 'approved' ? 'dashboard' : navigationByRole[data.user.role]?.[0]?.id || "dashboard")
+        const needsVerification = ['Employer', 'Applicant'].includes(data.user.role) && data.user.verificationStatus && data.user.verificationStatus !== 'approved'
+        setActiveView(needsVerification ? 'home' : navigationByRole[data.user.role]?.[0]?.id || "dashboard")
         setIsLoggedIn(true)
         setProfileData(normalizeProfile(data.user, data.user.role))
+        setResumeInfo(data.user.resumeFile || null)
+        setNsrpVerificationInfo(data.user.nsrpVerificationFile || null)
       })
       .catch((err) => {
         console.error(err)
@@ -851,7 +1955,7 @@ const [authView, setAuthView] = useState("login")
         const applicantProfile = normalizeProfile(data.user, data.user.role || 'Applicant')
         setCurrentUser({ ...data.user, token: data.token, role: 'Applicant' })
         setActiveRole('Applicant')
-        setActiveView('profile')
+        setActiveView('home')
         setIsLoggedIn(true)
         setProfileData(applicantProfile)
         setShowSkillPrompt(true)
@@ -872,7 +1976,7 @@ const [authView, setAuthView] = useState("login")
     setRememberMe(false)
     setShowPassword(false)
     setActiveRole("Applicant")
-    setActiveView("dashboard")
+    setActiveView("home")
   }
 
   const normalizedSearchTerm = jobSearchTerm.trim().toLowerCase()
@@ -884,7 +1988,10 @@ const [authView, setAuthView] = useState("login")
     ),
   ).sort((a, b) => a.localeCompare(b))
 
+  const appliedJobIds = new Set(appliedJobs.map((job) => String(job._id)))
+
   const filteredApplicantJobs = availableJobs.filter((job) => {
+    if (appliedJobIds.has(String(job._id))) return false
     const normalizedSkills = normalizeSkills(job.skills)
     const locationValue = (job.location || '').trim()
     const matchesSearch =
@@ -894,7 +2001,9 @@ const [authView, setAuthView] = useState("login")
         .some((value) => value.toLowerCase().includes(normalizedSearchTerm))
     const matchesSkill = jobSkillFilter === 'all' || normalizedSkills.includes(jobSkillFilter)
     const matchesLocation = jobLocationFilter === 'all' || locationValue === jobLocationFilter
-    return matchesSearch && matchesSkill && matchesLocation
+    const matchesLocationType = jobLocationTypeFilter === 'all' || (job.locationType || '') === jobLocationTypeFilter
+    const matchesEmploymentType = jobEmploymentTypeFilter === 'all' || (job.employmentType || '') === jobEmploymentTypeFilter
+    return matchesSearch && matchesSkill && matchesLocation && matchesLocationType && matchesEmploymentType
   })
 
   const normalizedAdminJobSearchTerm = adminJobSearchTerm.trim().toLowerCase()
@@ -910,21 +2019,17 @@ const [authView, setAuthView] = useState("login")
   const employerPendingJobs = myJobs.filter((job) => job.status === 'pending')
   const employerDeclinedJobs = myJobs.filter((job) => job.status === 'declined')
   const employerApprovedJobs = myJobs.filter((job) => job.status === 'approved')
+  const filteredMyJobs = employerJobStatusFilter === 'all' ? myJobs : myJobs.filter((job) => (job.status || 'pending') === employerJobStatusFilter)
   const showPendingAdminSection = activeRole === 'Admin' && (adminJobStatusFilter === 'all' || adminJobStatusFilter === 'pending')
   const showApprovedAdminSection = activeRole === 'Admin' && (adminJobStatusFilter === 'all' || adminJobStatusFilter === 'approved')
   const showDeclinedAdminSection = activeRole === 'Admin' && (adminJobStatusFilter === 'all' || adminJobStatusFilter === 'declined')
 
-  const appliedJobIds = new Set(appliedJobs.map((job) => String(job._id)))
   const selectedJobIsApplied = Boolean(selectedJob && (appliedJobIds.has(String(selectedJob._id)) || (selectedJob.applicants || []).some((applicant) => applicant.email === currentUser?.email)))
   const selectedNotificationId = selectedNotification?._id ? String(selectedNotification._id) : ''
   const selectedNotificationJobId = selectedNotification?.jobId || (selectedNotificationId.startsWith('job-pending-') ? selectedNotificationId.replace('job-pending-', '') : null)
   const selectedNotificationIsPending = selectedNotification?.status === 'pending' || (selectedNotification?.title || '').toLowerCase().includes('pending')
   const accountNeedsVerification = Boolean(
     currentUser?.verificationStatus && currentUser.verificationStatus !== 'approved',
-  ) || (
-    currentUser?.role === 'Applicant' &&
-    currentUser?.email?.toLowerCase() === 'third@gmail.com' &&
-    currentUser?.verificationStatus !== 'approved'
   )
 
   if (!isLoggedIn) {
@@ -1042,7 +2147,7 @@ const [authView, setAuthView] = useState("login")
                   onClick={() => setShowEmployerPasswords((value) => !value)}
                   className="auth-password-toggle"
                 >
-                  {showEmployerPasswords ? "◉" : "◌"}
+                  {showEmployerPasswords ? "?" : "?"}
                 </button>
               </div>
               <div>
@@ -1063,7 +2168,7 @@ const [authView, setAuthView] = useState("login")
                   onClick={() => setShowEmployerPasswords((value) => !value)}
                   className="auth-password-toggle"
                 >
-                  {showEmployerPasswords ? "◉" : "◌"}
+                  {showEmployerPasswords ? "?" : "?"}
                 </button>
               </div>
               <div>
@@ -1093,14 +2198,76 @@ const [authView, setAuthView] = useState("login")
                 />
               </div>
               <div>
-                <label htmlFor="employer-location" className="block text-sm font-medium text-slate-200">
-                  Location
+                <label htmlFor="employer-street" className="block text-sm font-medium text-slate-200">
+                  House/Unit No. &amp; Street
                 </label>
                 <input
-                  id="employer-location"
+                  id="employer-street"
                   type="text"
-                  value={employerRequestForm.location}
-                  onChange={(e) => setEmployerRequestForm({ ...employerRequestForm, location: e.target.value })}
+                  value={employerAddress.street}
+                  onChange={(e) => setEmployerAddress({ ...employerAddress, street: e.target.value })}
+                  placeholder="e.g. Blk 2 Lot 5, Rizal St."
+                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                />
+              </div>
+              <div>
+                <label htmlFor="employer-subdivision" className="block text-sm font-medium text-slate-200">
+                  Subdivision/Village/Building <span className="font-normal text-slate-400">(if applicable)</span>
+                </label>
+                <input
+                  id="employer-subdivision"
+                  type="text"
+                  value={employerAddress.subdivision}
+                  onChange={(e) => setEmployerAddress({ ...employerAddress, subdivision: e.target.value })}
+                  placeholder="e.g. Greenview Subdivision"
+                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                />
+              </div>
+              <div>
+                <label htmlFor="employer-municipality" className="block text-sm font-medium text-slate-200">
+                  City/Municipality
+                </label>
+                <select
+                  id="employer-municipality"
+                  value={employerAddress.municipality}
+                  onChange={(e) => setEmployerAddress({ ...employerAddress, municipality: e.target.value, barangay: '' })}
+                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                  required
+                >
+                  <option value="">Select city/municipality</option>
+                  {albayMunicipalities.map((municipality) => (
+                    <option key={municipality} value={municipality}>{municipality}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="employer-barangay" className="block text-sm font-medium text-slate-200">
+                  Barangay
+                </label>
+                <select
+                  id="employer-barangay"
+                  value={employerAddress.barangay}
+                  onChange={(e) => setEmployerAddress({ ...employerAddress, barangay: e.target.value })}
+                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                  disabled={!employerAddress.municipality}
+                  required
+                >
+                  <option value="">{employerAddress.municipality ? 'Select barangay' : 'Select city/municipality first'}</option>
+                  {(albayLocations[employerAddress.municipality] || []).map((barangay) => (
+                    <option key={barangay} value={barangay}>{barangay}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="employer-landmark" className="block text-sm font-medium text-slate-200">
+                  Landmark
+                </label>
+                <input
+                  id="employer-landmark"
+                  type="text"
+                  value={employerAddress.landmark}
+                  onChange={(e) => setEmployerAddress({ ...employerAddress, landmark: e.target.value })}
+                  placeholder="e.g. Near Brgy. Hall"
                   className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
                 />
               </div>
@@ -1178,7 +2345,7 @@ const [authView, setAuthView] = useState("login")
                 </label>
                 <input
                   id="signup-password"
-                  type="password"
+                  type={showSignupPassword ? "text" : "password"}
                   value={signupForm.password}
                   onChange={(e) => setSignupForm({ ...signupForm, password: e.target.value })}
                   className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
@@ -1191,13 +2358,20 @@ const [authView, setAuthView] = useState("login")
                 </label>
                 <input
                   id="signup-confirm-password"
-                  type="password"
+                  type={showSignupPassword ? "text" : "password"}
                   value={signupForm.confirmPassword}
                   onChange={(e) => setSignupForm({ ...signupForm, confirmPassword: e.target.value })}
                   className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
                   required
                 />
               </div>
+              <button
+                type="button"
+                onClick={() => setShowSignupPassword((current) => !current)}
+                className="text-sm font-medium text-slate-600 hover:text-black"
+              >
+                {showSignupPassword ? 'Hide password' : 'Show password'}
+              </button>
               <div className="flex gap-2">
                 <button type="submit" className="auth-primary-button auth-account-submit">
                   Create account
@@ -1215,7 +2389,13 @@ const [authView, setAuthView] = useState("login")
 
   const navItems = navigationByRole[activeRole] || []
   const employerApproved = activeRole !== 'Employer' || !currentUser?.verificationStatus || currentUser.verificationStatus === 'approved'
-  const portalNavItems = navItems.filter((item) => item.id !== "profile" && (activeRole !== 'Employer' || employerApproved || ['dashboard', 'profile'].includes(item.id)))
+  const applicantApproved = activeRole !== 'Applicant' || !currentUser?.verificationStatus || currentUser.verificationStatus === 'approved'
+  const portalNavItems = navItems.filter((item) => {
+    if (item.id === "profile") return false
+    if (activeRole === 'Employer') return employerApproved || ['home', 'dashboard', 'profile'].includes(item.id)
+    if (activeRole === 'Applicant') return applicantApproved || ['home', 'profile'].includes(item.id)
+    return true
+  })
   const showProfileTab = ["Applicant", "Employer"].includes(activeRole)
 
   return (
@@ -1244,8 +2424,12 @@ const [authView, setAuthView] = useState("login")
                   activeView === "profile" ? "bg-cyan-500 text-slate-950" : "text-slate-200"
                 }`}
               >
-                <span className="portal-profile-icon inline-flex h-9 w-9 items-center justify-center rounded-full bg-cyan-500 text-lg text-slate-950">
-                  👤
+                <span className="portal-profile-icon inline-flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-cyan-500 text-lg font-bold text-slate-950">
+                  {profileData.profileImage ? (
+                    <img src={profileData.profileImage} alt="Profile" className="h-full w-full object-cover" />
+                  ) : (
+                    (profileData.companyName || profileData.name || currentUser?.email || '?').trim().charAt(0).toUpperCase()
+                  )}
                 </span>
                 <span>Profile</span>
               </button>
@@ -1407,6 +2591,147 @@ const [authView, setAuthView] = useState("login")
               </button>
             </div>
           )}
+          {activeView === "home" && (
+            <section className="portal-card rounded-2xl border border-slate-300 bg-white p-8 text-black">
+              <p className="text-sm font-semibold uppercase tracking-wide text-cyan-600">
+                PESO Job Portal
+              </p>
+              <h2 className="mt-2 text-3xl font-bold text-black">
+                {activeRole === 'Employer'
+                  ? `Welcome back, ${profileData.companyName || currentUser?.companyName || 'Employer'}`
+                  : `Welcome back, ${profileData.name || currentUser?.email || 'Applicant'}`}
+              </h2>
+              <p className="mt-3 max-w-2xl text-slate-600">
+                {activeRole === 'Employer'
+                  ? 'Post job openings, track admin approvals, and connect with qualified applicants in Albay.'
+                  : 'Browse approved job openings from verified employers and track your applications in one place.'}
+              </p>
+
+              <div className="mt-6 flex flex-wrap gap-3">
+                {activeRole === 'Employer' ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setActiveView('employer')}
+                      className="rounded-2xl bg-cyan-500 px-5 py-2.5 text-sm font-semibold text-slate-950"
+                    >
+                      Manage Job Postings
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveView('notify')}
+                      className="rounded-2xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-black"
+                    >
+                      View Notifications
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    {applicantApproved ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setActiveView('jobs')}
+                          className="rounded-2xl bg-cyan-500 px-5 py-2.5 text-sm font-semibold text-slate-950"
+                        >
+                          Browse Jobs
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setActiveView('profile')}
+                          className="rounded-2xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-black"
+                        >
+                          Update My Profile
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsEditingProfile(true)
+                          setActiveView('profile')
+                        }}
+                        className="rounded-2xl bg-cyan-500 px-5 py-2.5 text-sm font-semibold text-slate-950"
+                      >
+                        Complete NSRP Verification
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {activeRole === 'Applicant' && !applicantApproved && (
+                <div className="mt-6 rounded-2xl border border-amber-300 bg-amber-50 p-5">
+                  <h3 className="text-lg font-semibold text-black">NSRP verification required</h3>
+                  <p className="mt-2 text-sm text-slate-700">
+                    Your account is pending verification. Submit your NSRP registration form from your Profile page.
+                    Once an admin approves it, you'll be able to browse jobs and apply.
+                  </p>
+                  <p className="mt-2 text-sm font-medium text-amber-700">
+                    Status: {(currentUser?.verificationStatus || 'under_review').replace('_', ' ')}
+                  </p>
+                  {currentUser?.verificationStatus === 'declined' && currentUser?.verificationReason && (
+                    <p className="mt-2 rounded-lg border border-rose-300 bg-rose-50 p-2 text-sm text-rose-700">
+                      {currentUser.verificationReason}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
+                {activeRole === 'Employer' ? (
+                  <>
+                    <div className="rounded-2xl border border-slate-300 bg-slate-50 p-5">
+                      <p className="text-sm text-slate-600">My job requests</p>
+                      <p className="mt-2 text-3xl font-bold text-black">{myJobs.length}</p>
+                    </div>
+                    <div className="rounded-2xl border border-slate-300 bg-slate-50 p-5">
+                      <p className="text-sm text-slate-600">Approved postings</p>
+                      <p className="mt-2 text-3xl font-bold text-black">{myJobs.filter((job) => job.status === 'approved').length}</p>
+                    </div>
+                    <div className="rounded-2xl border border-slate-300 bg-slate-50 p-5">
+                      <p className="text-sm text-slate-600">Total applicants</p>
+                      <p className="mt-2 text-3xl font-bold text-black">{myJobs.reduce((acc, j) => acc + (j.applicants ? j.applicants.length : 0), 0)}</p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="rounded-2xl border border-slate-300 bg-slate-50 p-5">
+                      <p className="text-sm text-slate-600">Open jobs</p>
+                      <p className="mt-2 text-3xl font-bold text-black">{availableJobs.length}</p>
+                    </div>
+                    <div className="rounded-2xl border border-slate-300 bg-slate-50 p-5">
+                      <p className="text-sm text-slate-600">My applications</p>
+                      <p className="mt-2 text-3xl font-bold text-black">{appliedJobs.length}</p>
+                    </div>
+                    <div className="rounded-2xl border border-slate-300 bg-slate-50 p-5">
+                      <p className="text-sm text-slate-600">Notifications</p>
+                      <p className="mt-2 text-3xl font-bold text-black">{notifications.length}</p>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="mt-8 rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                <h3 className="text-lg font-semibold text-black">Getting started</h3>
+                <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-600">
+                  {activeRole === 'Employer' ? (
+                    <>
+                      <li>Complete your employer profile and submit your NSRP form for verification.</li>
+                      <li>Create a job posting request and wait for admin approval.</li>
+                      <li>Review applicants and send referrals from the Job Postings tab.</li>
+                    </>
+                  ) : (
+                    <>
+                      <li>Fill out your profile and upload your resume so employers can find you.</li>
+                      <li>Browse open jobs and apply with your NSRP registration.</li>
+                      <li>Watch your notifications for application updates and referrals.</li>
+                    </>
+                  )}
+                </ul>
+              </div>
+            </section>
+          )}
           {activeView === "dashboard" && (
             <section className="admin-requests-card portal-card rounded-2xl border border-slate-300 bg-white p-6 text-black">
               <h2 className="text-xl font-semibold text-black">Dashboard</h2>
@@ -1475,7 +2800,7 @@ const [authView, setAuthView] = useState("login")
                 </div>
               ) : activeRole === 'Employer' ? (
                 <>
-                  <p className="mt-3 text-black">Employer dashboard — quick overview of your postings.</p>
+                  <p className="mt-3 text-black">Employer dashboard \u2022 quick overview of your postings.</p>
                   <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
                     <div className="rounded-2xl border border-slate-300 bg-white p-4">
                       <p className="text-sm text-black">My job requests</p>
@@ -1519,7 +2844,7 @@ const [authView, setAuthView] = useState("login")
                           >
                             <div>
                               <h4>{job.title}</h4>
-                              <p>{job.company} · {job.location || 'Remote'}</p>
+                              <p>{job.company} \u2022 {job.location || 'Remote'}</p>
                               <p>Salary: {job.salary || 'Not specified'}</p>
                               <p>Skills: {Array.isArray(job.skills) ? job.skills.join(', ') : job.skills || 'None specified'}</p>
                             </div>
@@ -1620,23 +2945,167 @@ const [authView, setAuthView] = useState("login")
                                       <th>Email</th>
                                       <th>{directory.role === 'Employer' ? 'Contact' : 'Location'}</th>
                                       <th>{directory.role === 'Employer' ? 'Phone' : 'Skills'}</th>
-                                      {directory.role === 'Employer' && <th>Status</th>}
+                                      <th>Status</th>
                                       <th>Actions</th>
                                     </tr>
                                   </thead>
                                   <tbody>
-                                    {users.map((user) => (
-                                      <tr key={user.id}>
-                                        <td><strong>{directory.role === 'Employer' ? user.companyName || 'Unnamed employer' : user.profile?.name || 'Unnamed applicant'}</strong></td>
-                                        <td>{user.email}</td>
-                                        <td>{directory.role === 'Employer' ? user.contactName || 'N/A' : user.profile?.location || 'N/A'}</td>
-                                        <td>{directory.role === 'Employer' ? user.phone || 'N/A' : Array.isArray(user.profile?.skills) ? user.profile.skills.join(', ') : user.profile?.skills || 'N/A'}</td>
-                                        {directory.role === 'Employer' && <td><span className={`portal-status status-${user.approvalStatus || 'pending'}`}>{user.approvalStatus || 'pending'}</span></td>}
-                                        <td>
-                                          <button type="button" className="portal-table-action" onClick={() => setSelectedDirectoryUser({ ...user, directoryRole: directory.role })}>View</button>
-                                        </td>
-                                      </tr>
-                                    ))}
+                                    {users.map((user) => {
+                                      const isExpanded = expandedDirectoryUserId === user.id
+                                      const detailColSpan = 6
+                                      return (
+                                        <Fragment key={user.id}>
+                                          <tr>
+                                            <td><strong>{directory.role === 'Employer' ? user.companyName || 'Unnamed employer' : user.profile?.name || 'Unnamed applicant'}</strong></td>
+                                            <td>{user.email}</td>
+                                            <td>{directory.role === 'Employer' ? user.contactName || 'N/A' : user.profile?.location || 'N/A'}</td>
+                                            <td>{directory.role === 'Employer' ? user.phone || 'N/A' : Array.isArray(user.profile?.skills) ? user.profile.skills.join(', ') : user.profile?.skills || 'N/A'}</td>
+                                            <td><span className={`portal-status status-${(directory.role === 'Employer' ? user.approvalStatus : user.verificationStatus) || 'approved'}`}>{(directory.role === 'Employer' ? user.approvalStatus : user.verificationStatus) || 'approved'}</span></td>
+                                            <td>
+                                              <button
+                                                type="button"
+                                                className="portal-table-action"
+                                                aria-expanded={isExpanded}
+                                                onClick={() => setExpandedDirectoryUserId(isExpanded ? null : user.id)}
+                                              >
+                                                {isExpanded ? 'Hide' : 'View'}
+                                              </button>
+                                            </td>
+                                          </tr>
+                                          {isExpanded && (
+                                            <tr className="portal-details-row">
+                                              <td colSpan={detailColSpan}>
+                                                <div className="admin-modal-details space-y-2 rounded-2xl border border-slate-800 bg-slate-950/80 p-4 text-sm text-slate-300">
+                                                  {directory.role === 'Employer' ? (
+                                                    <>
+                                                      <p><span className="font-semibold text-white">Company:</span> {user.companyName || 'N/A'}</p>
+                                                      <p><span className="font-semibold text-white">Contact:</span> {user.contactName || 'N/A'}</p>
+                                                      <p><span className="font-semibold text-white">Phone:</span> {user.phone || 'N/A'}</p>
+                                                      <p><span className="font-semibold text-white">Location:</span> {user.profile?.location || 'N/A'}</p>
+                                                      <p><span className="font-semibold text-white">About me:</span> {user.profile?.summary || 'N/A'}</p>
+                                                      <p><span className="font-semibold text-white">Status:</span> {user.approvalStatus || 'approved'}</p>
+                                                      {user.requestId && ['pending', 'under_review'].includes(user.approvalStatus) && (
+                                                        <div className="mt-3 flex flex-wrap gap-2">
+                                                          <button
+                                                            type="button"
+                                                            onClick={() => handleReviewEmployerRequest(user.requestId, 'approved')}
+                                                            className="rounded-2xl bg-green-500 px-3 py-2 text-sm font-semibold text-white"
+                                                          >
+                                                            Approve
+                                                          </button>
+                                                          <button
+                                                            type="button"
+                                                            onClick={() => setDeclineRequestTarget({ id: user.requestId, companyName: user.companyName })}
+                                                            className="rounded-2xl bg-red-500 px-3 py-2 text-sm font-semibold text-white"
+                                                          >
+                                                            Decline
+                                                          </button>
+                                                        </div>
+                                                      )}
+                                                    </>
+                                                  ) : (
+                                                    <>
+                                                      <p><span className="font-semibold text-white">Name:</span> {user.profile?.name || 'N/A'}</p>
+                                                      <p><span className="font-semibold text-white">Location:</span> {user.profile?.location || 'N/A'}</p>
+                                                      <p><span className="font-semibold text-white">Phone:</span> {user.phone || user.profile?.phone || 'N/A'}</p>
+                                                      <p><span className="font-semibold text-white">Skills:</span> {Array.isArray(user.profile?.skills) ? user.profile.skills.join(', ') : user.profile?.skills || 'N/A'}</p>
+                                                      <p><span className="font-semibold text-white">Traits:</span> {user.profile?.traits || 'N/A'}</p>
+                                                      <p><span className="font-semibold text-white">About me:</span> {user.profile?.summary || 'N/A'}</p>
+                                                      <p><span className="font-semibold text-white">NSRP / Resume:</span> {user.hasResume ? 'Submitted' : 'Not submitted'}</p>
+                                                      <p><span className="font-semibold text-white">NSRP Verification Doc:</span> {user.hasNsrpVerification ? 'Submitted' : 'Not submitted'}</p>
+                                                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                                                        {user.hasNsrpVerification && (
+                                                          <button
+                                                            type="button"
+                                                            onClick={async () => {
+                                                              const token = getToken()
+                                                              if (!token) return alert('Not authenticated')
+                                                              const preview = window.open('', '_blank')
+                                                              try {
+                                                                const response = await fetch(`http://localhost:4000/api/applicants/${user.id}/nsrp-verification`, { headers: { Authorization: `Bearer ${token}` } })
+                                                                if (!response.ok) { preview?.close(); return alert('NSRP document could not be opened') }
+                                                                const blob = await response.blob()
+                                                                const url = URL.createObjectURL(blob)
+                                                                if (preview) preview.location.href = url
+                                                                else window.open(url, '_blank')
+                                                                setTimeout(() => URL.revokeObjectURL(url), 60_000)
+                                                              } catch (err) { preview?.close(); alert('NSRP document could not be opened') }
+                                                            }}
+                                                            className="rounded-2xl bg-cyan-500 px-3 py-2 text-sm font-semibold text-slate-950"
+                                                          >
+                                                            View NSRP Verification
+                                                          </button>
+                                                        )}
+                                                        {user.hasResume && (
+                                                          <button
+                                                            type="button"
+                                                            onClick={() => handleViewApplicantResumeAdmin(user.id)}
+                                                            className="rounded-2xl bg-cyan-500 px-3 py-2 text-sm font-semibold text-slate-950"
+                                                          >
+                                                            View NSRP PDF
+                                                          </button>
+                                                        )}
+                                                        {user.verificationStatus === 'approved' ? (
+                                                          <button
+                                                            type="button"
+                                                            onClick={() => handleReviewApplicantVerification(user.id, 'restricted')}
+                                                            className="rounded-2xl bg-slate-700 px-3 py-2 text-sm font-semibold text-white"
+                                                          >
+                                                            Restrict
+                                                          </button>
+                                                        ) : (
+                                                          <>
+                                                            <button
+                                                              type="button"
+                                                              onClick={() => handleReviewApplicantVerification(user.id, 'approved')}
+                                                              className="rounded-2xl bg-green-500 px-3 py-2 text-sm font-semibold text-white"
+                                                            >
+                                                              Approve
+                                                            </button>
+                                                            <button
+                                                              type="button"
+                                                              onClick={() => handleReviewApplicantVerification(user.id, 'declined')}
+                                                              className="rounded-2xl bg-red-500 px-3 py-2 text-sm font-semibold text-white"
+                                                            >
+                                                              Decline
+                                                            </button>
+                                                          </>
+                                                        )}
+                                                      </div>
+                                                    </>
+                                                  )}
+                                                </div>
+
+                                                {directory.role === 'Employer' && user.requirementsFile && (
+                                                  <div className="mt-4 rounded-2xl border border-slate-300 bg-slate-50 p-4 text-sm text-black">
+                                                    <p className="font-semibold">Submitted MSRP file</p>
+                                                    <p className="mt-1">File: {user.requirementsFile.originalName || 'MSRP form.pdf'}</p>
+                                                    <p className="mt-1">Size: {user.requirementsFile.size ? `${Math.ceil(user.requirementsFile.size / 1024)} KB` : 'N/A'}</p>
+                                                    <p className="mt-1">Submitted: {user.requirementsFile.submittedAt ? new Date(user.requirementsFile.submittedAt).toLocaleString() : 'N/A'}</p>
+                                                    <div className="mt-3 flex flex-wrap gap-2">
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => handleViewRequirements(user.requirementsFile.requestId)}
+                                                        className="rounded-2xl bg-cyan-500 px-3 py-2 text-sm font-semibold text-slate-950"
+                                                      >
+                                                        View MSRP PDF
+                                                      </button>
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => handleDownloadRequirements(user.requirementsFile.requestId, user.requirementsFile.originalName)}
+                                                        className="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-black"
+                                                      >
+                                                        Download MSRP PDF
+                                                      </button>
+                                                    </div>
+                                                  </div>
+                                                )}
+                                              </td>
+                                            </tr>
+                                          )}
+                                        </Fragment>
+                                      )
+                                    })}
                                   </tbody>
                                 </table>
                               </div>
@@ -1654,6 +3123,49 @@ const [authView, setAuthView] = useState("login")
                 <>
                   <h2 className="text-xl font-semibold text-white">Applicant Profile</h2>
                   <p className="mt-3 text-slate-400">Update your traits and personal information.</p>
+
+                  {/* Banner and profile image preview */}
+                  <div className="mt-6 overflow-hidden rounded-2xl border border-slate-700">
+                    <div
+                      className="employer-banner h-36 w-full bg-slate-800 bg-cover bg-center"
+                      style={profileData.bannerImage ? { backgroundImage: `url(${profileData.bannerImage})` } : undefined}
+                    />
+                    <div className="flex items-end gap-4 bg-slate-900/60 px-5 pb-4">
+                      <div className="applicant-profile-avatar -mt-10 flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl border-4 border-slate-900 bg-cyan-500 text-2xl font-bold text-slate-950">
+                        {profileData.profileImage ? (
+                          <img src={profileData.profileImage} alt="Profile" className="h-full w-full object-cover" />
+                        ) : (
+                          applicantProfileInitials
+                        )}
+                      </div>
+                      <p className="pb-1 text-lg font-semibold text-white">{profileData.name || 'Your name'}</p>
+                    </div>
+                  </div>
+
+                  {isEditingProfile && (
+                    <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                      <div>
+                        <label htmlFor="applicantProfileImageUpload" className="block text-sm font-medium text-slate-300">Profile Image</label>
+                        <input
+                          id="applicantProfileImageUpload"
+                          type="file"
+                          accept="image/*"
+                          onChange={(event) => handleImageFile(event.target.files?.[0], 'profileImage')}
+                          className="mt-2 block w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white file:mr-3 file:rounded-xl file:border-0 file:bg-cyan-500 file:px-3 file:py-2 file:font-semibold file:text-slate-950"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="applicantBannerImageUpload" className="block text-sm font-medium text-slate-300">Banner Image</label>
+                        <input
+                          id="applicantBannerImageUpload"
+                          type="file"
+                          accept="image/*"
+                          onChange={(event) => handleImageFile(event.target.files?.[0], 'bannerImage')}
+                          className="mt-2 block w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white file:mr-3 file:rounded-xl file:border-0 file:bg-cyan-500 file:px-3 file:py-2 file:font-semibold file:text-slate-950"
+                        />
+                      </div>
+                    </div>
+                  )}
 
                   <div className="applicant-profile-summary mt-6 rounded-2xl border border-slate-700 bg-slate-950/80 p-4">
                     <div className="flex items-center gap-4">
@@ -1688,8 +3200,9 @@ const [authView, setAuthView] = useState("login")
                         id="name"
                         type="text"
                         value={profileData.name}
+                        disabled={!isEditingProfile}
                         onChange={(event) => setProfileData({ ...profileData, name: event.target.value })}
-                        className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                        className={`mt-2 w-full rounded-2xl border px-3 py-2 text-sm ${isEditingProfile ? 'border-slate-700 bg-slate-800 text-white' : 'cursor-not-allowed border-slate-700 bg-slate-900 text-slate-400'}`}
                       />
                     </div>
                     <div>
@@ -1700,8 +3213,9 @@ const [authView, setAuthView] = useState("login")
                         id="summary"
                         rows="4"
                         value={profileData.summary}
+                        disabled={!isEditingProfile}
                         onChange={(event) => setProfileData({ ...profileData, summary: event.target.value })}
-                        className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                        className={`mt-2 w-full rounded-2xl border px-3 py-2 text-sm ${isEditingProfile ? 'border-slate-700 bg-slate-800 text-white' : 'cursor-not-allowed border-slate-700 bg-slate-900 text-slate-400'}`}
                         placeholder="Write a brief profile summary."
                       />
                     </div>
@@ -1713,8 +3227,9 @@ const [authView, setAuthView] = useState("login")
                         id="location"
                         type="text"
                         value={profileData.location}
+                        disabled={!isEditingProfile}
                         onChange={(event) => setProfileData({ ...profileData, location: event.target.value })}
-                        className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                        className={`mt-2 w-full rounded-2xl border px-3 py-2 text-sm ${isEditingProfile ? 'border-slate-700 bg-slate-800 text-white' : 'cursor-not-allowed border-slate-700 bg-slate-900 text-slate-400'}`}
                       />
                     </div>
                     <div>
@@ -1725,47 +3240,256 @@ const [authView, setAuthView] = useState("login")
                         id="traits"
                         type="text"
                         value={profileData.traits}
+                        disabled={!isEditingProfile}
                         onChange={(event) => setProfileData({ ...profileData, traits: event.target.value })}
-                        className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                        className={`mt-2 w-full rounded-2xl border px-3 py-2 text-sm ${isEditingProfile ? 'border-slate-700 bg-slate-800 text-white' : 'cursor-not-allowed border-slate-700 bg-slate-900 text-slate-400'}`}
                         placeholder="e.g. reliable, detail-oriented, team player"
                       />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-slate-300">Skills</label>
-                      <div className="mt-2 grid grid-cols-2 gap-2">
-                        {availableSkills.map((skill) => (
-                          <label
-                            key={skill}
-                            className="applicant-profile-skill-option flex cursor-pointer items-center gap-2 rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-200"
+                      <SkillTagPicker
+                        selected={profileData.skills}
+                        disabled={!isEditingProfile}
+                        onChange={(next) => setProfileData({ ...profileData, skills: next })}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-300">Resume (PDF)</label>
+                      <div className="mt-2 rounded-2xl border border-slate-700 bg-slate-900 p-3">
+                        {resumeInfo?.originalName ? (
+                          <p className="text-sm text-slate-300">Current: {resumeInfo.originalName}{resumeInfo.uploadedAt ? ` • uploaded ${new Date(resumeInfo.uploadedAt).toLocaleDateString()}` : ''}</p>
+                        ) : (
+                          <p className="text-sm text-slate-400">No resume uploaded yet.</p>
+                        )}
+                        {resumeInfo?.originalName && (
+                          <button
+                            type="button"
+                            onClick={handleViewResume}
+                            className="mt-3 rounded-2xl border border-cyan-500 bg-transparent px-4 py-2 text-sm font-semibold text-cyan-300"
                           >
+                            View Resume
+                          </button>
+                        )}
+                        {(isEditingProfile || (activeRole === 'Applicant' && !applicantApproved)) && (
+                          <div className="mt-3 flex flex-wrap items-center gap-2">
                             <input
-                              type="checkbox"
-                              checked={profileData.skills.includes(skill)}
-                              onChange={() => setProfileData({ ...profileData, skills: toggleSkill(profileData.skills, skill) })}
-                              className="applicant-profile-skill-checkbox h-4 w-4 rounded border-slate-600 bg-slate-800"
+                              type="file"
+                              accept="application/pdf,.pdf"
+                              onChange={(e) => setResumeFile(e.target.files?.[0] || null)}
+                              className="text-sm text-slate-300 file:mr-3 file:rounded-xl file:border-0 file:bg-slate-700 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-white"
                             />
-                            {skill}
-                          </label>
-                        ))}
+                            <button
+                              type="button"
+                              disabled={!resumeFile || resumeUploading}
+                              onClick={async () => {
+                                if (!resumeFile) return
+                                const token = getToken()
+                                if (!token) return alert('Not authenticated')
+                                setResumeUploading(true)
+                                try {
+                                  const formData = new FormData()
+                                  formData.append('resume', resumeFile)
+                                  const response = await fetch('http://localhost:4000/api/profile/resume', {
+                                    method: 'POST',
+                                    headers: { Authorization: `Bearer ${token}` },
+                                    body: formData,
+                                  })
+                                  const data = await response.json().catch(() => null)
+                                  if (!response.ok || data?.error) throw new Error(data?.error || 'Upload failed')
+                                  setResumeInfo(data.resumeFile)
+                                  setResumeFile(null)
+                                  alert('Resume uploaded!')
+                                } catch (err) {
+                                  console.error(err)
+                                  alert(err?.message || 'Failed to upload resume')
+                                } finally {
+                                  setResumeUploading(false)
+                                }
+                              }}
+                              className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              {resumeUploading ? 'Uploading…' : 'Upload Resume'}
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        saveProfile(profileData).then((result) => {
-                          if (result.ok) alert('Profile saved!')
-                        })
-                      }}
-                      className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
-                    >
-                      Save Profile
-                    </button>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-300">NSRP Verification Document (PDF)</label>
+                      <div className="mt-2 rounded-2xl border border-slate-700 bg-slate-900 p-3">
+                        {nsrpVerificationInfo?.originalName ? (
+                          <p className="text-sm text-slate-300">Current: {nsrpVerificationInfo.originalName}{nsrpVerificationInfo.uploadedAt ? ` • uploaded ${new Date(nsrpVerificationInfo.uploadedAt).toLocaleDateString()}` : ''}</p>
+                        ) : (
+                          <p className="text-sm text-slate-400">No NSRP verification document uploaded yet.</p>
+                        )}
+                        {nsrpVerificationInfo?.originalName && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const token = getToken()
+                              const applicantId = currentUser?.id || currentUser?._id
+                              if (!token || !applicantId) return alert('Not authenticated')
+                              const preview = window.open('', '_blank')
+                              try {
+                                const response = await fetch(`http://localhost:4000/api/applicants/${applicantId}/nsrp-verification`, { headers: { Authorization: `Bearer ${token}` } })
+                                if (!response.ok) { preview?.close(); return alert('NSRP document could not be opened') }
+                                const blob = await response.blob()
+                                const url = URL.createObjectURL(blob)
+                                if (preview) preview.location.href = url
+                                else window.open(url, '_blank')
+                                setTimeout(() => URL.revokeObjectURL(url), 60_000)
+                              } catch (err) { preview?.close(); alert('NSRP document could not be opened') }
+                            }}
+                            className="mt-3 rounded-2xl border border-cyan-500 bg-transparent px-4 py-2 text-sm font-semibold text-cyan-300"
+                          >
+                            View NSRP Document
+                          </button>
+                        )}
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          <input
+                            type="file"
+                            accept="application/pdf,.pdf"
+                            onChange={(e) => setNsrpVerificationFile(e.target.files?.[0] || null)}
+                            className="text-sm text-slate-300 file:mr-3 file:rounded-xl file:border-0 file:bg-slate-700 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-white"
+                          />
+                          <button
+                            type="button"
+                            disabled={!nsrpVerificationFile || nsrpVerificationUploading}
+                            onClick={async () => {
+                              if (!nsrpVerificationFile) return
+                              const token = getToken()
+                              if (!token) return alert('Not authenticated')
+                              setNsrpVerificationUploading(true)
+                              try {
+                                const formData = new FormData()
+                                formData.append('nsrpVerification', nsrpVerificationFile)
+                                const response = await fetch('http://localhost:4000/api/profile/nsrp-verification', {
+                                  method: 'POST',
+                                  headers: { Authorization: `Bearer ${token}` },
+                                  body: formData,
+                                })
+                                const data = await response.json().catch(() => null)
+                                if (!response.ok || data?.error) throw new Error(data?.error || 'Upload failed')
+                                setNsrpVerificationInfo(data.nsrpVerificationFile)
+                                setNsrpVerificationFile(null)
+                                alert('NSRP verification document submitted for admin review.')
+                              } catch (err) {
+                                console.error(err)
+                                alert(err?.message || 'Failed to upload NSRP document')
+                              } finally {
+                                setNsrpVerificationUploading(false)
+                              }
+                            }}
+                            className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            {nsrpVerificationUploading ? 'Uploading…' : 'Submit NSRP for Approval'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex gap-3">
+                      {!isEditingProfile ? (
+                        <button
+                          type="button"
+                          onClick={() => setIsEditingProfile(true)}
+                          className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
+                        >
+                          Edit Profile
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              saveProfile(profileData).then((result) => {
+                                if (result.ok) {
+                                  setIsEditingProfile(false)
+                                  alert('Profile saved!')
+                                }
+                              })
+                            }}
+                            className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
+                          >
+                            Save Profile
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setProfileData(normalizeProfile(currentUser, currentUser?.role))
+                              setIsEditingProfile(false)
+                            }}
+                            className="rounded-2xl border border-slate-600 bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-200"
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </form>
                 </>
               ) : (
                 <>
                   <h2 className="text-xl font-semibold text-white">Employer Profile</h2>
                   <p className="mt-3 text-slate-400">Update your company details and contact information.</p>
+
+                  {/* Banner and profile image preview */}
+                  <div className="mt-6 overflow-hidden rounded-2xl border border-slate-700">
+                    <div
+                      className="h-36 w-full bg-slate-800 bg-cover bg-center"
+                      style={profileData.bannerImage ? { backgroundImage: `url(${profileData.bannerImage})` } : undefined}
+                    />
+                    <div className="flex items-end gap-4 bg-slate-900/60 px-5 pb-4">
+                      <div className="-mt-10 flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl border-4 border-slate-900 bg-slate-800 text-2xl font-bold text-cyan-300">
+                        {profileData.profileImage ? (
+                          <img src={profileData.profileImage} alt="Company profile" className="h-full w-full object-cover" />
+                        ) : (
+                          (profileData.companyName || 'C').trim().charAt(0).toUpperCase()
+                        )}
+                      </div>
+                      <p className="pb-1 text-lg font-semibold text-white">{profileData.companyName || 'Your company'}</p>
+                    </div>
+                  </div>
+
+                  {isEditingProfile && (
+                    <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                      <div>
+                        <label htmlFor="profileImageUpload" className="block text-sm font-medium text-slate-300">Profile Image</label>
+                        <input
+                          id="profileImageUpload"
+                          type="file"
+                          accept="image/*"
+                          onChange={(event) => {
+                            const file = event.target.files?.[0]
+                            if (!file) return
+                            if (file.size > 2 * 1024 * 1024) return alert('Image must be under 2 MB')
+                            const reader = new FileReader()
+                            reader.onload = () => setProfileData((current) => ({ ...current, profileImage: reader.result }))
+                            reader.readAsDataURL(file)
+                          }}
+                          className="mt-2 block w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white file:mr-3 file:rounded-xl file:border-0 file:bg-cyan-500 file:px-3 file:py-2 file:font-semibold file:text-slate-950"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="bannerImageUpload" className="block text-sm font-medium text-slate-300">Banner Image</label>
+                        <input
+                          id="bannerImageUpload"
+                          type="file"
+                          accept="image/*"
+                          onChange={(event) => {
+                            const file = event.target.files?.[0]
+                            if (!file) return
+                            if (file.size > 2 * 1024 * 1024) return alert('Image must be under 2 MB')
+                            const reader = new FileReader()
+                            reader.onload = () => setProfileData((current) => ({ ...current, bannerImage: reader.result }))
+                            reader.readAsDataURL(file)
+                          }}
+                          className="mt-2 block w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white file:mr-3 file:rounded-xl file:border-0 file:bg-cyan-500 file:px-3 file:py-2 file:font-semibold file:text-slate-950"
+                        />
+                      </div>
+                    </div>
+                  )}
+
                   <form className="mt-6 space-y-4" onSubmit={(event) => event.preventDefault()}>
                     <div>
                       <label htmlFor="companyName" className="block text-sm font-medium text-slate-300">Company Name</label>
@@ -1773,8 +3497,9 @@ const [authView, setAuthView] = useState("login")
                         id="companyName"
                         type="text"
                         value={profileData.companyName}
+                        disabled={!isEditingProfile}
                         onChange={(e) => setProfileData({ ...profileData, companyName: e.target.value })}
-                        className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                        className={`mt-2 w-full rounded-2xl border px-3 py-2 text-sm ${isEditingProfile ? 'border-slate-700 bg-slate-800 text-white' : 'cursor-not-allowed border-slate-700 bg-slate-900 text-slate-400'}`}
                       />
                     </div>
                     <div>
@@ -1783,8 +3508,9 @@ const [authView, setAuthView] = useState("login")
                         id="contactName"
                         type="text"
                         value={profileData.contactName}
+                        disabled={!isEditingProfile}
                         onChange={(e) => setProfileData({ ...profileData, contactName: e.target.value })}
-                        className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                        className={`mt-2 w-full rounded-2xl border px-3 py-2 text-sm ${isEditingProfile ? 'border-slate-700 bg-slate-800 text-white' : 'cursor-not-allowed border-slate-700 bg-slate-900 text-slate-400'}`}
                       />
                     </div>
                     <div>
@@ -1793,8 +3519,9 @@ const [authView, setAuthView] = useState("login")
                         id="location"
                         type="text"
                         value={profileData.location}
+                        disabled={!isEditingProfile}
                         onChange={(e) => setProfileData({ ...profileData, location: e.target.value })}
-                        className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                        className={`mt-2 w-full rounded-2xl border px-3 py-2 text-sm ${isEditingProfile ? 'border-slate-700 bg-slate-800 text-white' : 'cursor-not-allowed border-slate-700 bg-slate-900 text-slate-400'}`}
                       />
                     </div>
                     <div>
@@ -1802,12 +3529,10 @@ const [authView, setAuthView] = useState("login")
                       <input
                         id="phone"
                         type="tel"
-                        inputMode="numeric"
-                        maxLength={11}
-                        pattern="[0-9]{11}"
                         value={profileData.phone}
-                        onChange={(e) => setProfileData({ ...profileData, phone: e.target.value.replace(/\D/g, '').slice(0, 11) })}
-                        className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                        disabled={!isEditingProfile}
+                        onChange={(e) => setProfileData({ ...profileData, phone: e.target.value })}
+                        className={`mt-2 w-full rounded-2xl border px-3 py-2 text-sm ${isEditingProfile ? 'border-slate-700 bg-slate-800 text-white' : 'cursor-not-allowed border-slate-700 bg-slate-900 text-slate-400'}`}
                       />
                     </div>
                     <div>
@@ -1816,8 +3541,9 @@ const [authView, setAuthView] = useState("login")
                         id="website"
                         type="text"
                         value={profileData.website}
+                        disabled={!isEditingProfile}
                         onChange={(e) => setProfileData({ ...profileData, website: e.target.value })}
-                        className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                        className={`mt-2 w-full rounded-2xl border px-3 py-2 text-sm ${isEditingProfile ? 'border-slate-700 bg-slate-800 text-white' : 'cursor-not-allowed border-slate-700 bg-slate-900 text-slate-400'}`}
                       />
                     </div>
                     <div>
@@ -1826,38 +3552,63 @@ const [authView, setAuthView] = useState("login")
                         id="summary"
                         rows="4"
                         value={profileData.summary}
+                        disabled={!isEditingProfile}
                         onChange={(event) => setProfileData({ ...profileData, summary: event.target.value })}
-                        className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                        className={`mt-2 w-full rounded-2xl border px-3 py-2 text-sm ${isEditingProfile ? 'border-slate-700 bg-slate-800 text-white' : 'cursor-not-allowed border-slate-700 bg-slate-900 text-slate-400'}`}
                         placeholder="Brief description of company or services"
                       />
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (!/^\d{11}$/.test(profileData.phone)) {
-                          alert('Phone number must contain exactly 11 digits')
-                          return
-                        }
-                        const token = currentUser?.token || localStorage.getItem('peso-token')
-                        fetch('http://localhost:4000/api/profile', {
-                          method: 'PUT',
-                          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                          body: JSON.stringify({ profile: profileData }),
-                        })
-                          .then((r) => r.json())
-                          .then((data) => {
-                            if (data.error) return alert(data.error)
-                            alert('Profile saved!')
-                          })
-                          .catch((err) => {
-                            console.error(err)
-                            alert('Save failed')
-                          })
-                      }}
-                      className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
-                    >
-                      Save Profile
-                    </button>
+                    <div className="flex gap-3">
+                      {!isEditingProfile ? (
+                        <button
+                          type="button"
+                          onClick={() => setIsEditingProfile(true)}
+                          className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
+                        >
+                          Edit Profile
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const token = currentUser?.token || localStorage.getItem('peso-token')
+                              if (!token) return alert('Not authenticated. Please log in again.')
+                              // Preserve existing profile fields and update the editable ones, including top-level employer fields.
+                              const editableProfile = { ...(currentUser?.profile || {}), location: profileData.location, website: profileData.website, summary: profileData.summary, profileImage: profileData.profileImage || '', bannerImage: profileData.bannerImage || '' }
+                              fetch('http://localhost:4000/api/profile', {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                                body: JSON.stringify({ profile: editableProfile, companyName: profileData.companyName, contactName: profileData.contactName, phone: profileData.phone, website: profileData.website }),
+                              })
+                                .then((r) => r.json())
+                                .then((data) => {
+                                  if (data.error) return alert(data.error)
+                                  setIsEditingProfile(false)
+                                  alert('Profile saved!')
+                                })
+                                .catch((err) => {
+                                  console.error(err)
+                                  alert('Save failed')
+                                })
+                            }}
+                            className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
+                          >
+                            Save Profile
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setProfileData(normalizeProfile(currentUser, currentUser?.role))
+                              setIsEditingProfile(false)
+                            }}
+                            className="rounded-2xl border border-slate-600 bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-200"
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </form>
                 </>
               )}
@@ -1871,7 +3622,20 @@ const [authView, setAuthView] = useState("login")
 
               <button
                 type="button"
-                onClick={() => setShowCreateJobPosting(true)}
+                onClick={() => {
+                  setJobForm({
+                    title: '',
+                    company: profileData.companyName || '',
+                    location: profileData.location || '',
+                    description: '',
+                    requirements: '',
+                    salary: '',
+                    locationType: '',
+                    employmentType: '',
+                    skills: [],
+                  })
+                  setShowCreateJobPosting(true)
+                }}
                 className="mt-6 rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
               >
                 Create Job Posting
@@ -1913,30 +3677,6 @@ const [authView, setAuthView] = useState("login")
                     />
                   </div>
                   <div>
-                    <label htmlFor="job-company" className="block text-sm font-medium text-slate-200">
-                      Company
-                    </label>
-                    <input
-                      id="job-company"
-                      value={jobForm.company}
-                      onChange={(e) => setJobForm({ ...jobForm, company: e.target.value })}
-                      className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-                      placeholder="e.g. PESO Services"
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="job-location" className="block text-sm font-medium text-slate-200">
-                      Location
-                    </label>
-                    <input
-                      id="job-location"
-                      value={jobForm.location}
-                      onChange={(e) => setJobForm({ ...jobForm, location: e.target.value })}
-                      className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-                      placeholder="e.g. Manila"
-                    />
-                  </div>
-                  <div>
                     <label htmlFor="job-description" className="block text-sm font-medium text-slate-200">
                       Description
                     </label>
@@ -1964,21 +3704,45 @@ const [authView, setAuthView] = useState("login")
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-200">Required Skills</label>
-                    <div className="mt-2 grid grid-cols-2 gap-2">
-                      {availableSkills.map((skill) => (
-                        <label
-                          key={skill}
-                          className="employer-skill-option flex cursor-pointer items-center gap-2 rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-200"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={jobForm.skills.includes(skill)}
-                            onChange={() => setJobForm({ ...jobForm, skills: toggleSkill(jobForm.skills, skill) })}
-                            className="h-4 w-4 rounded border-slate-600 bg-slate-800"
-                          />
-                          {skill}
-                        </label>
-                      ))}
+                    <SkillTagPicker
+                      theme="light"
+                      selected={jobForm.skills}
+                      onChange={(next) => setJobForm({ ...jobForm, skills: next })}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label htmlFor="job-location-type" className="block text-sm font-medium text-slate-200">
+                        Location Type
+                      </label>
+                      <select
+                        id="job-location-type"
+                        value={jobForm.locationType}
+                        onChange={(e) => setJobForm({ ...jobForm, locationType: e.target.value })}
+                        className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                      >
+                        <option value="">Select location type</option>
+                        <option value="On-site">On-site</option>
+                        <option value="Hybrid">Hybrid</option>
+                        <option value="Remote">Remote</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label htmlFor="job-employment-type" className="block text-sm font-medium text-slate-200">
+                        Employment Type
+                      </label>
+                      <select
+                        id="job-employment-type"
+                        value={jobForm.employmentType}
+                        onChange={(e) => setJobForm({ ...jobForm, employmentType: e.target.value })}
+                        className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                      >
+                        <option value="">Select employment type</option>
+                        <option value="Full-time">Full-time</option>
+                        <option value="Part-time">Part-time</option>
+                        <option value="Contract">Contract</option>
+                        <option value="Internship">Internship</option>
+                      </select>
                     </div>
                   </div>
                   <div>
@@ -1988,9 +3752,10 @@ const [authView, setAuthView] = useState("login")
                     <input
                       id="job-salary"
                       value={jobForm.salary}
-                      onChange={(e) => setJobForm({ ...jobForm, salary: e.target.value })}
+                      inputMode="numeric"
+                      onChange={(e) => setJobForm({ ...jobForm, salary: formatPesoSalary(e.target.value) })}
                       className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-                      placeholder="e.g. PHP 25,000 - PHP 30,000"
+                      placeholder="e.g. \u20B125,000"
                     />
                   </div>
                   <button
@@ -2005,17 +3770,40 @@ const [authView, setAuthView] = useState("login")
               )}
 
               <div className="employer-pending-panel mt-6 rounded-2xl border border-slate-800 bg-slate-950/80 p-5">
-                <h3 className="text-lg font-semibold text-white">My Job Requests</h3>
-                {myJobs.length === 0 ? (
-                  <p className="mt-3 text-slate-400">No job requests submitted yet.</p>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h3 className="text-lg font-semibold text-white">My Job Requests</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { id: 'all', label: 'All', activeClass: 'bg-slate-200 text-slate-950', count: myJobs.length },
+                      { id: 'pending', label: 'Pending', activeClass: 'bg-yellow-400 text-slate-950', count: employerPendingJobs.length },
+                      { id: 'approved', label: 'Approved', activeClass: 'bg-green-500 text-white', count: employerApprovedJobs.length },
+                      { id: 'declined', label: 'Declined', activeClass: 'bg-red-500 text-white', count: employerDeclinedJobs.length },
+                    ].map((filter) => (
+                      <button
+                        key={filter.id}
+                        type="button"
+                        onClick={() => setEmployerJobStatusFilter(filter.id)}
+                        className={`rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.15em] transition ${
+                          employerJobStatusFilter === filter.id
+                            ? filter.activeClass
+                            : 'border border-slate-600 bg-slate-900 text-slate-300 hover:border-slate-400'
+                        }`}
+                      >
+                        {filter.label} ({filter.count})
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {filteredMyJobs.length === 0 ? (
+                  <p className="mt-3 text-slate-400">{myJobs.length === 0 ? 'No job requests submitted yet.' : `No ${employerJobStatusFilter} job requests.`}</p>
                 ) : (
                   <div className="mt-4 space-y-4">
-                    {myJobs.map((job) => (
+                    {filteredMyJobs.map((job) => (
                       <div key={job._id} className="employer-pending-item rounded-2xl border border-slate-700 bg-slate-900 p-4">
                         <div className="flex items-center justify-between gap-4">
                           <div>
                             <p className="text-lg font-semibold text-white">{job.title}</p>
-                            <p className="text-sm text-slate-400">{job.company} • {job.location || 'Remote'}</p>
+                            <p className="text-sm text-slate-400">{job.company} \u2022 {job.location || 'Remote'}</p>
                           </div>
                           <span className={`rounded-full px-3 py-1 text-xs uppercase tracking-[0.2em] ${job.status === 'approved' ? 'bg-cyan-500 text-slate-950' : job.status === 'declined' ? 'bg-rose-400 text-slate-950' : 'bg-amber-400 text-slate-950'}`}>
                             {job.status || 'pending'}
@@ -2033,41 +3821,8 @@ const [authView, setAuthView] = useState("login")
 
               {(employerPendingJobs.length > 0 || employerApprovedJobs.length > 0 || employerDeclinedJobs.length > 0) && (
                 <p className="mt-4 text-xs uppercase tracking-[0.2em] text-slate-400">
-                  Pending: {employerPendingJobs.length} • Approved: {employerApprovedJobs.length} • Declined: {employerDeclinedJobs.length}
+                  Pending: {employerPendingJobs.length} \u2022 Approved: {employerApprovedJobs.length} \u2022 Declined: {employerDeclinedJobs.length}
                 </p>
-              )}
-            </section>
-          )}
-
-          {activeView === "applications" && activeRole === "Applicant" && (
-            <section className="applicant-applications-card portal-card rounded-2xl border border-slate-300 bg-white p-6 text-black">
-              <h2 className="text-xl font-semibold text-black">My Applications</h2>
-              <p className="mt-3 text-black">Jobs you applied to and their current posting status.</p>
-
-              {appliedJobs.length === 0 ? (
-                <p className="mt-6 text-black">You have not applied to any job offers yet.</p>
-              ) : (
-                <div className="mt-6 space-y-3">
-                  {appliedJobs.map((job) => {
-                    const myApplication = (job.applicants || []).find((applicant) => applicant.email === currentUser?.email)
-                    return (
-                      <div key={`applied-${job._id}`} className="applicant-application-item rounded-2xl border border-slate-700 bg-slate-950/80 p-4">
-                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                          <div>
-                            <p className="text-base font-semibold text-white">{job.title}</p>
-                            <p className="text-sm text-slate-400">{job.company} • {job.location || 'Remote'}</p>
-                          </div>
-                          <span className="rounded-full bg-slate-700 px-3 py-1 text-xs uppercase tracking-[0.2em] text-slate-200">
-                            {job.status || 'unknown'}
-                          </span>
-                        </div>
-                        <p className="mt-2 text-sm text-slate-400">
-                          Applied on: {myApplication?.appliedAt ? new Date(myApplication.appliedAt).toLocaleString() : 'N/A'}
-                        </p>
-                      </div>
-                    )
-                  })}
-                </div>
               )}
             </section>
           )}
@@ -2083,8 +3838,13 @@ const [authView, setAuthView] = useState("login")
               availableSkills={availableSkills}
               jobLocationFilter={jobLocationFilter}
               setJobLocationFilter={setJobLocationFilter}
+              jobLocationTypeFilter={jobLocationTypeFilter}
+              setJobLocationTypeFilter={setJobLocationTypeFilter}
+              jobEmploymentTypeFilter={jobEmploymentTypeFilter}
+              setJobEmploymentTypeFilter={setJobEmploymentTypeFilter}
               locationFilterOptions={locationFilterOptions}
               filteredApplicantJobs={filteredApplicantJobs}
+              appliedJobs={appliedJobs}
               appliedJobIds={appliedJobIds}
               currentUser={currentUser}
               selectedJob={selectedJob}
@@ -2096,6 +3856,7 @@ const [authView, setAuthView] = useState("login")
               setAdminJobStatusFilter={setAdminJobStatusFilter}
               filteredPendingJobs={filteredPendingJobs}
               handleReviewJob={handleReviewJob}
+              handleBulkReviewJobs={handleBulkReviewJobs}
               showPendingAdminSection={showPendingAdminSection}
               showApprovedAdminSection={showApprovedAdminSection}
               filteredApprovedJobs={filteredApprovedJobs}
@@ -2104,6 +3865,8 @@ const [authView, setAuthView] = useState("login")
               adminUsers={adminUsers}
               referredApplicantIdsByJob={referredApplicantIdsByJob}
               handleReferApplicantFromJob={handleReferApplicantFromJob}
+              handleBulkReferApplicants={handleBulkReferApplicants}
+              token={getToken()}
               handleEditPendingJob={openEditJob}
             />
           )}
@@ -2140,7 +3903,7 @@ const [authView, setAuthView] = useState("login")
                             {activeRole === 'Admin' && isNewApplicationNotification(notification) && (
                               <>
                                 <p className="mt-2 text-sm text-black">Applicant: {notification.applicantName || 'Unknown applicant'}</p>
-                                <p className="mt-1 text-sm text-black">Job: {notification.jobTitle || 'Unknown job'} • Employer: {notification.employerName || 'Unknown employer'}</p>
+                                <p className="mt-1 text-sm text-black">Job: {notification.jobTitle || 'Unknown job'} \u2022 Employer: {notification.employerName || 'Unknown employer'}</p>
                               </>
                             )}
                             {activeRole === 'Admin' && ((notification.actionable && notification.status === 'pending') || String(notification._id || '').startsWith('job-pending-')) && (
@@ -2189,21 +3952,12 @@ const [authView, setAuthView] = useState("login")
                   </button>
                 </div>
 
-                <div className="mt-5 grid grid-cols-2 gap-2">
-                  {availableSkills.map((skill) => (
-                    <label
-                      key={skill}
-                      className="applicant-profile-skill-option flex cursor-pointer items-center gap-2 rounded-2xl border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-800"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={profileData.skills.includes(skill)}
-                        onChange={() => setProfileData({ ...profileData, skills: toggleSkill(profileData.skills, skill) })}
-                        className="applicant-profile-skill-checkbox h-4 w-4 rounded border-slate-400 bg-white"
-                      />
-                      {skill}
-                    </label>
-                  ))}
+                <div className="mt-5">
+                  <SkillTagPicker
+                    theme="light"
+                    selected={profileData.skills}
+                    onChange={(next) => setProfileData({ ...profileData, skills: next })}
+                  />
                 </div>
 
                 <div className="mt-6 flex justify-end">
@@ -2264,11 +4018,43 @@ const [authView, setAuthView] = useState("login")
                         id={id}
                         value={editingJobForm[field]}
                         disabled={!editingJobCanSave}
-                        onChange={(event) => setEditingJobForm({ ...editingJobForm, [field]: event.target.value })}
+                        inputMode={field === 'salary' ? 'numeric' : undefined}
+                        onChange={(event) => setEditingJobForm({ ...editingJobForm, [field]: field === 'salary' ? formatPesoSalary(event.target.value) : event.target.value })}
                         className="mt-2 w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-black"
                       />
                     </label>
                   ))}
+                  <label htmlFor="edit-job-location-type" className="text-sm font-medium text-black">
+                    Location Type
+                    <select
+                      id="edit-job-location-type"
+                      value={editingJobForm.locationType}
+                      disabled={!editingJobCanSave}
+                      onChange={(event) => setEditingJobForm({ ...editingJobForm, locationType: event.target.value })}
+                      className="mt-2 w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-black"
+                    >
+                      <option value="">Select location type</option>
+                      <option value="On-site">On-site</option>
+                      <option value="Hybrid">Hybrid</option>
+                      <option value="Remote">Remote</option>
+                    </select>
+                  </label>
+                  <label htmlFor="edit-job-employment-type" className="text-sm font-medium text-black">
+                    Employment Type
+                    <select
+                      id="edit-job-employment-type"
+                      value={editingJobForm.employmentType}
+                      disabled={!editingJobCanSave}
+                      onChange={(event) => setEditingJobForm({ ...editingJobForm, employmentType: event.target.value })}
+                      className="mt-2 w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-black"
+                    >
+                      <option value="">Select employment type</option>
+                      <option value="Full-time">Full-time</option>
+                      <option value="Part-time">Part-time</option>
+                      <option value="Contract">Contract</option>
+                      <option value="Internship">Internship</option>
+                    </select>
+                  </label>
                   <label htmlFor="edit-job-description" className="text-sm font-medium text-black sm:col-span-2">
                     Description
                     <textarea
@@ -2295,19 +4081,12 @@ const [authView, setAuthView] = useState("login")
 
                 <fieldset className="mt-4">
                   <legend className="text-sm font-medium text-black">Skills</legend>
-                  <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                    {availableSkills.map((skill) => (
-                      <label key={skill} className="flex items-center gap-2 rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-black">
-                        <input
-                          type="checkbox"
-                          checked={editingJobForm.skills.includes(skill)}
-                          disabled={!editingJobCanSave}
-                          onChange={() => setEditingJobForm({ ...editingJobForm, skills: toggleSkill(editingJobForm.skills, skill) })}
-                        />
-                        {skill}
-                      </label>
-                    ))}
-                  </div>
+                  <SkillTagPicker
+                    theme="light"
+                    selected={editingJobForm.skills}
+                    disabled={!editingJobCanSave}
+                    onChange={(next) => setEditingJobForm({ ...editingJobForm, skills: next })}
+                  />
                 </fieldset>
 
                 {editingJobCanSave && (
@@ -2321,84 +4100,6 @@ const [authView, setAuthView] = useState("login")
                   </div>
                 )}
               </form>
-            </div>
-          )}
-
-          {selectedDirectoryUser && (
-            <div
-              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="directory-user-title"
-              onClick={() => setSelectedDirectoryUser(null)}
-            >
-              <div
-                className="admin-directory-modal w-full max-w-md rounded-2xl border border-cyan-500/40 bg-slate-900 p-6 shadow-2xl"
-                onClick={(event) => event.stopPropagation()}
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <h2 id="directory-user-title" className="text-lg font-semibold text-white">
-                      {selectedDirectoryUser.directoryRole} details
-                    </h2>
-                    <p className="mt-2 text-sm text-cyan-300">{selectedDirectoryUser.email}</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedDirectoryUser(null)}
-                    className="admin-modal-close rounded-2xl border border-slate-700 bg-slate-800 px-3 py-1 text-sm text-slate-200"
-                  >
-                    Close
-                  </button>
-                </div>
-
-                <div className="admin-modal-details mt-5 space-y-2 rounded-2xl border border-slate-800 bg-slate-950/80 p-4 text-sm text-slate-300">
-                  {selectedDirectoryUser.directoryRole === 'Employer' ? (
-                    <>
-                      <p><span className="font-semibold text-white">Company:</span> {selectedDirectoryUser.companyName || 'N/A'}</p>
-                      <p><span className="font-semibold text-white">Contact:</span> {selectedDirectoryUser.contactName || 'N/A'}</p>
-                      <p><span className="font-semibold text-white">Phone:</span> {selectedDirectoryUser.phone || 'N/A'}</p>
-                      <p><span className="font-semibold text-white">Location:</span> {selectedDirectoryUser.profile?.location || 'N/A'}</p>
-                      <p><span className="font-semibold text-white">About me:</span> {selectedDirectoryUser.profile?.summary || 'N/A'}</p>
-                      <p><span className="font-semibold text-white">Status:</span> {selectedDirectoryUser.approvalStatus || 'approved'}</p>
-                    </>
-                  ) : (
-                    <>
-                      <p><span className="font-semibold text-white">Name:</span> {selectedDirectoryUser.profile?.name || 'N/A'}</p>
-                      <p><span className="font-semibold text-white">Location:</span> {selectedDirectoryUser.profile?.location || 'N/A'}</p>
-                      <p><span className="font-semibold text-white">Phone:</span> {selectedDirectoryUser.phone || selectedDirectoryUser.profile?.phone || 'N/A'}</p>
-                      <p><span className="font-semibold text-white">Skills:</span> {Array.isArray(selectedDirectoryUser.profile?.skills) ? selectedDirectoryUser.profile.skills.join(', ') : selectedDirectoryUser.profile?.skills || 'N/A'}</p>
-                      <p><span className="font-semibold text-white">Traits:</span> {selectedDirectoryUser.profile?.traits || 'N/A'}</p>
-                      <p><span className="font-semibold text-white">About me:</span> {selectedDirectoryUser.profile?.summary || 'N/A'}</p>
-                    </>
-                  )}
-                </div>
-
-                {selectedDirectoryUser.directoryRole === 'Employer' && selectedDirectoryUser.requirementsFile && (
-                  <div className="mt-4 rounded-2xl border border-slate-300 bg-slate-50 p-4 text-sm text-black">
-                    <p className="font-semibold">Submitted MSRP file</p>
-                    <p className="mt-1">File: {selectedDirectoryUser.requirementsFile.originalName || 'MSRP form.pdf'}</p>
-                    <p className="mt-1">Size: {selectedDirectoryUser.requirementsFile.size ? `${Math.ceil(selectedDirectoryUser.requirementsFile.size / 1024)} KB` : 'N/A'}</p>
-                    <p className="mt-1">Submitted: {selectedDirectoryUser.requirementsFile.submittedAt ? new Date(selectedDirectoryUser.requirementsFile.submittedAt).toLocaleString() : 'N/A'}</p>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleViewRequirements(selectedDirectoryUser.requirementsFile.requestId)}
-                        className="rounded-2xl bg-cyan-500 px-3 py-2 text-sm font-semibold text-slate-950"
-                      >
-                        View MSRP PDF
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDownloadRequirements(selectedDirectoryUser.requirementsFile.requestId, selectedDirectoryUser.requirementsFile.originalName)}
-                        className="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-black"
-                      >
-                        Download MSRP PDF
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
             </div>
           )}
 
@@ -2457,7 +4158,7 @@ const [authView, setAuthView] = useState("login")
                 className="w-full max-w-md rounded-2xl border border-cyan-500/40 bg-slate-900 p-6 shadow-2xl"
                 onSubmit={(event) => {
                   event.preventDefault()
-                  const requestId = declineRequestTarget._id
+                  const requestId = declineRequestTarget._id || declineRequestTarget.id
                   setDeclineRequestTarget(null)
                   setDeclineReason('')
                   handleReviewEmployerRequest(requestId, 'declined')

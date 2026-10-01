@@ -7,6 +7,8 @@ import cors from 'cors'
 import multer from 'multer'
 import fs from 'fs'
 import path from 'path'
+import { createReport } from 'docx-templates'
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
 import { Applicant, Employer, Admin, Notification, Referral, HireReport, Rating, findUserByEmail, createUserInRole, updateUserProfileByEmail } from './models/collections.js'
 
 const app = express()
@@ -15,6 +17,7 @@ const PORT = process.env.PORT || 4000
 app.use(cors({ origin: 'http://localhost:5173' }))
 // Capture raw request body for debugging JSON parse issues
 app.use(express.json({
+  limit: '8mb',
   verify: (req, _res, buf) => {
     try {
       req.rawBody = buf && buf.toString ? buf.toString() : ''
@@ -47,6 +50,8 @@ const jobSchema = new Schema({
   description: String,
   requirements: String,
   salary: String,
+  locationType: { type: String, enum: ['', 'On-site', 'Hybrid', 'Remote'], default: '' },
+  employmentType: { type: String, enum: ['', 'Full-time', 'Part-time', 'Contract', 'Internship'], default: '' },
   skills: [String],
   status: { type: String, enum: ['pending', 'approved', 'declined'], default: 'pending' },
   reviewReason: String,
@@ -113,8 +118,10 @@ const applicationUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (_req, file, callback) => {
-    if (file.mimetype !== 'application/pdf' || path.extname(file.originalname).toLowerCase() !== '.pdf') {
-      return callback(new Error('Only PDF files are accepted'))
+    const ext = path.extname(file.originalname).toLowerCase()
+    const allowed = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
+    if (!allowed.includes(file.mimetype) || !['.pdf', '.docx'].includes(ext)) {
+      return callback(new Error('Only PDF or DOCX files are accepted'))
     }
     callback(null, true)
   },
@@ -175,8 +182,9 @@ app.post('/api/login', async (req, res) => {
 
     const ok = await bcrypt.compare(password, user.passwordHash)
     if (!ok) return res.status(401).json({ error: 'Invalid credentials' })
+    if (user.verificationStatus === 'restricted') return res.status(403).json({ error: 'Your account has been restricted. Please contact PESO support.' })
 
-    const safe = { id: String(user._id), email: user.email, role: type, companyName: type === 'Employer' ? (user.companyName || requirements?.companyName) : undefined, contactName: type === 'Employer' ? (user.contactName || requirements?.contactName) : undefined, phone: type === 'Employer' ? (user.phone || requirements?.phone) : undefined, profile: user.profile, verificationStatus: ['Employer', 'Applicant'].includes(type) ? (user.verificationStatus || 'approved') : undefined, verificationReason: ['Employer', 'Applicant'].includes(type) ? user.verificationReason : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size } : undefined }
+    const safe = { id: String(user._id), email: user.email, role: type, companyName: type === 'Employer' ? (user.companyName || requirements?.companyName) : undefined, contactName: type === 'Employer' ? (user.contactName || requirements?.contactName) : undefined, phone: type === 'Employer' ? (user.phone || requirements?.phone) : undefined, profile: user.profile, verificationStatus: ['Employer', 'Applicant'].includes(type) ? (user.verificationStatus || 'approved') : undefined, verificationReason: ['Employer', 'Applicant'].includes(type) ? user.verificationReason : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size } : undefined, resumeFile: type === 'Applicant' && user.resumeFile?.originalName ? { originalName: user.resumeFile.originalName, size: user.resumeFile.size, uploadedAt: user.resumeFile.uploadedAt } : undefined, nsrpVerificationFile: type === 'Applicant' && user.nsrpVerificationFile?.originalName ? { originalName: user.nsrpVerificationFile.originalName, size: user.nsrpVerificationFile.size, uploadedAt: user.nsrpVerificationFile.uploadedAt } : undefined }
     const token = jwt.sign({ email: user.email, role: type }, jwtSecret, { expiresIn: '7d' })
     res.json({ user: safe, token })
   } catch (err) {
@@ -196,7 +204,135 @@ app.get('/api/profile', async (req, res) => {
     if (!found) return res.status(404).json({ error: 'Not found' })
     const { user, type } = found
     const requirements = type === 'Employer' ? await EmployerRequest.findOne({ email: user.email }).lean() : null
-    res.json({ id: String(user._id), email: user.email, role: type, companyName: type === 'Employer' ? (user.companyName || requirements?.companyName) : undefined, contactName: type === 'Employer' ? (user.contactName || requirements?.contactName) : undefined, phone: type === 'Employer' ? (user.phone || requirements?.phone) : undefined, profile: user.profile, verificationStatus: ['Employer', 'Applicant'].includes(type) ? (user.verificationStatus || 'approved') : undefined, verificationReason: ['Employer', 'Applicant'].includes(type) ? user.verificationReason : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size } : undefined })
+    res.json({ id: String(user._id), email: user.email, role: type, companyName: type === 'Employer' ? (user.companyName || requirements?.companyName) : undefined, contactName: type === 'Employer' ? (user.contactName || requirements?.contactName) : undefined, phone: type === 'Employer' ? (user.phone || requirements?.phone) : undefined, profile: user.profile, verificationStatus: ['Employer', 'Applicant'].includes(type) ? (user.verificationStatus || 'approved') : undefined, verificationReason: ['Employer', 'Applicant'].includes(type) ? user.verificationReason : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size } : undefined, hasResume: type === 'Applicant' ? Boolean(user.resumeFile?.data || user.resumeFile?.originalName) : undefined, resumeFile: type === 'Applicant' && user.resumeFile?.originalName ? { originalName: user.resumeFile.originalName, size: user.resumeFile.size, uploadedAt: user.resumeFile.uploadedAt } : undefined, nsrpVerificationFile: type === 'Applicant' && user.nsrpVerificationFile?.originalName ? { originalName: user.nsrpVerificationFile.originalName, size: user.nsrpVerificationFile.size, uploadedAt: user.nsrpVerificationFile.uploadedAt } : undefined })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Server error' })
+  }
+})
+
+// Applicant resume upload (PDF only)
+app.post('/api/profile/resume', applicationUpload.single('resume'), async (req, res) => {
+  try {
+    const auth = req.headers.authorization
+    if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
+    const token = auth.split(' ')[1]
+    const decoded = jwt.verify(token, jwtSecret)
+    if (decoded.role !== 'Applicant') return res.status(403).json({ error: 'Only applicants can upload a resume' })
+    if (!req.file) return res.status(400).json({ error: 'Resume PDF is required' })
+
+    const applicant = await Applicant.findOneAndUpdate(
+      { email: decoded.email },
+      {
+        resumeFile: {
+          originalName: req.file.originalname,
+          mimetype: req.file.mimetype,
+          size: req.file.size,
+          uploadedAt: new Date(),
+          data: req.file.buffer,
+        },
+      },
+      { new: true },
+    )
+    if (!applicant) return res.status(404).json({ error: 'Applicant not found' })
+    res.json({ ok: true, resumeFile: { originalName: req.file.originalname, size: req.file.size, uploadedAt: new Date() } })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Server error' })
+  }
+})
+
+// Applicant NSRP verification document upload (separate from jobseeker resume)
+app.post('/api/profile/nsrp-verification', applicationUpload.single('nsrpVerification'), async (req, res) => {
+  try {
+    const auth = req.headers.authorization
+    if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
+    const token = auth.split(' ')[1]
+    const decoded = jwt.verify(token, jwtSecret)
+    if (decoded.role !== 'Applicant') return res.status(403).json({ error: 'Only applicants can upload NSRP verification' })
+    if (!req.file) return res.status(400).json({ error: 'NSRP verification document is required' })
+
+    const applicant = await Applicant.findOneAndUpdate(
+      { email: decoded.email },
+      {
+        $set: {
+          nsrpVerificationFile: {
+            originalName: req.file.originalname,
+            mimetype: req.file.mimetype,
+            size: req.file.size,
+            uploadedAt: new Date(),
+            data: req.file.buffer,
+          },
+          // Resubmitting after a decline moves the account back to review
+          verificationStatus: 'under_review',
+        },
+        $unset: { verificationReason: 1 },
+      },
+      { new: true },
+    )
+    if (!applicant) return res.status(404).json({ error: 'Applicant not found' })
+
+    const admins = await Admin.find().lean()
+    if (admins.length > 0) {
+      await Notification.insertMany(admins.map((admin) => ({
+        recipientEmail: admin.email,
+        title: 'Applicant NSRP verification submitted',
+        message: `${decoded.email} submitted an NSRP verification document for account approval.`,
+        kind: 'applicant-verification',
+        linkPath: '/applicants',
+      })))
+    }
+
+    res.json({ ok: true, nsrpVerificationFile: { originalName: req.file.originalname, size: req.file.size, uploadedAt: new Date() } })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Server error' })
+  }
+})
+
+// Admin: view an applicant's NSRP verification document
+app.get('/api/applicants/:id/nsrp-verification', async (req, res) => {
+  try {
+    const auth = req.headers.authorization
+    if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
+    const token = auth.split(' ')[1]
+    const decoded = jwt.verify(token, jwtSecret)
+    if (!['Admin', 'Applicant'].includes(decoded.role)) return res.status(403).json({ error: 'Forbidden' })
+    const applicant = await Applicant.findById(req.params.id).select('+nsrpVerificationFile.data').lean()
+    if (!applicant) return res.status(404).json({ error: 'Applicant not found' })
+    if (decoded.role === 'Applicant' && applicant.email !== decoded.email) return res.status(403).json({ error: 'Forbidden' })
+    if (!applicant.nsrpVerificationFile?.data) return res.status(404).json({ error: 'No NSRP verification document uploaded' })
+    const raw = applicant.nsrpVerificationFile.data
+    const buffer = Buffer.isBuffer(raw) ? raw : (raw?.buffer ? Buffer.from(raw.buffer) : Buffer.from(raw))
+    res.type(applicant.nsrpVerificationFile.mimetype || 'application/pdf')
+    res.set('Content-Disposition', `inline; filename="${applicant.nsrpVerificationFile.originalName || 'nsrp-verification.pdf'}"`)
+    res.send(buffer)
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Server error' })
+  }
+})
+
+// View an applicant's resume (self, employer, or admin)
+app.get('/api/applicants/:id/resume', async (req, res) => {
+  try {
+    const auth = req.headers.authorization
+    if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
+    const token = auth.split(' ')[1]
+    const decoded = jwt.verify(token, jwtSecret)
+    if (!['Employer', 'Admin', 'Applicant'].includes(decoded.role)) return res.status(403).json({ error: 'Forbidden' })
+
+    const applicant = await Applicant.findById(req.params.id).select('+resumeFile.data').lean()
+    if (!applicant) return res.status(404).json({ error: 'Applicant not found' })
+    if (decoded.role === 'Applicant' && applicant.email !== decoded.email) return res.status(403).json({ error: 'Forbidden' })
+    if (!applicant.resumeFile?.data) return res.status(404).json({ error: 'No resume uploaded' })
+
+    // MongoDB returns BSON Binary; extract the raw buffer for a valid PDF response
+    const raw = applicant.resumeFile.data
+    const buffer = Buffer.isBuffer(raw) ? raw : (raw?.buffer ? Buffer.from(raw.buffer) : Buffer.from(raw))
+    res.type(applicant.resumeFile.mimetype || 'application/pdf')
+    res.set('Content-Disposition', `inline; filename="${applicant.resumeFile.originalName || 'resume.pdf'}"`)
+    res.send(buffer)
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Server error' })
@@ -210,10 +346,27 @@ app.put('/api/profile', async (req, res) => {
     if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
     const token = auth.split(' ')[1]
     const decoded = jwt.verify(token, jwtSecret)
-    const { profile } = req.body
+    const { profile, companyName, contactName, phone, website } = req.body
     if (!profile) return res.status(400).json({ error: 'Missing profile' })
+    for (const key of ['profileImage', 'bannerImage']) {
+      if (typeof profile[key] === 'string' && profile[key].length > 3 * 1024 * 1024) {
+        return res.status(413).json({ error: 'Image is too large. Please use an image under 2 MB.' })
+      }
+    }
     const updated = await updateUserProfileByEmail(decoded.email, profile)
     if (!updated) return res.status(404).json({ error: 'Not found' })
+
+    // Persist editable top-level employer fields as well
+    if (updated.type === 'Employer') {
+      const topLevel = {}
+      if (typeof companyName === 'string') topLevel.companyName = companyName.trim()
+      if (typeof contactName === 'string') topLevel.contactName = contactName.trim()
+      if (typeof phone === 'string') topLevel.phone = phone.trim()
+      if (typeof website === 'string') topLevel.website = website.trim()
+      if (Object.keys(topLevel).length > 0) {
+        await Employer.updateOne({ email: decoded.email }, { $set: topLevel })
+      }
+    }
     res.json({ profile: updated.user.profile })
   } catch (err) {
     console.error(err)
@@ -228,11 +381,15 @@ app.post('/api/jobs', async (req, res) => {
     const token = auth.split(' ')[1]
     const decoded = jwt.verify(token, jwtSecret)
     if (!(await requireApprovedEmployer(decoded, res))) return
-    const { title, company, location, description, requirements, salary, skills } = req.body || {}
-    if (!title || !company || !description) return res.status(400).json({ error: 'Missing required fields' })
+    const { title, company, location, description, requirements, salary, skills, locationType, employmentType } = req.body || {}
+    const employer = await Employer.findOne({ email: decoded.email }).lean()
+    const request = await EmployerRequest.findOne({ email: decoded.email }).lean()
+    const resolvedCompany = company || employer?.companyName || employer?.profile?.companyName || request?.companyName || ''
+    const resolvedLocation = location || employer?.profile?.location || request?.location || ''
+    if (!title || !resolvedCompany || !description) return res.status(400).json({ error: 'Missing required fields. Set your company name in your employer profile first.' })
     if (!Array.isArray(skills) || skills.length === 0) return res.status(400).json({ error: 'Select at least one skill' })
     const normalizedSkills = skills.filter((skill) => typeof skill === 'string').map((skill) => skill.trim()).filter(Boolean)
-    const job = new JobPosting({ title, company, location, description, requirements, salary, skills: normalizedSkills, createdBy: decoded.email })
+    const job = new JobPosting({ title, company: resolvedCompany, location: resolvedLocation, description, requirements, salary, skills: normalizedSkills, locationType: locationType || '', employmentType: employmentType || '', createdBy: decoded.email })
     await job.save()
 
     const admins = await Admin.find().lean()
@@ -261,7 +418,7 @@ app.put('/api/jobs/:id', async (req, res) => {
     const decoded = jwt.verify(token, jwtSecret)
     if (!(await requireApprovedEmployer(decoded, res))) return
 
-    const { title, company, location, description, requirements, salary, skills } = req.body || {}
+    const { title, company, location, description, requirements, salary, skills, locationType, employmentType } = req.body || {}
     if (!title || !company || !description) return res.status(400).json({ error: 'Missing required fields' })
     if (!Array.isArray(skills) || skills.length === 0) return res.status(400).json({ error: 'Select at least one skill' })
 
@@ -276,6 +433,8 @@ app.put('/api/jobs/:id', async (req, res) => {
     job.description = description
     job.requirements = requirements || ''
     job.salary = salary || ''
+    job.locationType = locationType || ''
+    job.employmentType = employmentType || ''
     job.skills = skills.filter((skill) => typeof skill === 'string').map((skill) => skill.trim()).filter(Boolean)
     await job.save()
 
@@ -288,6 +447,19 @@ app.put('/api/jobs/:id', async (req, res) => {
 
 app.get('/api/jobs', async (req, res) => {
   try {
+    const attachEmployerBranding = async (jobDocs) => {
+      const emails = [...new Set(jobDocs.map((job) => job.createdBy).filter(Boolean))]
+      if (emails.length === 0) return jobDocs
+      const employers = await Employer.find({ email: { $in: emails.map((email) => new RegExp(`^${String(email).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i')) } }).select('email profile.profileImage profile.bannerImage').lean()
+      const brandingByEmail = new Map(employers.map((employer) => [employer.email.toLowerCase(), {
+        profileImage: employer.profile?.profileImage || '',
+        bannerImage: employer.profile?.bannerImage || '',
+      }]))
+      return jobDocs.map((job) => {
+        const plain = typeof job.toObject === 'function' ? job.toObject() : job
+        return { ...plain, employerBranding: brandingByEmail.get((plain.createdBy || '').toLowerCase()) || null }
+      })
+    }
     const { status } = req.query
     if (status === 'pending') {
       const auth = req.headers.authorization
@@ -296,7 +468,7 @@ app.get('/api/jobs', async (req, res) => {
       const decoded = jwt.verify(token, jwtSecret)
       if (decoded.role !== 'Admin') return res.status(403).json({ error: 'Forbidden' })
       const jobs = await JobPosting.find({ status: 'pending' }).sort({ createdAt: -1 })
-      return res.json(jobs)
+      return res.json(await attachEmployerBranding(jobs))
     }
     if (status === 'mine') {
       const auth = req.headers.authorization
@@ -324,10 +496,10 @@ app.get('/api/jobs', async (req, res) => {
       const decoded = jwt.verify(token, jwtSecret)
       if (decoded.role !== 'Admin') return res.status(403).json({ error: 'Forbidden' })
       const jobs = await JobPosting.find({ status: 'declined' }).sort({ createdAt: -1 })
-      return res.json(jobs)
+      return res.json(await attachEmployerBranding(jobs))
     }
     const jobs = await JobPosting.find({ status: 'approved' }).sort({ createdAt: -1 })
-    res.json(jobs)
+    res.json(await attachEmployerBranding(jobs))
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Server error' })
@@ -388,6 +560,202 @@ app.put('/api/jobs/:id/status', async (req, res) => {
   }
 })
 
+const nsrpTemplatePath = path.join(process.cwd(), 'server', 'nsrp-template.docx')
+const nsrpOfficialPdfPath = path.join(process.cwd(), 'public', 'NSRP-Form-1-Jobseeker-Reg-Form.pdf')
+
+// Overlay answers onto the official NSRP Form 1 PDF at measured coordinates.
+// pdf-lib uses a bottom-left origin; coordinates below were measured from the top (see pdfplumber map),
+// so y = pageHeight - top.
+async function generateNsrpPdf(answers) {
+  const existingPdfBytes = fs.readFileSync(nsrpOfficialPdfPath)
+  const pdfDoc = await PDFDocument.load(existingPdfBytes)
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
+  const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold)
+  const ink = rgb(0, 0, 0)
+  const pages = pdfDoc.getPages()
+  const page1 = pages[0]
+  const H = page1.getSize().height
+  const y = (top) => H - top
+  const size = 9
+  const write = (text, x, top, opts = {}) => {
+    const value = text == null ? '' : String(text)
+    if (!value.trim()) return
+    page1.drawText(value, { x, y: y(top), size: opts.size || size, font: opts.bold ? bold : font, color: ink })
+  }
+  const mark = (checked, x, top) => {
+    if (!checked) return
+    page1.drawText('X', { x, y: y(top), size: 10, font: bold, color: ink })
+  }
+
+  // I. PERSONAL INFORMATION (answers placed inside each cell, using the table grid lines)
+  // Name row: labels at top 167; answer band ~180-206
+  write(answers.surname, 32, 196)
+  write(answers.firstName, 155, 196)
+  write(answers.middleName, 300, 196)
+  write(answers.suffix, 440, 196)
+  // DOB / PLACE OF BIRTH row: labels at 180; answer within band 192-206, right of the label
+  write(answers.dob, 170, 198)
+  write(answers.placeOfBirth, 340, 198)
+  // SEX row band ~206-228
+  mark(answers.sex === 'Male', 178, 211)
+  mark(answers.sex === 'Female', 250, 211)
+  // RELIGION row band ~206-228, answer right of label
+  write(answers.religion, 100, 224)
+  // PRESENT ADDRESS right column (x>=321), four stacked lines
+  write(answers.addressStreet, 340, 218)
+  write(answers.addressBarangay, 340, 233)
+  write(answers.addressCity, 340, 247)
+  write(answers.addressProvince, 340, 261)
+  // CIVIL STATUS checkboxes
+  mark(answers.civilStatus === 'Single', 105, 233)
+  mark(answers.civilStatus === 'Separated', 200, 233)
+  mark(answers.civilStatus === 'Married', 105, 246)
+  mark(answers.civilStatus === 'Live-in', 200, 246)
+  mark(answers.civilStatus === 'Widowed', 105, 261)
+  // TIN / HEIGHT row band ~270-284
+  write(answers.tin, 100, 278)
+  write(answers.height, 340, 278)
+  // GSIS/SSS / EMAIL row band ~284-298
+  write(answers.gsisSss, 100, 292)
+  write(answers.email, 340, 292)
+  // PAG-IBIG / LANDLINE row band ~298-312
+  write(answers.pagibig, 100, 306)
+  write(answers.landline, 340, 306)
+  // PHILHEALTH / CELLPHONE row band ~312-326
+  write(answers.philhealth, 100, 320)
+  write(answers.cellphone, 340, 320)
+  // DISABILITY specify line (next to 'Others, specify:')
+  write(answers.disability, 380, 344, { size: 8 })
+
+  // EMPLOYMENT STATUS / TYPE
+  mark(answers.employmentStatus === 'Employed', 116, 364)
+  mark(answers.employmentStatus === 'Unemployed', 246, 364)
+  const typeDetail = (answers.employmentTypeDetail || '').toLowerCase()
+  mark(typeDetail.includes('wage'), 132, 390)
+  mark(typeDetail.includes('self'), 132, 416)
+  mark(typeDetail.includes('fresh') || typeDetail.includes('new entrant'), 258, 390)
+  mark(typeDetail.includes('finished') || typeDetail.includes('contract'), 258, 412)
+  mark(typeDetail.includes('resigned'), 258, 432)
+  mark(typeDetail.includes('retired'), 258, 456)
+  if (typeDetail.includes('terminated') && typeDetail.includes('abroad')) write(answers.employmentTypeDetail, 443, 424, { size: 7 })
+  else if (typeDetail && !['wage', 'self', 'fresh', 'new entrant', 'finished', 'contract', 'resigned', 'retired'].some((k) => typeDetail.includes(k))) {
+    write(answers.employmentTypeDetail, 445, 444, { size: 7 })
+  }
+
+  // Looking-for-work questions
+  mark(answers.activelyLooking === 'Yes', 155, 473)
+  mark(answers.activelyLooking === 'No', 180, 473)
+  write(answers.lookingDuration, 430, 473, { size: 8 })
+  mark(answers.willingImmediately === 'Yes', 155, 485)
+  mark(answers.willingImmediately === 'No', 180, 485)
+  write(answers.willingWhen, 340, 485, { size: 8 })
+  mark(answers.fourPs === 'Yes', 155, 509)
+  mark(answers.fourPs === 'No', 180, 509)
+  write(answers.fourPsId, 430, 509, { size: 8 })
+
+  // II. JOB PREFERENCE
+  write(answers.occupation1, 36, 562)
+  write(answers.occupation2, 36, 584)
+  write(answers.occupation3, 36, 606)
+  write(answers.occupation4, 36, 626)
+  write(answers.localPref1, 175, 582)
+  write(answers.localPref2, 175, 606)
+  write(answers.localPref3, 175, 626)
+  write(answers.overseasPref1, 400, 582)
+  write(answers.overseasPref2, 400, 606)
+  write(answers.overseasPref3, 400, 626)
+  write(answers.expectedSalary, 36, 662)
+  write(answers.passportNo, 322, 662)
+  write(answers.passportExpiry, 480, 662)
+
+  const pdfBytes = await pdfDoc.save()
+  return Buffer.from(pdfBytes)
+}
+
+async function generateNsrpDocument(answers, fallbackEmail) {
+  const templateBuffer = fs.readFileSync(nsrpTemplatePath)
+  const filledBuffer = await createReport({
+    template: templateBuffer,
+    data: {
+      surname: answers.surname || '',
+      firstName: answers.firstName || '',
+      middleName: answers.middleName || '',
+      suffix: answers.suffix || '',
+      dob: answers.dob || '',
+      placeOfBirth: answers.placeOfBirth || '',
+      sexMale: answers.sex === 'Male' ? '[X]' : '[  ]',
+      sexFemale: answers.sex === 'Female' ? '[X]' : '[  ]',
+      religion: answers.religion || '',
+      addressStreet: answers.addressStreet || '',
+      addressBarangay: answers.addressBarangay || '',
+      addressCity: answers.addressCity || '',
+      addressProvince: answers.addressProvince || '',
+      civilSingle: answers.civilStatus === 'Single' ? '[X]' : '[  ]',
+      civilSeparated: answers.civilStatus === 'Separated' ? '[X]' : '[  ]',
+      civilMarried: answers.civilStatus === 'Married' ? '[X]' : '[  ]',
+      civilLiveIn: answers.civilStatus === 'Live-in' ? '[X]' : '[  ]',
+      civilWidowed: answers.civilStatus === 'Widowed' ? '[X]' : '[  ]',
+      tin: answers.tin || '',
+      height: answers.height || '',
+      gsisSss: answers.gsisSss || '',
+      email: answers.email || fallbackEmail || '',
+      pagibig: answers.pagibig || '',
+      landline: answers.landline || '',
+      philhealth: answers.philhealth || '',
+      cellphone: answers.cellphone || '',
+      disability: answers.disability ? `Disability: ${answers.disability}` : '',
+      empEmployed: answers.employmentStatus === 'Employed' ? '[X]' : '[  ]',
+      empUnemployed: answers.employmentStatus === 'Unemployed' ? '[X]' : '[  ]',
+      empTypeDetail: answers.employmentTypeDetail ? `Type: ${answers.employmentTypeDetail}` : '',
+      activelyLooking: `Actively looking for work: ${answers.activelyLooking || 'N/A'}`,
+      lookingDuration: answers.lookingDuration || 'N/A',
+      willingImmediately: answers.willingImmediately || 'N/A',
+      willingWhen: answers.willingWhen || 'N/A',
+      fourPs: `4Ps beneficiary: ${answers.fourPs || 'N/A'}`,
+      fourPsId: answers.fourPsId || 'N/A',
+      occupation1: answers.occupation1 || '',
+      occupation2: answers.occupation2 || '',
+      occupation3: answers.occupation3 || '',
+      occupation4: answers.occupation4 || '',
+      localPref1: answers.localPref1 || '',
+      localPref2: answers.localPref2 || '',
+      localPref3: answers.localPref3 || '',
+      overseasPref1: answers.overseasPref1 || '',
+      overseasPref2: answers.overseasPref2 || '',
+      overseasPref3: answers.overseasPref3 || '',
+      expectedSalary: answers.expectedSalary || '',
+      passportNo: answers.passportNo || '',
+      passportExpiry: answers.passportExpiry || '',
+    },
+    cmdDelimiter: ['{', '}'],
+  })
+  const docxBuffer = Buffer.isBuffer(filledBuffer) ? filledBuffer : Buffer.from(filledBuffer)
+  const filename = `NSRP-${(answers.surname || 'applicant').replace(/\s+/g, '_')}-${Date.now()}.docx`
+  return { docxBuffer, filename }
+}
+
+// Generate a filled NSRP Form 1 document from browser answers and let the applicant download it
+app.post('/api/nsrp/generate', async (req, res) => {
+  try {
+    const auth = req.headers.authorization
+    if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
+    const token = auth.split(' ')[1]
+    const decoded = jwt.verify(token, jwtSecret)
+    if (decoded.role !== 'Applicant') return res.status(403).json({ error: 'Forbidden' })
+    const answers = req.body || {}
+    if (!answers.surname || !answers.firstName) return res.status(400).json({ error: 'Surname and first name are required' })
+
+    const surname = (answers.surname || 'form').replace(/\s+/g, '_')
+    const pdfBuffer = await generateNsrpPdf(answers)
+    res.set('Content-Type', 'application/pdf')
+    res.set('Content-Disposition', `attachment; filename="NSRP-${surname}.pdf"`)
+    res.send(pdfBuffer)
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Server error' })
+  }
+})
+
 app.post('/api/jobs/:id/apply', applicationUpload.single('nsrp'), async (req, res) => {
   try {
     const auth = req.headers.authorization
@@ -401,7 +769,16 @@ app.post('/api/jobs/:id/apply', applicationUpload.single('nsrp'), async (req, re
 
     const applicant = await Applicant.findOne({ email: decoded.email }).lean()
     if (!applicant) return res.status(404).json({ error: 'Applicant not found' })
-    if (!req.file) return res.status(400).json({ error: 'Completed NSRP PDF is required' })
+
+    // Submission requires uploading the completed form (PDF or DOCX)
+    if (!req.file) return res.status(400).json({ error: 'Please upload your completed NSRP form (PDF or DOCX)' })
+    const nsrpFilePayload = {
+      originalName: req.file.originalname,
+      mimetype: req.file.mimetype,
+      size: req.file.size,
+      data: req.file.buffer,
+    }
+
     if (job.applicants.some((existingApplicant) => existingApplicant.email === decoded.email)) {
       return res.status(409).json({ error: 'You have already applied for this job' })
     }
@@ -409,12 +786,7 @@ app.post('/api/jobs/:id/apply', applicationUpload.single('nsrp'), async (req, re
     await JobApplication.create({
       jobId: job._id,
       applicantEmail: decoded.email,
-      nsrpFile: {
-        originalName: req.file.originalname,
-        mimetype: req.file.mimetype,
-        size: req.file.size,
-        data: req.file.buffer,
-      },
+      nsrpFile: nsrpFilePayload,
     })
 
     job.applicants.push({ email: decoded.email, appliedAt: new Date() })
@@ -544,7 +916,7 @@ app.get('/api/referrals/admin', async (req, res) => {
     const decoded = jwt.verify(token, jwtSecret)
     if (decoded.role !== 'Admin') return res.status(403).json({ error: 'Forbidden' })
 
-    const referrals = await Referral.find().select('jobId applicantId').lean()
+    const referrals = await Referral.find().select('jobId applicantId status').lean()
     res.json(referrals)
   } catch (err) {
     console.error(err)
@@ -569,11 +941,11 @@ app.get('/api/referrals/employer/:employerId', async (req, res) => {
 
     const referrals = await Referral.find({ employerId: req.params.employerId })
       .sort({ createdAt: -1 })
-      .populate({ path: 'applicantId', select: 'email profile' })
+      .populate({ path: 'applicantId', select: 'email profile resumeFile.originalName resumeFile.size resumeFile.uploadedAt' })
       .populate({
         path: 'jobId',
         model: JobPosting,
-        select: 'title company location description requirements salary status createdBy createdAt',
+        select: 'title company location description requirements salary locationType employmentType status createdBy createdAt',
       })
 
     res.json(referrals)
@@ -1079,6 +1451,33 @@ app.get('/api/employer-requirements/:id/view', async (req, res) => {
   }
 })
 
+// Admin: view an applicant's NSRP application PDF for a given job
+app.get('/api/job-applications/view', async (req, res) => {
+  try {
+    const auth = req.headers.authorization
+    if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
+    const token = auth.split(' ')[1]
+    const decoded = jwt.verify(token, jwtSecret)
+    if (decoded.role !== 'Admin') return res.status(403).json({ error: 'Forbidden' })
+    const { jobId, email } = req.query || {}
+    if (!jobId || !email) return res.status(400).json({ error: 'jobId and email are required' })
+    const application = await JobApplication.findOne({ jobId, applicantEmail: { $regex: `^${String(email).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' } }).select('+nsrpFile.data').lean()
+    if (!application?.nsrpFile?.data) return res.status(404).json({ error: 'Application NSRP PDF not found' })
+    const file = application.nsrpFile
+    const raw = file.data
+    const buffer = Buffer.isBuffer(raw) ? raw : (raw?.buffer ? Buffer.from(raw.buffer) : Buffer.from(raw))
+    const filename = file.originalName || 'nsrp-form'
+    // Serve with the correct content type so PDFs render inline and DOCX files download cleanly
+    res.type(file.mimetype || 'application/octet-stream')
+    const isPdf = (file.mimetype || '').includes('pdf') || filename.toLowerCase().endsWith('.pdf')
+    res.set('Content-Disposition', `${isPdf ? 'inline' : 'attachment'}; filename="${filename}"`)
+    res.send(buffer)
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Failed to view application NSRP' })
+  }
+})
+
 app.put('/api/employer-requests/:id/status', async (req, res) => {
   try {
     const auth = req.headers.authorization
@@ -1118,6 +1517,33 @@ app.put('/api/employer-requests/:id/status', async (req, res) => {
   }
 })
 
+// Admin: review an applicant's NSRP (resume) for account verification
+app.put('/api/applicants/:id/verification', async (req, res) => {
+  try {
+    const auth = req.headers.authorization
+    if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
+    const token = auth.split(' ')[1]
+    const decoded = jwt.verify(token, jwtSecret)
+    if (decoded.role !== 'Admin') return res.status(403).json({ error: 'Forbidden' })
+    const { status, reason } = req.body || {}
+    if (!['approved', 'declined', 'restricted'].includes(status)) return res.status(400).json({ error: 'Invalid status' })
+
+    const applicant = await Applicant.findById(req.params.id)
+    if (!applicant) return res.status(404).json({ error: 'Applicant not found' })
+
+    const reviewReason = typeof reason === 'string' ? reason.trim() : ''
+    applicant.verificationStatus = status
+    if (reviewReason) applicant.verificationReason = reviewReason
+    else applicant.verificationReason = undefined
+    await applicant.save()
+
+    res.json({ id: String(applicant._id), email: applicant.email, verificationStatus: applicant.verificationStatus })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Server error' })
+  }
+})
+
 // Admin: list all accounts across collections
 app.get('/api/admin/users', async (req, res) => {
   try {
@@ -1146,6 +1572,7 @@ app.get('/api/admin/users', async (req, res) => {
         website: u.website,
         profile: u.profile,
         approvalStatus: request?.status || 'approved',
+        requestId: request ? String(request._id) : undefined,
         requirementsFile: request?.requirementsFile ? {
           requestId: String(request._id),
           originalName: request.requirementsFile.originalName,
@@ -1160,7 +1587,7 @@ app.get('/api/admin/users', async (req, res) => {
       id: request._id, email: request.email, role: 'Employer', companyName: request.companyName, contactName: request.contactName, phone: request.phone,
       profile: { location: request.location, summary: request.message }, approvalStatus: request.status, createdAt: request.createdAt,
     }))
-    const mapApplicant = applicants.map((u) => ({ id: u._id, email: u.email, role: 'Applicant', phone: u.phone || u.profile?.phone, profile: u.profile, createdAt: u.createdAt }))
+    const mapApplicant = applicants.map((u) => ({ id: u._id, email: u.email, role: 'Applicant', phone: u.phone || u.profile?.phone, profile: u.profile, verificationStatus: u.verificationStatus || 'approved', hasResume: Boolean(u.resumeFile?.data || u.resumeFile?.originalName), hasNsrpVerification: Boolean(u.nsrpVerificationFile?.data || u.nsrpVerificationFile?.originalName), createdAt: u.createdAt }))
 
     const combined = [...mapAdmin, ...mapEmployer, ...mapEmployerRequests, ...mapApplicant]
     res.json(combined)
