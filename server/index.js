@@ -44,7 +44,7 @@ app.use((req, res, next) => {
   next()
 })
 
-const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI
+const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI || process.env.MONGODB_URL
 const jwtSecret = process.env.JWT_SECRET || 'dev-secret'
 if (!mongoUri) {
   console.warn('Warning: MONGODB_URI not set. Connect by setting MONGODB_URI in .env')
