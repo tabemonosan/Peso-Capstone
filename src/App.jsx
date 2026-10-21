@@ -1,6 +1,16 @@
-import { Fragment, useEffect, useState } from "react"
+import { Fragment, useCallback, useEffect, useState } from "react"
 import { API_URL } from "./config"
 import JobsView from "./components/JobsView"
+import VerificationDocumentsForm, { emptyVerificationDocs, validateVerificationDocs } from "./components/VerificationDocumentsForm"
+import AdminVerificationDocs from "./components/AdminVerificationDocs"
+import MyDocumentsPage from "./components/MyDocumentsPage"
+import VerifyEmailPage from "./components/VerifyEmailPage"
+import EmailVerificationBanner from "./components/EmailVerificationBanner"
+import CompleteRegistrationPage from "./components/CompleteRegistrationPage"
+import JobTitlePicker from "./components/JobTitlePicker"
+import AdminJobTitlesPage from "./components/AdminJobTitlesPage"
+import PasswordChecklist from "./components/PasswordChecklist"
+import { validatePassword } from "./utils/passwordPolicy"
 import ReferralList from "./components/ReferralList"
 import PesoReferralPanel from "./components/PesoReferralPanel"
 
@@ -16,9 +26,11 @@ const navigationByRole = {
     { id: "applicants", label: "Applicants" },
     { id: "requests", label: "Employer Requests" },
     { id: "jobs", label: "Job Postings" },
+    { id: "job-titles", label: "Job Titles" },
     { id: "peso-referrals", label: "Reports" },
   ],
   Employer: [
+    { id: "complete", label: "Complete Registration" },
     { id: "home", label: "Home" },
     { id: "dashboard", label: "Dashboard" },
     { id: "employer", label: "Job Postings" },
@@ -27,7 +39,9 @@ const navigationByRole = {
     { id: "notify", label: "Notifications" },
   ],
   Applicant: [
+    { id: "complete", label: "Complete Registration" },
     { id: "home", label: "Home" },
+    { id: "documents", label: "My Documents" },
     { id: "jobs", label: "Jobs" },
     { id: "reputation", label: "Reviews" },
     { id: "notify", label: "Notifications" },
@@ -1052,7 +1066,15 @@ const [authView, setAuthView] = useState("login")
     password: "",
     confirmPassword: "",
     name: "",
+    location: "",
+    skills: "",
+    summary: "",
   })
+  const [signupResumeFile, setSignupResumeFile] = useState(null)
+  const [signupDocs, setSignupDocs] = useState(emptyVerificationDocs)
+  const [signupConsent, setSignupConsent] = useState(false)
+  const [signupUploading, setSignupUploading] = useState(false)
+  const [signupProgress, setSignupProgress] = useState("")
   const [employerRequestForm, setEmployerRequestForm] = useState({
     email: "",
     password: "",
@@ -1071,15 +1093,19 @@ const [authView, setAuthView] = useState("login")
     landmark: "",
   })
   const [requirementsFile, setRequirementsFile] = useState(null)
+  const [employerSignupFile, setEmployerSignupFile] = useState(null)
   const [employerRequests, setEmployerRequests] = useState([])
   const [adminUsers, setAdminUsers] = useState([])
   const [jobForm, setJobForm] = useState({
     title: "",
+    customTitle: "",
     company: "",
     location: "",
     description: "",
     requirements: "",
     salary: "",
+    slots: "",
+    deadline: "",
     locationType: "",
     employmentType: "",
     skills: [],
@@ -1090,16 +1116,21 @@ const [authView, setAuthView] = useState("login")
   const [editingJobCanSave, setEditingJobCanSave] = useState(false)
   const [editingJobForm, setEditingJobForm] = useState({
     title: '',
+    customTitle: '',
     company: '',
     location: '',
     description: '',
     requirements: '',
     salary: '',
+    slots: '',
+    deadline: '',
     locationType: '',
     employmentType: '',
     skills: [],
   })
   const [availableJobs, setAvailableJobs] = useState([])
+  const [jobTitleGroups, setJobTitleGroups] = useState([])
+  const [jobTitleLoadError, setJobTitleLoadError] = useState("")
   const [appliedJobs, setAppliedJobs] = useState([])
   const [pendingJobs, setPendingJobs] = useState([])
   const [notifications, setNotifications] = useState([])
@@ -1117,14 +1148,13 @@ const [authView, setAuthView] = useState("login")
   const [jobLocationTypeFilter, setJobLocationTypeFilter] = useState('all')
   const [jobEmploymentTypeFilter, setJobEmploymentTypeFilter] = useState('all')
   const [jobLoading, setJobLoading] = useState(false)
+  const [jobLoadError, setJobLoadError] = useState('')
   const [selectedJob, setSelectedJob] = useState(null)
   const [selectedNotification, setSelectedNotification] = useState(null)
   const [referralPrefill, setReferralPrefill] = useState({ jobId: '', applicantIds: [] })
   const [appMessage, setAppMessage] = useState(null)
   const [declineRequestTarget, setDeclineRequestTarget] = useState(null)
   const [declineReason, setDeclineReason] = useState('')
-  const [declineJobTarget, setDeclineJobTarget] = useState(null)
-  const [declineJobReason, setDeclineJobReason] = useState('')
   const [approveRequestTarget, setApproveRequestTarget] = useState(null)
   const [expandedDirectoryUserId, setExpandedDirectoryUserId] = useState(null)
   const [showVerificationModal, setShowVerificationModal] = useState(false)
@@ -1143,7 +1173,7 @@ const [authView, setAuthView] = useState("login")
     const token = currentUser?.token || localStorage.getItem('peso-token')
     if (!token) return Promise.resolve({ ok: false })
 
-    return fetch('${API_URL}/api/profile', {
+    return fetch(`${API_URL}/api/profile`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ profile: nextProfile }),
@@ -1178,6 +1208,29 @@ const [authView, setAuthView] = useState("login")
 
   const getToken = () =>
     currentUser?.token || (typeof window !== "undefined" ? localStorage.getItem('peso-token') : null)
+
+  const updateRegistrationUser = useCallback((data) => {
+    setCurrentUser((current) => ({ ...current, registration: data.registration }))
+  }, [])
+
+  const loadJobTitles = useCallback(async () => {
+    const token = currentUser?.token || localStorage.getItem('peso-token')
+    if (!token) return
+    try {
+      const response = await fetch(`${API_URL}/api/job-titles`, { headers: { Authorization: `Bearer ${token}` } })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) throw new Error(data?.error || 'Could not load job titles')
+      setJobTitleGroups(Array.isArray(data?.categories) ? data.categories : [])
+      setJobTitleLoadError("")
+    } catch (err) {
+      console.error(err)
+      setJobTitleLoadError(err?.message || 'Could not load job titles')
+    }
+  }, [currentUser?.token])
+
+  useEffect(() => {
+    if (isLoggedIn && ['Employer', 'Admin'].includes(activeRole)) loadJobTitles()
+  }, [isLoggedIn, activeRole, loadJobTitles])
 
   const handleImageFile = (file, field) => {
     if (!file) return
@@ -1218,7 +1271,7 @@ const [authView, setAuthView] = useState("login")
     const token = getToken()
     if (!token) return
 
-    fetch('${API_URL}/api/employer-requests', {
+    fetch(`${API_URL}/api/employer-requests`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((r) => r.json())
@@ -1230,7 +1283,7 @@ const [authView, setAuthView] = useState("login")
     const token = getToken()
     if (!token) return
 
-    fetch('${API_URL}/api/notifications', {
+    fetch(`${API_URL}/api/notifications`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((r) => r.json())
@@ -1254,14 +1307,25 @@ const [authView, setAuthView] = useState("login")
     if (!token) return
 
     const headers = { Authorization: `Bearer ${token}` }
+    // Server says email is unverified or registration incomplete: sync state so the right page shows
+    const handleEmailGate = (r, data) => {
+      if (r.status === 403 && data?.code === 'EMAIL_NOT_VERIFIED') {
+        setCurrentUser((current) => ({ ...current, emailVerified: false }))
+        return true
+      }
+      if (r.status === 403 && data?.code === 'REGISTRATION_INCOMPLETE') {
+        setActiveView('complete')
+        return true
+      }
+      return false
+    }
     if (activeRole === "Applicant") {
       setJobLoading(true)
-      const approvedRequest = fetch('${API_URL}/api/jobs?status=approved', { headers })
-        .then((r) => r.json())
-        .then((data) => setAvailableJobs(Array.isArray(data) ? sortJobsByMatch(data, profileData.skills) : []))
+      const approvedRequest = fetch(`${API_URL}/api/jobs?status=approved`, { headers })
+        .then(async (r) => { const data = await r.json(); if (handleEmailGate(r, data)) return; setAvailableJobs(Array.isArray(data) ? sortJobsByMatch(data, profileData.skills) : []) })
         .catch(() => setAvailableJobs([]))
 
-      const appliedRequest = fetch('${API_URL}/api/jobs?status=applied', { headers })
+      const appliedRequest = fetch(`${API_URL}/api/jobs?status=applied`, { headers })
         .then((r) => r.json())
         .then((data) => setAppliedJobs(Array.isArray(data) ? data : []))
         .catch(() => setAppliedJobs([]))
@@ -1272,7 +1336,7 @@ const [authView, setAuthView] = useState("login")
 
     if (activeRole === "Employer") {
       setJobLoading(true)
-      fetch('${API_URL}/api/jobs?status=mine', { headers })
+      fetch(`${API_URL}/api/jobs?status=mine`, { headers })
         .then((r) => r.json())
         .then((data) => {
           const jobs = Array.isArray(data) ? data : []
@@ -1286,22 +1350,27 @@ const [authView, setAuthView] = useState("login")
 
     if (activeRole === "Admin") {
       setJobLoading(true)
-      const pendingRequest = fetch('${API_URL}/api/jobs?status=pending', { headers })
-        .then((r) => r.json())
-        .then((data) => setPendingJobs(Array.isArray(data) ? data : []))
-        .catch(() => setPendingJobs([]))
-
-      const approvedRequest = fetch('${API_URL}/api/jobs?status=approved', { headers })
-        .then((r) => r.json())
-        .then((data) => setApprovedJobs(Array.isArray(data) ? data : []))
-        .catch(() => setApprovedJobs([]))
-
-      const declinedRequest = fetch('${API_URL}/api/jobs?status=declined', { headers })
-        .then((r) => r.json())
-        .then((data) => setDeclinedJobs(Array.isArray(data) ? data : []))
-        .catch(() => setDeclinedJobs([]))
-
-      Promise.all([pendingRequest, approvedRequest, declinedRequest]).finally(() => setJobLoading(false))
+      setJobLoadError('')
+      Promise.all(['pending', 'approved', 'declined'].map(async (status) => {
+        const response = await fetch(`${API_URL}/api/jobs?status=${status}`, { headers })
+        const data = await response.json().catch(() => null)
+        if (!response.ok || !Array.isArray(data)) throw new Error(data?.error || `Could not load ${status} job postings`)
+        return [status, data]
+      }))
+        .then((results) => {
+          const lists = Object.fromEntries(results)
+          setPendingJobs(lists.pending)
+          setApprovedJobs(lists.approved)
+          setDeclinedJobs(lists.declined)
+        })
+        .catch((error) => {
+          console.error('Failed to load admin job postings:', error)
+          setJobLoadError(error?.message || 'Could not load job postings. Try again.')
+          setPendingJobs([])
+          setApprovedJobs([])
+          setDeclinedJobs([])
+        })
+        .finally(() => setJobLoading(false))
       fetchEmployerRequests()
       fetchAdminReferrals()
     }
@@ -1310,7 +1379,7 @@ const [authView, setAuthView] = useState("login")
   const fetchAdminUsers = () => {
     const token = getToken()
     if (!token) return
-    fetch('${API_URL}/api/admin/users', { headers: { Authorization: `Bearer ${token}` } })
+    fetch(`${API_URL}/api/admin/users`, { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => r.json())
       .then((data) => setAdminUsers(Array.isArray(data) ? data : []))
       .catch(() => setAdminUsers([]))
@@ -1320,7 +1389,7 @@ const [authView, setAuthView] = useState("login")
     const token = getToken()
     if (!token) return
 
-    fetch('${API_URL}/api/referrals/admin', { headers: { Authorization: `Bearer ${token}` } })
+    fetch(`${API_URL}/api/referrals/admin`, { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => r.json())
       .then((data) => {
         const referredByJob = (Array.isArray(data) ? data : []).reduce((current, referral) => {
@@ -1341,12 +1410,12 @@ const [authView, setAuthView] = useState("login")
     event.preventDefault()
     const token = getToken()
     if (!token) return alert('Not authenticated')
-    const { title, company, description, skills } = jobForm
+    const { title, customTitle, company, description, skills } = jobForm
     const payload = { ...jobForm, company: company || profileData.companyName || '', location: jobForm.location || profileData.location || '' }
-    if (!title || !payload.company || !description) return alert('Title, company, and description are required')
+    if (!title || (title === 'Other' && !customTitle.trim()) || (title === 'Other' && customTitle.trim().length > 80) || !payload.company || !description) return alert('A job title (custom titles up to 80 characters), company, and description are required')
     if (!Array.isArray(skills) || skills.length === 0) return alert('Please select at least one skill for the job')
 
-    fetch('${API_URL}/api/jobs', {
+    fetch(`${API_URL}/api/jobs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify(payload),
@@ -1354,7 +1423,7 @@ const [authView, setAuthView] = useState("login")
       .then((r) => r.json())
       .then((data) => {
         if (data.error) return alert(data.error)
-        setJobForm({ title: '', company: '', location: '', description: '', requirements: '', salary: '', locationType: '', employmentType: '', skills: [] })
+        setJobForm({ title: '', customTitle: '', company: '', location: '', description: '', requirements: '', salary: '', slots: '', deadline: '', locationType: '', employmentType: '', skills: [] })
         setShowCreateJobPosting(false)
         fetchJobs()
         fetchNotifications()
@@ -1369,13 +1438,17 @@ const [authView, setAuthView] = useState("login")
   const openEditJob = (job, canSave = true) => {
     setEditingJob(job)
     setEditingJobCanSave(canSave)
+    const knownTitle = jobTitleGroups.some((group) => group.titles.some((item) => item.name === job.title))
     setEditingJobForm({
-      title: job.title || '',
+      title: knownTitle ? job.title : 'Other',
+      customTitle: knownTitle ? '' : (job.title || ''),
       company: job.company || '',
       location: job.location || '',
       description: job.description || '',
       requirements: job.requirements || '',
       salary: job.salary || '',
+      slots: job.slots || '',
+      deadline: job.deadline ? new Date(job.deadline).toISOString().slice(0, 10) : '',
       locationType: job.locationType || '',
       employmentType: job.employmentType || '',
       skills: Array.isArray(job.skills) ? job.skills : [],
@@ -1385,8 +1458,8 @@ const [authView, setAuthView] = useState("login")
   const handleSaveEditedJob = async (event) => {
     event.preventDefault()
     if (!editingJob || !editingJobCanSave) return
-    if (!editingJobForm.title || !editingJobForm.company || !editingJobForm.description) {
-      return alert('Title, company, and description are required')
+    if (!editingJobForm.title || (editingJobForm.title === 'Other' && !editingJobForm.customTitle.trim()) || (editingJobForm.title === 'Other' && editingJobForm.customTitle.trim().length > 80) || !editingJobForm.company || !editingJobForm.description) {
+      return alert('A job title (custom titles up to 80 characters), company, and description are required')
     }
     if (!Array.isArray(editingJobForm.skills) || editingJobForm.skills.length === 0) {
       return alert('Please select at least one skill for the job')
@@ -1415,46 +1488,44 @@ const [authView, setAuthView] = useState("login")
     }
   }
 
-  const handleReviewJob = (jobId, status, options = {}) => {
+  const handleReviewJob = async (jobId, status, options = {}) => {
     const token = getToken()
-    if (!token) return alert('Not authenticated')
+    if (!token) return { error: 'Not authenticated' }
     const declineReasonValue = typeof options.reason === 'string' ? options.reason.trim() : ''
-    if (status === 'declined' && !Object.prototype.hasOwnProperty.call(options, 'reason')) {
-      const allKnownJobs = [...pendingJobs, ...approvedJobs, ...declinedJobs]
-      const matchedJob = allKnownJobs.find((job) => String(job?._id) === String(jobId))
-      setDeclineJobTarget(matchedJob || { _id: jobId, title: 'this job posting' })
-      setDeclineJobReason('')
-      setSelectedNotification(null)
-      return
-    }
+    if (status === 'declined' && !declineReasonValue) return { error: 'Enter a reason before declining this job posting.' }
 
     if (status === 'approved') {
       const allKnownJobs = [...pendingJobs, ...approvedJobs, ...declinedJobs]
       const matchedJob = allKnownJobs.find((job) => String(job?._id) === String(jobId))
       const jobTitle = matchedJob?.title || 'this job posting'
-      if (!window.confirm(`Approve "${jobTitle}"? It will become visible to applicants.`)) return
+      if (options.confirm !== false && !window.confirm(`Approve "${jobTitle}"? It will become visible to applicants.`)) return { ok: false, cancelled: true }
     }
 
-    fetch(`${API_URL}/api/jobs/${jobId}/status`, {
+    return fetch(`${API_URL}/api/jobs/${jobId}/status`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ status, reason: status === 'declined' ? declineReasonValue : '' }),
     })
-      .then((r) => r.json())
+      .then(async (response) => {
+        const data = await response.json().catch(() => null)
+        if (!response.ok || data?.error) throw new Error(data?.error || `Request failed: ${response.status}`)
+        if (!data?._id || String(data._id) !== String(jobId) || data.status !== status) {
+          throw new Error('The server returned an unexpected job review result. Refresh the list and try again.')
+        }
+        return data
+      })
       .then((data) => {
-        if (data.error) return alert(data.error)
         fetchJobs()
         fetchNotifications()
         setSelectedNotification(null)
-        if (status === 'declined') {
-          setDeclineJobTarget(null)
-          setDeclineJobReason('')
-        }
-        alert(`Job ${status}`)
+        if (!options.silent) alert(`Job ${status}`)
+        return { ok: true, job: data }
       })
       .catch((err) => {
         console.error(err)
-        alert('Failed to update job status')
+        const error = err?.message || 'Failed to update job status'
+        if (!options.silent) alert(error)
+        return { error }
       })
   }
 
@@ -1463,6 +1534,12 @@ const [authView, setAuthView] = useState("login")
     if (!token) return alert('Not authenticated')
     const ids = Array.isArray(jobIds) ? jobIds : []
     if (ids.length === 0) return alert('Select at least one job posting first')
+    let reason = ''
+    if (status === 'declined') {
+      reason = window.prompt('Enter a reason to share with the employer:')
+      if (!reason?.trim()) return alert('A reason is required to decline job postings')
+      if (reason.trim().length > 500) return alert('The decline reason must be 500 characters or fewer')
+    }
     if (!window.confirm(`${status === 'approved' ? 'Approve' : 'Decline'} ${ids.length} selected job posting${ids.length === 1 ? '' : 's'}?`)) return
 
     try {
@@ -1470,7 +1547,7 @@ const [authView, setAuthView] = useState("login")
         fetch(`${API_URL}/api/jobs/${jobId}/status`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ status }),
+          body: JSON.stringify({ status, reason }),
         }).then((r) => r.json()),
       ))
       const failed = results.filter((r) => r && r.error)
@@ -1487,38 +1564,36 @@ const [authView, setAuthView] = useState("login")
     }
   }
 
-  const handleApplyJob = async (jobId, applicationFile) => {
+  const handleApplyJob = async (jobId, nsrpAnswers) => {
     const token = getToken()
     if (!token) {
-      alert('Not authenticated')
-      return false
+      return { error: 'Your session has expired. Sign in again to continue.' }
     }
-    if (!applicationFile) {
-      alert('Please upload your completed NSRP form (PDF or DOCX)')
-      return false
-    }
-
-    const payload = new FormData()
-    payload.append('nsrp', applicationFile)
-
     try {
       const response = await fetch(`${API_URL}/api/jobs/${jobId}/apply`, {
       method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: payload,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ answers: nsrpAnswers }),
       })
       const data = await response.json().catch(() => null)
       if (!response.ok || data?.error) {
-        alert(data?.error || 'Failed to apply')
-        return false
+        if (data?.fieldErrors) return { error: data.error, fieldErrors: data.fieldErrors }
+        return { error: data?.error || 'Failed to apply' }
       }
       fetchJobs()
+      const profileResponse = await fetch(`${API_URL}/api/profile`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (profileResponse.ok) {
+        const profile = await profileResponse.json()
+        setCurrentUser((current) => ({ ...current, profile: profile.profile }))
+        setProfileData((current) => ({ ...current, skills: profile.profile?.skills || [] }))
+      }
       alert('Application submitted')
-      return true
+      return { ok: true }
     } catch (err) {
       console.error(err)
-      alert('Failed to apply')
-      return false
+      return { error: 'Failed to apply. Check your connection and try again.' }
     }
   }
 
@@ -1526,9 +1601,12 @@ const [authView, setAuthView] = useState("login")
     event.preventDefault()
     const { email, password, confirmPassword, companyName, contactName } = employerRequestForm
     if (!email || !password || !companyName || !contactName) return alert('Please fill in required fields')
+    const employerPasswordErrors = validatePassword(password)
+    if (employerPasswordErrors.length > 0) return alert('Password requirements not met. Check the rules under the password field.')
     if (password !== confirmPassword) return alert('Passwords do not match')
     if (!/^\d{11}$/.test(employerRequestForm.phone)) return alert('Phone number must contain exactly 11 digits')
     if (!employerAddress.municipality || !employerAddress.barangay) return alert('Please select your City/Municipality and Barangay')
+    if (!employerSignupFile) return alert('Please upload your NSRP registration form (PDF) to complete sign up')
 
     const addressParts = [
       employerAddress.street,
@@ -1541,10 +1619,14 @@ const [authView, setAuthView] = useState("login")
     const payload = { ...employerRequestForm, location: addressParts.join(', ') }
 
     try {
-      const response = await fetch('${API_URL}/api/employer-requests', {
+      const formPayload = new FormData()
+      Object.entries(payload).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) formPayload.append(key, value)
+      })
+      formPayload.append('requirements', employerSignupFile)
+      const response = await fetch(`${API_URL}/api/employer-requests`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: formPayload,
       })
 
       const contentType = response.headers.get('content-type') || ''
@@ -1557,8 +1639,9 @@ const [authView, setAuthView] = useState("login")
 
       setEmployerRequestForm({ email: '', password: '', confirmPassword: '', companyName: '', contactName: '', location: '', phone: '', message: '' })
       setEmployerAddress({ street: '', subdivision: '', municipality: '', barangay: '', landmark: '' })
+      setEmployerSignupFile(null)
       setAuthView('login')
-      alert('Employer account created. You can now sign in and submit your NSRP registration form for review.')
+      alert('Employer account created. Your NSRP registration form was submitted for admin review.')
     } catch (err) {
       console.error('Employer request submit failed:', err)
       alert(err?.message || 'Failed to submit employer request')
@@ -1573,7 +1656,7 @@ const [authView, setAuthView] = useState("login")
     const payload = new FormData()
     payload.append('requirements', requirementsFile)
     try {
-      const response = await fetch('${API_URL}/api/employer-requirements', {
+      const response = await fetch(`${API_URL}/api/employer-requirements`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
         body: payload,
@@ -1582,7 +1665,7 @@ const [authView, setAuthView] = useState("login")
       if (!response.ok) return alert(data?.error || 'Failed to submit requirements')
       setRequirementsFile(null)
       alert('NSRP registration form submitted for admin review.')
-      const profileResponse = await fetch('${API_URL}/api/profile', { headers: { Authorization: `Bearer ${token}` } })
+      const profileResponse = await fetch(`${API_URL}/api/profile`, { headers: { Authorization: `Bearer ${token}` } })
       const profile = await profileResponse.json().catch(() => null)
       if (profile && !profile.error) setCurrentUser((current) => ({ ...current, verificationStatus: profile.verificationStatus, verificationReason: profile.verificationReason }))
       fetchEmployerRequests()
@@ -1695,7 +1778,7 @@ const [authView, setAuthView] = useState("login")
     const token = getToken()
     if (!token) return
     const preview = window.open('', '_blank')
-    const response = await fetch('${API_URL}/api/employer-requirements/current/view', {
+    const response = await fetch(`${API_URL}/api/employer-requirements/current/view`, {
       headers: { Authorization: `Bearer ${token}` },
     })
     if (!response.ok) {
@@ -1731,7 +1814,7 @@ const [authView, setAuthView] = useState("login")
     if (!window.confirm(`${isReferred ? 'Cancel referral for' : 'Refer'} ${applicantName}${isReferred ? '?' : ' to this job?'}`)) return
 
     try {
-      const response = await fetch('${API_URL}/api/referrals', {
+      const response = await fetch(`${API_URL}/api/referrals`, {
         method: isReferred ? 'DELETE' : 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ jobId, applicantIds: [applicantId] }),
@@ -1763,7 +1846,7 @@ const [authView, setAuthView] = useState("login")
     if (!window.confirm(`Refer ${applicantIdsArray.length} selected applicant${applicantIdsArray.length === 1 ? '' : 's'} to this job?`)) return
 
     try {
-      const response = await fetch('${API_URL}/api/referrals', {
+      const response = await fetch(`${API_URL}/api/referrals`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ jobId, applicantIds: applicantIdsArray }),
@@ -1826,30 +1909,31 @@ const [authView, setAuthView] = useState("login")
   }
 
   useEffect(() => {
-    if (isLoggedIn) {
+    // Unverified applicants don't fetch job data (the jobs view is hidden anyway)
+    const applicantBlocked = activeRole === 'Applicant' && currentUser?.verificationStatus && currentUser.verificationStatus !== 'approved'
+    const registrationIncomplete = ['Applicant', 'Employer'].includes(activeRole) && currentUser?.registration && !currentUser.registration.complete
+    if (isLoggedIn && !applicantBlocked && !registrationIncomplete) {
       fetchJobs()
       fetchNotifications()
     }
     if (isLoggedIn && activeRole === 'Employer' && currentUser?.verificationStatus && currentUser.verificationStatus !== 'approved' && !['home', 'dashboard', 'profile'].includes(activeView)) {
       setActiveView('home')
     }
-    if (isLoggedIn && activeRole === 'Applicant' && currentUser?.verificationStatus && currentUser.verificationStatus !== 'approved' && !['home', 'profile'].includes(activeView)) {
-      setActiveView('home')
-    }
     if (isLoggedIn && activeRole === 'Admin' && ['records', 'employers', 'applicants', 'requests', 'jobs', 'peso-referrals'].includes(activeView)) fetchAdminUsers()
-  }, [isLoggedIn, activeRole, activeView, currentUser?.verificationStatus, profileData.skills])
+  }, [isLoggedIn, activeRole, activeView, currentUser?.verificationStatus, currentUser?.registration?.complete, profileData.skills])
 
   useEffect(() => {
-    if (isLoggedIn) {
+    const registrationIncomplete = ['Applicant', 'Employer'].includes(activeRole) && currentUser?.registration && !currentUser.registration.complete
+    if (isLoggedIn && !registrationIncomplete) {
       fetchNotifications()
     }
-  }, [isLoggedIn, currentUser?.email])
+  }, [isLoggedIn, currentUser?.email, activeRole, currentUser?.registration])
 
   useEffect(() => {
     const token = localStorage.getItem('peso-token')
     if (!token) return
 
-    fetch('${API_URL}/api/profile', {
+    fetch(`${API_URL}/api/profile`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((response) => response.json())
@@ -1877,7 +1961,7 @@ const [authView, setAuthView] = useState("login")
     const refreshEmployerVerification = () => {
       const token = getToken()
       if (!token) return
-      fetch('${API_URL}/api/profile', {
+      fetch(`${API_URL}/api/profile`, {
         headers: { Authorization: `Bearer ${token}` },
       })
         .then((response) => response.json())
@@ -1901,7 +1985,7 @@ const [authView, setAuthView] = useState("login")
   const handleLogin = (event) => {
     event.preventDefault()
     // call backend login
-    fetch('${API_URL}/api/login', {
+    fetch(`${API_URL}/api/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: formData.email, password: formData.password }),
@@ -1921,7 +2005,9 @@ const [authView, setAuthView] = useState("login")
         setCurrentUser({ ...data.user, token: data.token })
         setActiveRole(data.user.role)
         const needsVerification = ['Employer', 'Applicant'].includes(data.user.role) && data.user.verificationStatus && data.user.verificationStatus !== 'approved'
-        setActiveView(needsVerification ? 'home' : navigationByRole[data.user.role]?.[0]?.id || "dashboard")
+        const registrationIncomplete = ['Applicant', 'Employer'].includes(data.user.role) && data.user.registration && !data.user.registration.complete
+        const initialView = navigationByRole[data.user.role]?.find((item) => item.id !== 'complete')?.id || "dashboard"
+        setActiveView(registrationIncomplete ? 'complete' : needsVerification ? 'home' : initialView)
         setIsLoggedIn(true)
         setProfileData(normalizeProfile(data.user, data.user.role))
         setResumeInfo(data.user.resumeFile || null)
@@ -1933,39 +2019,93 @@ const [authView, setAuthView] = useState("login")
       })
   }
 
-  const handleSignup = (event) => {
+  const uploadVerificationDoc = async (token, docKey, file, { idType } = {}) => {
+    const payload = new FormData()
+    payload.append('document', file)
+    if (idType) payload.append('idType', idType)
+    const response = await fetch(`${API_URL}/api/profile/verification-documents/${docKey}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: payload,
+    })
+    const data = await response.json().catch(() => null)
+    if (!response.ok || data?.error) throw new Error(data?.error || `Failed to upload ${docKey}`)
+    return data
+  }
+
+  const handleSignup = async (event) => {
     event.preventDefault()
+    const passwordErrors = validatePassword(signupForm.password)
+    if (passwordErrors.length > 0) {
+      alert('Password requirements not met. Check the rules under the password field.')
+      return
+    }
     if (signupForm.password !== signupForm.confirmPassword) {
       alert('Passwords do not match')
       return
     }
-    // Call backend signup
-    fetch('${API_URL}/api/signup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: signupForm.email,
-        password: signupForm.password,
-        name: signupForm.name,
-      }),
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.error) return alert(data.error)
-        if (data.token) localStorage.setItem('peso-token', data.token)
-        const applicantProfile = normalizeProfile(data.user, data.user.role || 'Applicant')
-        setCurrentUser({ ...data.user, token: data.token, role: 'Applicant' })
-        setActiveRole('Applicant')
-        setActiveView('home')
-        setIsLoggedIn(true)
-        setProfileData(applicantProfile)
-        setShowSkillPrompt(true)
-        setAuthView("login")
+    if (!signupConsent) {
+      alert('Please agree to the data privacy consent to continue')
+      return
+    }
+    if (!validateVerificationDocs(signupDocs, signupConsent)) {
+      alert('Please complete all required verification documents (NSRP form, birth certificate, and Valid ID #1 front)')
+      return
+    }
+    if (!signupResumeFile) {
+      alert('Please upload your resume (PDF, DOCX, JPG, or PNG; maximum 5 MB)')
+      return
+    }
+    setSignupUploading(true)
+    setSignupProgress('Validating your profile and documents…')
+    try {
+      const signupPayload = new FormData()
+      Object.entries(signupForm).forEach(([key, value]) => {
+        if (key !== 'confirmPassword') signupPayload.append(key, value)
       })
-      .catch((err) => {
-        console.error(err)
-        alert('Signup failed')
+      signupPayload.append('consent', 'true')
+      signupPayload.append('id1Type', signupDocs.id1.type)
+      signupPayload.append('nsrpForm', signupDocs.nsrpForm)
+      signupPayload.append('birthCertificate', signupDocs.birthCertificate)
+      signupPayload.append('validId1Front', signupDocs.id1.front)
+      signupPayload.append('resume', signupResumeFile)
+
+      const signupResponse = await fetch(`${API_URL}/api/signup`, {
+        method: 'POST',
+        body: signupPayload,
       })
+      const data = await signupResponse.json().catch(() => null)
+      if (!signupResponse.ok || data?.error) throw new Error(data?.error || `Signup failed: ${signupResponse.status}`)
+
+      if (signupDocs.id2.front) {
+        try {
+          await uploadVerificationDoc(data.token, 'validId2', signupDocs.id2.front, { idType: signupDocs.id2.type })
+        } catch (err) {
+          console.error('Optional second ID upload failed:', err)
+        }
+      }
+
+      if (data.token) localStorage.setItem('peso-token', data.token)
+      const applicantProfile = normalizeProfile(data.user, data.user.role || 'Applicant')
+      setCurrentUser({ ...data.user, token: data.token, role: 'Applicant', verificationStatus: 'under_review' })
+      setActiveRole('Applicant')
+      setActiveView('home')
+      setIsLoggedIn(true)
+      setProfileData(applicantProfile)
+      setSignupResumeFile(null)
+      setSignupDocs(emptyVerificationDocs)
+      setSignupConsent(false)
+      setSignupProgress("")
+      setAuthView("login")
+      alert('Account created. Your documents were submitted for admin review.')
+    } catch (err) {
+      console.error(err)
+      alert(err?.message || 'Signup failed')
+      setSignupProgress("")
+    } finally {
+      setSignupUploading(false)
+      setSignupProgress("")
+    }
   }
 
   const handleLogout = () => {
@@ -2026,17 +2166,35 @@ const [authView, setAuthView] = useState("login")
   const showDeclinedAdminSection = activeRole === 'Admin' && (adminJobStatusFilter === 'all' || adminJobStatusFilter === 'declined')
 
   const selectedJobIsApplied = Boolean(selectedJob && (appliedJobIds.has(String(selectedJob._id)) || (selectedJob.applicants || []).some((applicant) => applicant.email === currentUser?.email)))
-  const selectedNotificationId = selectedNotification?._id ? String(selectedNotification._id) : ''
-  const selectedNotificationJobId = selectedNotification?.jobId || (selectedNotificationId.startsWith('job-pending-') ? selectedNotificationId.replace('job-pending-', '') : null)
-  const selectedNotificationIsPending = selectedNotification?.status === 'pending' || (selectedNotification?.title || '').toLowerCase().includes('pending')
+  const selectedNotificationIsPending = selectedNotification?.kind === 'job-review'
+    && (selectedNotification?.status === 'pending' || (selectedNotification?.title || '').toLowerCase().includes('pending'))
   const accountNeedsVerification = Boolean(
     currentUser?.verificationStatus && currentUser.verificationStatus !== 'approved',
   )
 
+  // Unverified applicants land on My Documents once (not every navigation)
+  useEffect(() => {
+    if (isLoggedIn && activeRole === 'Applicant' && currentUser?.verificationStatus && currentUser.verificationStatus !== 'approved' && activeView === 'home') {
+      setActiveView('documents')
+    }
+  }, [isLoggedIn, activeRole, currentUser?.verificationStatus, activeView])
+
+  // Incomplete accounts can only leave the checklist through its profile/document links.
+  useEffect(() => {
+    if (isLoggedIn && currentUser?.registration && !currentUser.registration.complete && ['Applicant', 'Employer'].includes(activeRole) && !['complete', 'profile', 'documents', 'dashboard'].includes(activeView)) {
+      setActiveView('complete')
+    }
+  }, [isLoggedIn, activeRole, currentUser?.registration, activeView])
+
+  // /verify-email landing page (linked from verification emails)
+  if (!isLoggedIn && typeof window !== 'undefined' && window.location.pathname === '/verify-email') {
+    return <VerifyEmailPage onDone={() => { window.history.replaceState({}, '', '/'); setAuthView('login') }} />
+  }
+
   if (!isLoggedIn) {
     return (
       <div className="auth-page">
-        <div className="auth-card">
+        <div className={`auth-card${authView === 'login' ? '' : ' auth-card-wide'}`}>
           <div className="auth-logo" aria-label="Public Employment Service Office">
             <img
               src="/peso-logo.png"
@@ -2140,6 +2298,7 @@ const [authView, setAuthView] = useState("login")
                   value={employerRequestForm.password}
                   onChange={(e) => setEmployerRequestForm({ ...employerRequestForm, password: e.target.value })}
                   className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                  autoComplete="new-password"
                   required
                 />
                 <button
@@ -2161,8 +2320,10 @@ const [authView, setAuthView] = useState("login")
                   value={employerRequestForm.confirmPassword}
                   onChange={(e) => setEmployerRequestForm({ ...employerRequestForm, confirmPassword: e.target.value })}
                   className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                  autoComplete="new-password"
                   required
                 />
+                <PasswordChecklist password={employerRequestForm.password} confirmPassword={employerRequestForm.confirmPassword} />
                 <button
                   type="button"
                   aria-label={showEmployerPasswords ? "Hide passwords" : "Show passwords"}
@@ -2285,6 +2446,7 @@ const [authView, setAuthView] = useState("login")
                   value={employerRequestForm.phone}
                   onChange={(e) => setEmployerRequestForm({ ...employerRequestForm, phone: e.target.value.replace(/\D/g, '').slice(0, 11) })}
                   className="mt-2 w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-black"
+                  required
                 />
               </div>
               <div>
@@ -2299,6 +2461,20 @@ const [authView, setAuthView] = useState("login")
                   className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
                   placeholder="Tell us about your company or hiring needs."
                 />
+              </div>
+              <div>
+                <label htmlFor="employer-requirements" className="block text-sm font-medium text-slate-200">
+                  NSRP Registration Form (PDF)
+                </label>
+                <input
+                  id="employer-requirements"
+                  type="file"
+                  accept="application/pdf,.pdf"
+                  onChange={(e) => setEmployerSignupFile(e.target.files?.[0] || null)}
+                  className="mt-2 w-full text-sm text-slate-300 file:mr-3 file:rounded-xl file:border-0 file:bg-slate-700 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-white"
+                  required
+                />
+                <p className="mt-1 text-xs text-slate-400">Required for account verification. An admin will review it before your postings are approved.</p>
               </div>
               <div className="flex gap-2">
                 <button type="submit" className="auth-primary-button auth-account-submit">
@@ -2325,6 +2501,47 @@ const [authView, setAuthView] = useState("login")
                   value={signupForm.name}
                   onChange={(e) => setSignupForm({ ...signupForm, name: e.target.value })}
                   className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                  required
+                />
+              </div>
+              <div>
+                <label htmlFor="signup-location" className="block text-sm font-medium text-slate-200">
+                  Location
+                </label>
+                <input
+                  id="signup-location"
+                  type="text"
+                  value={signupForm.location}
+                  onChange={(e) => setSignupForm({ ...signupForm, location: e.target.value })}
+                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                  required
+                />
+              </div>
+              <div>
+                <label htmlFor="signup-skills" className="block text-sm font-medium text-slate-200">
+                  Skills
+                </label>
+                <input
+                  id="signup-skills"
+                  type="text"
+                  value={signupForm.skills}
+                  onChange={(e) => setSignupForm({ ...signupForm, skills: e.target.value })}
+                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                  placeholder="For example: Customer service, Data entry"
+                  required
+                />
+              </div>
+              <div>
+                <label htmlFor="signup-summary" className="block text-sm font-medium text-slate-200">
+                  About me
+                </label>
+                <textarea
+                  id="signup-summary"
+                  rows="3"
+                  value={signupForm.summary}
+                  onChange={(e) => setSignupForm({ ...signupForm, summary: e.target.value })}
+                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                  required
                 />
               </div>
               <div>
@@ -2350,8 +2567,10 @@ const [authView, setAuthView] = useState("login")
                   value={signupForm.password}
                   onChange={(e) => setSignupForm({ ...signupForm, password: e.target.value })}
                   className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                  autoComplete="new-password"
                   required
                 />
+                <PasswordChecklist password={signupForm.password} confirmPassword={signupForm.confirmPassword} />
               </div>
               <div>
                 <label htmlFor="signup-confirm-password" className="block text-sm font-medium text-slate-200">
@@ -2365,17 +2584,38 @@ const [authView, setAuthView] = useState("login")
                   className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
                   required
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowSignupPassword((current) => !current)}
+                  className="mt-2 text-sm font-medium text-slate-600 hover:text-black"
+                >
+                  {showSignupPassword ? 'Hide password' : 'Show password'}
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setShowSignupPassword((current) => !current)}
-                className="text-sm font-medium text-slate-600 hover:text-black"
-              >
-                {showSignupPassword ? 'Hide password' : 'Show password'}
-              </button>
+              <div>
+                <label htmlFor="signup-resume" className="block text-sm font-medium text-slate-200">
+                  Resume (PDF, DOCX, JPG, or PNG; max 5 MB)
+                </label>
+                <input
+                  id="signup-resume"
+                  type="file"
+                  accept="application/pdf,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx,image/jpeg,.jpg,.jpeg,image/png,.png"
+                  onChange={(e) => setSignupResumeFile(e.target.files?.[0] || null)}
+                  className="mt-2 w-full text-sm text-slate-300 file:mr-3 file:rounded-xl file:border-0 file:bg-slate-700 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-white"
+                  required
+                />
+              </div>
+              <VerificationDocumentsForm
+                docs={signupDocs}
+                setDocs={setSignupDocs}
+                consent={signupConsent}
+                setConsent={setSignupConsent}
+                disabled={signupUploading}
+              />
+              {signupProgress && <p className="text-sm font-medium text-cyan-300">{signupProgress}</p>}
               <div className="flex gap-2">
-                <button type="submit" className="auth-primary-button auth-account-submit">
-                  Create account
+                <button type="submit" disabled={signupUploading || !signupResumeFile || !signupForm.name.trim() || !signupForm.location.trim() || !signupForm.skills.trim() || !signupForm.summary.trim() || !validateVerificationDocs(signupDocs, signupConsent)} className="auth-primary-button auth-account-submit disabled:cursor-not-allowed disabled:opacity-40">
+                  {signupUploading ? 'Creating account…' : 'Create account'}
                 </button>
                 <button type="button" onClick={() => setAuthView("login")} className="auth-secondary-button">
                   Back to sign in
@@ -2391,12 +2631,19 @@ const [authView, setAuthView] = useState("login")
   const navItems = navigationByRole[activeRole] || []
   const employerApproved = activeRole !== 'Employer' || !currentUser?.verificationStatus || currentUser.verificationStatus === 'approved'
   const applicantApproved = activeRole !== 'Applicant' || !currentUser?.verificationStatus || currentUser.verificationStatus === 'approved'
+  const registrationIncomplete = ['Applicant', 'Employer'].includes(activeRole) && currentUser?.registration && !currentUser.registration.complete
+
   const portalNavItems = navItems.filter((item) => {
     if (item.id === "profile") return false
+    if (registrationIncomplete) return item.id === 'complete'
+    if (item.id === 'complete') return ['Applicant', 'Employer'].includes(activeRole) && !currentUser?.registration?.complete
     if (activeRole === 'Employer') return employerApproved || ['home', 'dashboard', 'profile'].includes(item.id)
-    if (activeRole === 'Applicant') return applicantApproved || ['home', 'profile'].includes(item.id)
+    // Unverified applicants only get My Documents (job listings stay hidden)
+    if (activeRole === 'Applicant') return applicantApproved || item.id === 'documents'
     return true
   })
+  // Server state is the source of truth; this is just UI gating
+  const applicantDocAttention = activeRole === 'Applicant' ? (currentUser?.attentionCount || 0) : 0
   const showProfileTab = ["Applicant", "Employer"].includes(activeRole)
 
   return (
@@ -2473,66 +2720,19 @@ const [authView, setAuthView] = useState("login")
         </aside>
 
         <div className="portal-content">
-          {accountNeedsVerification && (
-            <div className="portal-verification-notice" role="status">
-              <div>
-                <strong>Account is unverified</strong>
-                <span>Verification is required before all account features become available.</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setVerificationEmail(currentUser?.email || '')
-                  setShowVerificationModal(true)
-                }}
-                className="portal-verify-button"
-              >
-                Verify now
-              </button>
-            </div>
+          {['Applicant', 'Employer'].includes(activeRole) && currentUser && currentUser.emailVerified === false && (
+            <EmailVerificationBanner
+              email={currentUser.email}
+              token={getToken()}
+              onVerified={() => setCurrentUser((current) => ({ ...current, emailVerified: true }))}
+            />
           )}
-
-          {showVerificationModal && (
-            <div
-              className="portal-verification-overlay"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="verify-email-title"
-              onClick={() => setShowVerificationModal(false)}
-            >
-              <form
-                className="portal-verification-modal"
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  setCurrentUser((current) => ({ ...current, verificationStatus: 'approved' }))
-                  setShowVerificationModal(false)
-                }}
-                onClick={(event) => event.stopPropagation()}
-              >
-                <h2 id="verify-email-title">Verify your email</h2>
-                <p>Enter your email address to continue verification.</p>
-                <label htmlFor="verification-email">Email address</label>
-                <input
-                  id="verification-email"
-                  type="email"
-                  value={verificationEmail}
-                  onChange={(event) => setVerificationEmail(event.target.value)}
-                  required
-                />
-                <label htmlFor="verification-code">Verification code</label>
-                <input
-                  id="verification-code"
-                  type="text"
-                  value={verificationCode}
-                  onChange={(event) => setVerificationCode(event.target.value)}
-                />
-                <div className="portal-verification-actions">
-                  <button type="submit" className="portal-verify-submit">Verify email</button>
-                  <button type="button" onClick={() => setShowVerificationModal(false)} className="portal-verify-cancel">
-                    Cancel
-                  </button>
-                </div>
-              </form>
+          {applicantDocAttention > 0 && (
+            <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm font-medium text-amber-800" role="alert">
+              <span>{applicantDocAttention} document{applicantDocAttention === 1 ? '' : 's'} need{applicantDocAttention === 1 ? 's' : ''} your attention.</span>
+              <button type="button" onClick={() => setActiveView('documents')} className="rounded-xl bg-amber-500 px-3 py-1.5 text-xs font-semibold text-slate-950">
+                Review now
+              </button>
             </div>
           )}
 
@@ -2592,6 +2792,32 @@ const [authView, setAuthView] = useState("login")
               </button>
             </div>
           )}
+          {activeView === "complete" && ['Applicant', 'Employer'].includes(activeRole) && (
+            <CompleteRegistrationPage
+              role={activeRole}
+              token={getToken()}
+              onNavigate={(target) => setActiveView(target === 'continue' ? 'home' : target === 'documents' && activeRole === 'Applicant' ? 'documents' : target === 'dashboard' && activeRole === 'Employer' ? 'dashboard' : 'profile')}
+              onUpdated={updateRegistrationUser}
+            />
+          )}
+          {activeView === "documents" && activeRole === 'Applicant' && (
+            <MyDocumentsPage
+              applicantId={currentUser?.id || currentUser?._id}
+              token={getToken()}
+              onUpdated={() => {
+                const token = getToken()
+                if (!token) return
+                fetch(`${API_URL}/api/profile`, { headers: { Authorization: `Bearer ${token}` } })
+                  .then((r) => r.json())
+                  .then((data) => {
+                    if (!data?.error) {
+                      setCurrentUser((current) => ({ ...current, verificationStatus: data.verificationStatus, verificationReason: data.verificationReason, attentionCount: data.attentionCount }))
+                    }
+                  })
+                  .catch(() => {})
+              }}
+            />
+          )}
           {activeView === "home" && (
             <section className="portal-card rounded-2xl border border-slate-300 bg-white p-8 text-black">
               <p className="text-sm font-semibold uppercase tracking-wide text-cyan-600">
@@ -2628,7 +2854,7 @@ const [authView, setAuthView] = useState("login")
                   </>
                 ) : (
                   <>
-                    {applicantApproved ? (
+                    {applicantApproved && (
                       <>
                         <button
                           type="button"
@@ -2645,17 +2871,6 @@ const [authView, setAuthView] = useState("login")
                           Update My Profile
                         </button>
                       </>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsEditingProfile(true)
-                          setActiveView('profile')
-                        }}
-                        className="rounded-2xl bg-cyan-500 px-5 py-2.5 text-sm font-semibold text-slate-950"
-                      >
-                        Complete NSRP Verification
-                      </button>
                     )}
                   </>
                 )}
@@ -2663,10 +2878,9 @@ const [authView, setAuthView] = useState("login")
 
               {activeRole === 'Applicant' && !applicantApproved && (
                 <div className="mt-6 rounded-2xl border border-amber-300 bg-amber-50 p-5">
-                  <h3 className="text-lg font-semibold text-black">NSRP verification required</h3>
+                  <h3 className="text-lg font-semibold text-black">Account verification in progress</h3>
                   <p className="mt-2 text-sm text-slate-700">
-                    Your account is pending verification. Submit your NSRP registration form from your Profile page.
-                    Once an admin approves it, you'll be able to browse jobs and apply.
+                    Your NSRP registration form was submitted with your sign up. Once an admin approves it, you'll be able to browse jobs and apply. You can check the status or resubmit from your Profile page.
                   </p>
                   <p className="mt-2 text-sm font-medium text-amber-700">
                     Status: {(currentUser?.verificationStatus || 'under_review').replace('_', ' ')}
@@ -2736,7 +2950,7 @@ const [authView, setAuthView] = useState("login")
           {activeView === "dashboard" && (
             <section className="admin-requests-card portal-card rounded-2xl border border-slate-300 bg-white p-6 text-black">
               <h2 className="text-xl font-semibold text-black">Dashboard</h2>
-              {activeRole === 'Employer' && !employerApproved ? (
+              {activeRole === 'Employer' && (!employerApproved || registrationIncomplete) ? (
                 <div className="mt-4 rounded-2xl border border-amber-300 bg-white p-5">
                   <h3 className="text-lg font-semibold text-black">Employer verification</h3>
                   <p className="mt-2 text-sm text-black">
@@ -2779,7 +2993,7 @@ const [authView, setAuthView] = useState("login")
                       </button>
                     </div>
                   )}
-                  {currentUser.verificationStatus === 'under_review' ? (
+                  {currentUser.verificationStatus === 'under_review' && currentUser.requirementsFile ? (
                     <p className="mt-5 text-sm text-amber-300">Your PDF is waiting for admin review. You cannot submit another file until this review is complete.</p>
                   ) : (
                     <form className="mt-5 space-y-3" onSubmit={handleSubmitEmployerRequirements}>
@@ -3013,30 +3227,8 @@ const [authView, setAuthView] = useState("login")
                                                       <p><span className="font-semibold text-white">Traits:</span> {user.profile?.traits || 'N/A'}</p>
                                                       <p><span className="font-semibold text-white">About me:</span> {user.profile?.summary || 'N/A'}</p>
                                                       <p><span className="font-semibold text-white">NSRP / Resume:</span> {user.hasResume ? 'Submitted' : 'Not submitted'}</p>
-                                                      <p><span className="font-semibold text-white">NSRP Verification Doc:</span> {user.hasNsrpVerification ? 'Submitted' : 'Not submitted'}</p>
+                                                      <AdminVerificationDocs applicant={user} token={getToken()} onReviewed={() => fetchAdminUsers()} />
                                                       <div className="mt-3 flex flex-wrap items-center gap-2">
-                                                        {user.hasNsrpVerification && (
-                                                          <button
-                                                            type="button"
-                                                            onClick={async () => {
-                                                              const token = getToken()
-                                                              if (!token) return alert('Not authenticated')
-                                                              const preview = window.open('', '_blank')
-                                                              try {
-                                                                const response = await fetch(`${API_URL}/api/applicants/${user.id}/nsrp-verification`, { headers: { Authorization: `Bearer ${token}` } })
-                                                                if (!response.ok) { preview?.close(); return alert('NSRP document could not be opened') }
-                                                                const blob = await response.blob()
-                                                                const url = URL.createObjectURL(blob)
-                                                                if (preview) preview.location.href = url
-                                                                else window.open(url, '_blank')
-                                                                setTimeout(() => URL.revokeObjectURL(url), 60_000)
-                                                              } catch (err) { preview?.close(); alert('NSRP document could not be opened') }
-                                                            }}
-                                                            className="rounded-2xl bg-cyan-500 px-3 py-2 text-sm font-semibold text-slate-950"
-                                                          >
-                                                            View NSRP Verification
-                                                          </button>
-                                                        )}
                                                         {user.hasResume && (
                                                           <button
                                                             type="button"
@@ -3046,7 +3238,7 @@ const [authView, setAuthView] = useState("login")
                                                             View NSRP PDF
                                                           </button>
                                                         )}
-                                                        {user.verificationStatus === 'approved' ? (
+                                                        {user.verificationStatus === 'approved' && (
                                                           <button
                                                             type="button"
                                                             onClick={() => handleReviewApplicantVerification(user.id, 'restricted')}
@@ -3054,23 +3246,6 @@ const [authView, setAuthView] = useState("login")
                                                           >
                                                             Restrict
                                                           </button>
-                                                        ) : (
-                                                          <>
-                                                            <button
-                                                              type="button"
-                                                              onClick={() => handleReviewApplicantVerification(user.id, 'approved')}
-                                                              className="rounded-2xl bg-green-500 px-3 py-2 text-sm font-semibold text-white"
-                                                            >
-                                                              Approve
-                                                            </button>
-                                                            <button
-                                                              type="button"
-                                                              onClick={() => handleReviewApplicantVerification(user.id, 'declined')}
-                                                              className="rounded-2xl bg-red-500 px-3 py-2 text-sm font-semibold text-white"
-                                                            >
-                                                              Decline
-                                                            </button>
-                                                          </>
                                                         )}
                                                       </div>
                                                     </>
@@ -3256,10 +3431,10 @@ const [authView, setAuthView] = useState("login")
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-slate-300">Resume (PDF)</label>
+                      <label className="block text-sm font-medium text-slate-300">Resume (PDF, DOCX, JPG, or PNG)</label>
                       <div className="mt-2 rounded-2xl border border-slate-700 bg-slate-900 p-3">
                         {resumeInfo?.originalName ? (
-                          <p className="text-sm text-slate-300">Current: {resumeInfo.originalName}{resumeInfo.uploadedAt ? ` • uploaded ${new Date(resumeInfo.uploadedAt).toLocaleDateString()}` : ''}</p>
+                          <p className="text-sm text-slate-300">📄 {resumeInfo.originalName}{resumeInfo.uploadedAt ? ` • uploaded ${new Date(resumeInfo.uploadedAt).toLocaleDateString()}` : ''}{resumeInfo.status ? ` • ${resumeInfo.status}` : ''}</p>
                         ) : (
                           <p className="text-sm text-slate-400">No resume uploaded yet.</p>
                         )}
@@ -3276,7 +3451,7 @@ const [authView, setAuthView] = useState("login")
                           <div className="mt-3 flex flex-wrap items-center gap-2">
                             <input
                               type="file"
-                              accept="application/pdf,.pdf"
+                              accept="application/pdf,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx,image/jpeg,.jpg,.jpeg,image/png,.png"
                               onChange={(e) => setResumeFile(e.target.files?.[0] || null)}
                               className="text-sm text-slate-300 file:mr-3 file:rounded-xl file:border-0 file:bg-slate-700 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-white"
                             />
@@ -3291,7 +3466,7 @@ const [authView, setAuthView] = useState("login")
                                 try {
                                   const formData = new FormData()
                                   formData.append('resume', resumeFile)
-                                  const response = await fetch('${API_URL}/api/profile/resume', {
+                                  const response = await fetch(`${API_URL}/api/profile/resume`, {
                                     method: 'POST',
                                     headers: { Authorization: `Bearer ${token}` },
                                     body: formData,
@@ -3310,83 +3485,10 @@ const [authView, setAuthView] = useState("login")
                               }}
                               className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
                             >
-                              {resumeUploading ? 'Uploading…' : 'Upload Resume'}
+                              {resumeUploading ? 'Uploading…' : resumeInfo?.originalName ? 'Replace Resume' : 'Upload Resume'}
                             </button>
                           </div>
                         )}
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-slate-300">NSRP Verification Document (PDF)</label>
-                      <div className="mt-2 rounded-2xl border border-slate-700 bg-slate-900 p-3">
-                        {nsrpVerificationInfo?.originalName ? (
-                          <p className="text-sm text-slate-300">Current: {nsrpVerificationInfo.originalName}{nsrpVerificationInfo.uploadedAt ? ` • uploaded ${new Date(nsrpVerificationInfo.uploadedAt).toLocaleDateString()}` : ''}</p>
-                        ) : (
-                          <p className="text-sm text-slate-400">No NSRP verification document uploaded yet.</p>
-                        )}
-                        {nsrpVerificationInfo?.originalName && (
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              const token = getToken()
-                              const applicantId = currentUser?.id || currentUser?._id
-                              if (!token || !applicantId) return alert('Not authenticated')
-                              const preview = window.open('', '_blank')
-                              try {
-                                const response = await fetch(`${API_URL}/api/applicants/${applicantId}/nsrp-verification`, { headers: { Authorization: `Bearer ${token}` } })
-                                if (!response.ok) { preview?.close(); return alert('NSRP document could not be opened') }
-                                const blob = await response.blob()
-                                const url = URL.createObjectURL(blob)
-                                if (preview) preview.location.href = url
-                                else window.open(url, '_blank')
-                                setTimeout(() => URL.revokeObjectURL(url), 60_000)
-                              } catch (err) { preview?.close(); alert('NSRP document could not be opened') }
-                            }}
-                            className="mt-3 rounded-2xl border border-cyan-500 bg-transparent px-4 py-2 text-sm font-semibold text-cyan-300"
-                          >
-                            View NSRP Document
-                          </button>
-                        )}
-                        <div className="mt-3 flex flex-wrap items-center gap-2">
-                          <input
-                            type="file"
-                            accept="application/pdf,.pdf"
-                            onChange={(e) => setNsrpVerificationFile(e.target.files?.[0] || null)}
-                            className="text-sm text-slate-300 file:mr-3 file:rounded-xl file:border-0 file:bg-slate-700 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-white"
-                          />
-                          <button
-                            type="button"
-                            disabled={!nsrpVerificationFile || nsrpVerificationUploading}
-                            onClick={async () => {
-                              if (!nsrpVerificationFile) return
-                              const token = getToken()
-                              if (!token) return alert('Not authenticated')
-                              setNsrpVerificationUploading(true)
-                              try {
-                                const formData = new FormData()
-                                formData.append('nsrpVerification', nsrpVerificationFile)
-                                const response = await fetch('${API_URL}/api/profile/nsrp-verification', {
-                                  method: 'POST',
-                                  headers: { Authorization: `Bearer ${token}` },
-                                  body: formData,
-                                })
-                                const data = await response.json().catch(() => null)
-                                if (!response.ok || data?.error) throw new Error(data?.error || 'Upload failed')
-                                setNsrpVerificationInfo(data.nsrpVerificationFile)
-                                setNsrpVerificationFile(null)
-                                alert('NSRP verification document submitted for admin review.')
-                              } catch (err) {
-                                console.error(err)
-                                alert(err?.message || 'Failed to upload NSRP document')
-                              } finally {
-                                setNsrpVerificationUploading(false)
-                              }
-                            }}
-                            className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            {nsrpVerificationUploading ? 'Uploading…' : 'Submit NSRP for Approval'}
-                          </button>
-                        </div>
                       </div>
                     </div>
                     <div className="flex gap-3">
@@ -3577,7 +3679,7 @@ const [authView, setAuthView] = useState("login")
                               if (!token) return alert('Not authenticated. Please log in again.')
                               // Preserve existing profile fields and update the editable ones, including top-level employer fields.
                               const editableProfile = { ...(currentUser?.profile || {}), location: profileData.location, website: profileData.website, summary: profileData.summary, profileImage: profileData.profileImage || '', bannerImage: profileData.bannerImage || '' }
-                              fetch('${API_URL}/api/profile', {
+                              fetch(`${API_URL}/api/profile`, {
                                 method: 'PUT',
                                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                                 body: JSON.stringify({ profile: editableProfile, companyName: profileData.companyName, contactName: profileData.contactName, phone: profileData.phone, website: profileData.website }),
@@ -3626,6 +3728,7 @@ const [authView, setAuthView] = useState("login")
                 onClick={() => {
                   setJobForm({
                     title: '',
+                    customTitle: '',
                     company: profileData.companyName || '',
                     location: profileData.location || '',
                     description: '',
@@ -3666,16 +3769,13 @@ const [authView, setAuthView] = useState("login")
                     </div>
                 <form className="space-y-4 mt-4" onSubmit={handleCreateJob}>
                   <div>
-                    <label htmlFor="job-title" className="block text-sm font-medium text-slate-200">
-                      Job title
-                    </label>
-                    <input
-                      id="job-title"
-                      value={jobForm.title}
-                      onChange={(e) => setJobForm({ ...jobForm, title: e.target.value })}
-                      className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-                      placeholder="e.g. Customer Service Specialist"
+                    <JobTitlePicker
+                      categories={jobTitleGroups}
+                      title={jobForm.title}
+                      customTitle={jobForm.customTitle}
+                      onChange={(value) => setJobForm({ ...jobForm, ...value })}
                     />
+                    {jobTitleLoadError && <p role="alert" className="mt-2 text-sm text-rose-700">{jobTitleLoadError}</p>}
                   </div>
                   <div>
                     <label htmlFor="job-description" className="block text-sm font-medium text-slate-200">
@@ -3758,6 +3858,31 @@ const [authView, setAuthView] = useState("login")
                       className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
                       placeholder="e.g. \u20B125,000"
                     />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label htmlFor="job-slots" className="block text-sm font-medium text-slate-200">
+                      Available slots
+                      <input
+                        id="job-slots"
+                        type="number"
+                        min="1"
+                        max="10000"
+                        value={jobForm.slots}
+                        onChange={(event) => setJobForm({ ...jobForm, slots: event.target.value })}
+                        className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                        placeholder="Optional"
+                      />
+                    </label>
+                    <label htmlFor="job-deadline" className="block text-sm font-medium text-slate-200">
+                      Application deadline
+                      <input
+                        id="job-deadline"
+                        type="date"
+                        value={jobForm.deadline}
+                        onChange={(event) => setJobForm({ ...jobForm, deadline: event.target.value })}
+                        className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                      />
+                    </label>
                   </div>
                   <button
                     type="submit"
@@ -3863,6 +3988,7 @@ const [authView, setAuthView] = useState("login")
               filteredApprovedJobs={filteredApprovedJobs}
               showDeclinedAdminSection={showDeclinedAdminSection}
               filteredDeclinedJobs={filteredDeclinedJobs}
+              jobLoadError={jobLoadError}
               adminUsers={adminUsers}
               referredApplicantIdsByJob={referredApplicantIdsByJob}
               handleReferApplicantFromJob={handleReferApplicantFromJob}
@@ -3870,6 +3996,9 @@ const [authView, setAuthView] = useState("login")
               token={getToken()}
               handleEditPendingJob={openEditJob}
             />
+          )}
+          {activeView === "job-titles" && activeRole === "Admin" && (
+            <AdminJobTitlesPage token={getToken()} onChanged={loadJobTitles} />
           )}
 
           {activeView === "referrals" && activeRole === "Employer" && (
@@ -4006,9 +4135,19 @@ const [authView, setAuthView] = useState("login")
                   </button>
                 </div>
 
+                <div className="mt-5">
+                  <JobTitlePicker
+                    id="edit-job-title-input"
+                    categories={jobTitleGroups}
+                    title={editingJobForm.title}
+                    customTitle={editingJobForm.customTitle}
+                    disabled={!editingJobCanSave}
+                    onChange={(value) => setEditingJobForm({ ...editingJobForm, ...value })}
+                  />
+                </div>
+
                 <div className="mt-5 grid gap-4 sm:grid-cols-2">
                   {[
-                    ['edit-job-title-input', 'Job title', 'title'],
                     ['edit-job-company', 'Company', 'company'],
                     ['edit-job-location', 'Location', 'location'],
                     ['edit-job-salary', 'Salary', 'salary'],
@@ -4025,6 +4164,30 @@ const [authView, setAuthView] = useState("login")
                       />
                     </label>
                   ))}
+                  <label htmlFor="edit-job-slots" className="text-sm font-medium text-black">
+                    Available slots
+                    <input
+                      id="edit-job-slots"
+                      type="number"
+                      min="1"
+                      max="10000"
+                      value={editingJobForm.slots}
+                      disabled={!editingJobCanSave}
+                      onChange={(event) => setEditingJobForm({ ...editingJobForm, slots: event.target.value })}
+                      className="mt-2 w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-black"
+                    />
+                  </label>
+                  <label htmlFor="edit-job-deadline" className="text-sm font-medium text-black">
+                    Application deadline
+                    <input
+                      id="edit-job-deadline"
+                      type="date"
+                      value={editingJobForm.deadline}
+                      disabled={!editingJobCanSave}
+                      onChange={(event) => setEditingJobForm({ ...editingJobForm, deadline: event.target.value })}
+                      className="mt-2 w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-black"
+                    />
+                  </label>
                   <label htmlFor="edit-job-location-type" className="text-sm font-medium text-black">
                     Location Type
                     <select
@@ -4203,62 +4366,6 @@ const [authView, setAuthView] = useState("login")
             </div>
           )}
 
-          {declineJobTarget && (
-            <div
-              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="decline-job-title"
-              onClick={() => setDeclineJobTarget(null)}
-            >
-              <form
-                className="w-full max-w-md rounded-2xl border border-cyan-500/40 bg-slate-900 p-6 shadow-2xl"
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  const jobId = declineJobTarget._id
-                  handleReviewJob(jobId, 'declined', { reason: declineJobReason })
-                }}
-                onClick={(event) => event.stopPropagation()}
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <h2 id="decline-job-title" className="text-lg font-semibold text-white">Decline job posting</h2>
-                    <p className="mt-2 text-sm text-slate-400">{declineJobTarget.title || 'Selected posting'}</p>
-                  </div>
-                </div>
-                <label htmlFor="decline-job-reason" className="mt-5 block text-sm font-medium text-slate-200">
-                  Reason for declining (optional)
-                </label>
-                <textarea
-                  id="decline-job-reason"
-                  value={declineJobReason}
-                  onChange={(event) => setDeclineJobReason(event.target.value)}
-                  rows="4"
-                  placeholder="Explain why this posting was declined."
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-                />
-                <div className="mt-5 flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDeclineJobTarget(null)
-                      setDeclineJobReason('')
-                    }}
-                    className="rounded-2xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm text-slate-200"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="rounded-2xl bg-rose-400 px-4 py-2 text-sm font-semibold text-slate-950"
-                  >
-                    Confirm decline
-                  </button>
-                </div>
-              </form>
-            </div>
-          )}
-
           {selectedNotification && (
             <div
               className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4"
@@ -4305,21 +4412,18 @@ const [authView, setAuthView] = useState("login")
                   <p className="mt-1 text-sm text-black">Description: {selectedNotification.description}</p>
                 )}
 
-                {activeRole === 'Admin' && selectedNotificationJobId && selectedNotificationIsPending && (
+                {activeRole === 'Admin' && selectedNotificationIsPending && (
                   <div className="mt-5 flex flex-wrap items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => handleReviewJob(selectedNotificationJobId, 'approved')}
-                      className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
+                      onClick={() => {
+                        setSelectedNotification(null)
+                        setAdminJobStatusFilter('pending')
+                        setActiveView('jobs')
+                      }}
+                      className="rounded-2xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white"
                     >
-                      Approve here
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleReviewJob(selectedNotificationJobId, 'declined')}
-                      className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-black"
-                    >
-                      Decline here
+                      Open job review
                     </button>
                   </div>
                 )}

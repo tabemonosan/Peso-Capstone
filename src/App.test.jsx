@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 
@@ -14,7 +14,7 @@ beforeEach(() => {
       const role = credentials.email === 'employer@peso.gov' ? 'Employer' : 'Admin'
       return Promise.resolve({
         ok: true,
-        json: async () => ({ token: `token-${role.toLowerCase()}`, user: { email: credentials.email, role, verificationStatus: role === 'Employer' ? 'approved' : undefined, profile: { name: role === 'Employer' ? 'Employer Contact' : 'Admin User' } } }),
+        json: async () => ({ token: `token-${role.toLowerCase()}`, user: { email: credentials.email, role, emailVerified: true, verificationStatus: role === 'Employer' ? 'approved' : undefined, profile: { name: role === 'Employer' ? 'Employer Contact' : 'Admin User' } } }),
       })
     }
 
@@ -22,7 +22,7 @@ beforeEach(() => {
       const isEmployer = options?.headers?.Authorization === 'Bearer token-employer'
       return Promise.resolve({
         ok: true,
-        json: async () => ({ email: isEmployer ? 'employer@peso.gov' : 'admin@peso.gov', role: isEmployer ? 'Employer' : 'Admin', profile: { name: isEmployer ? 'Employer Contact' : 'Admin User' } }),
+        json: async () => ({ email: isEmployer ? 'employer@peso.gov' : 'admin@peso.gov', role: isEmployer ? 'Employer' : 'Admin', emailVerified: true, verificationStatus: isEmployer ? 'approved' : undefined, profile: { name: isEmployer ? 'Employer Contact' : 'Admin User' } }),
       })
     }
 
@@ -65,41 +65,17 @@ describe('PESO Portal prototype', () => {
     expect(screen.getByLabelText(/Email/i)).toBeInTheDocument()
   })
 
-  it('asks new applicants to choose skills right after signup and saves them to the profile', async () => {
+  it('keeps the Create account button disabled until consent and required documents are provided', async () => {
     mockFetch.mockImplementation((url, options) => {
       if (url === 'http://localhost:4000/api/signup') {
         return Promise.resolve({
           ok: true,
           json: async () => ({
             token: 'token-new-applicant',
-            user: { email: 'newapplicant@peso.gov', role: 'Applicant', profile: { name: 'New Applicant' } },
+            user: { email: 'newapplicant@peso.gov', role: 'Applicant', emailVerified: false, profile: { name: 'New Applicant' } },
           }),
         })
       }
-
-      if (url === 'http://localhost:4000/api/profile') {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            email: 'newapplicant@peso.gov',
-            role: 'Applicant',
-            profile: { name: 'New Applicant', skills: ['Cleaning'], traits: 'Reliable', summary: 'I enjoy helping people and working with teams.' },
-          }),
-        })
-      }
-
-      if (url === 'http://localhost:4000/api/jobs?status=approved') {
-        return Promise.resolve({ ok: true, json: async () => [] })
-      }
-
-      if (url === 'http://localhost:4000/api/jobs?status=applied') {
-        return Promise.resolve({ ok: true, json: async () => [] })
-      }
-
-      if (url === 'http://localhost:4000/api/notifications') {
-        return Promise.resolve({ ok: true, json: async () => [] })
-      }
-
       return Promise.resolve({ ok: true, json: async () => [] })
     })
 
@@ -110,14 +86,9 @@ describe('PESO Portal prototype', () => {
     fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: 'newapplicant@peso.gov' } })
     fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'password123' } })
     fireEvent.change(screen.getByLabelText(/Confirm password/i), { target: { value: 'password123' } })
-    fireEvent.click(screen.getByRole('button', { name: /Create account/i }))
 
-    expect(await screen.findByText(/Tell us about your skills/i)).toBeInTheDocument()
-    const cleaningCheckboxes = screen.getAllByLabelText(/Cleaning/i)
-    fireEvent.click(cleaningCheckboxes[0])
-    fireEvent.click(screen.getByRole('button', { name: /Continue/i }))
-
-    expect(await screen.findAllByText(/Cleaning/i)).toHaveLength(2)
+    // Without consent and required documents, submission stays disabled
+    expect(screen.getByRole('button', { name: /Create account/i })).toBeDisabled()
   })
 
   it('renders the portal after a successful admin login and shows admin access control', async () => {
@@ -135,6 +106,129 @@ describe('PESO Portal prototype', () => {
     expect(await screen.findByText(/Role:\s*Admin/i)).toBeInTheDocument()
   })
 
+  it('opens an accessible admin job review modal and requires a decline reason', async () => {
+    const reviewJob = {
+      _id: 'review-job-1',
+      title: 'Customer Service Representative',
+      company: 'Review Company',
+      description: 'Full job description for the review.',
+      requirements: 'Two years of experience.',
+      salary: '₱25,000',
+      location: 'Legazpi City',
+      employmentType: 'Full-time',
+      slots: 3,
+      deadline: '2026-12-31T00:00:00.000Z',
+      status: 'pending',
+      createdBy: 'employer@peso.gov',
+      createdAt: '2026-10-01T00:00:00.000Z',
+      employerDetails: {
+        companyName: 'Review Company',
+        contactName: 'Review Contact',
+        email: 'employer@peso.gov',
+        verificationStatus: 'approved',
+      },
+    }
+    let reviewPayload
+    mockFetch.mockImplementation((url, options) => {
+      if (url === 'http://localhost:4000/api/login') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ token: 'token-admin', user: { email: 'admin@peso.gov', role: 'Admin', emailVerified: true, profile: { name: 'Admin' } } }),
+        })
+      }
+      if (url === 'http://localhost:4000/api/profile') {
+        return Promise.resolve({ ok: true, json: async () => ({ email: 'admin@peso.gov', role: 'Admin', profile: { name: 'Admin' } }) })
+      }
+      if (url === 'http://localhost:4000/api/jobs?status=pending') {
+        return Promise.resolve({ ok: true, json: async () => [reviewJob] })
+      }
+      if (url === 'http://localhost:4000/api/jobs?status=approved' || url === 'http://localhost:4000/api/jobs?status=declined') {
+        return Promise.resolve({ ok: true, json: async () => [] })
+      }
+      if (url === 'http://localhost:4000/api/employer-requests' || url === 'http://localhost:4000/api/notifications') {
+        return Promise.resolve({ ok: true, json: async () => [] })
+      }
+      if (url === 'http://localhost:4000/api/jobs/review-job-1/status') {
+        reviewPayload = JSON.parse(options.body)
+        return Promise.resolve({ ok: true, json: async () => ({ ...reviewJob, status: 'declined', reviewReason: reviewPayload.reason }) })
+      }
+      return Promise.resolve({ ok: true, json: async () => [] })
+    })
+
+    render(<App />)
+    fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: 'admin@peso.gov' } })
+    fireEvent.change(screen.getByLabelText(/Password/i), { target: { value: 'password123' } })
+    fireEvent.click(screen.getByRole('button', { name: /Sign in/i }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Job Postings' }))
+
+    fireEvent.click(await screen.findByRole('button', { name: /View Customer Service Representative details/i }))
+    const dialog = await screen.findByRole('dialog', { name: 'Customer Service Representative' })
+    expect(dialog).toHaveAttribute('aria-modal', 'true')
+    expect(screen.getByText('Full job description for the review.')).toBeInTheDocument()
+    expect(screen.getByText('Review Contact')).toBeInTheDocument()
+    expect(screen.getByText('approved', { exact: true })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Decline' })).toBeDisabled()
+
+    fireEvent.change(screen.getByLabelText(/Decline reason/i), { target: { value: 'Please add the work schedule.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Decline' }))
+
+    await waitFor(() => expect(reviewPayload).toEqual({ status: 'declined', reason: 'Please add the work schedule.' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Customer Service Representative' })).not.toBeInTheDocument())
+  })
+
+  it('routes incomplete applicants to the registration checklist and its profile fix', async () => {
+    const registration = {
+      complete: false,
+      done: 3,
+      total: 8,
+      checklist: [
+        { key: 'name', label: 'Full name', done: true, link: 'profile' },
+        { key: 'location', label: 'Location', done: false, link: 'profile' },
+        { key: 'skills', label: 'At least one skill', done: false, link: 'profile' },
+        { key: 'summary', label: 'Short bio / about me', done: true, link: 'profile' },
+        { key: 'nsrpForm', label: 'NSRP Registration Form', done: false, link: 'documents' },
+        { key: 'birthCertificate', label: 'Birth Certificate', done: false, link: 'documents' },
+        { key: 'validId1', label: 'Valid ID', done: true, link: 'documents' },
+        { key: 'resume', label: 'Resume (PDF, DOCX, JPG, or PNG)', done: false, link: 'documents' },
+      ],
+    }
+    mockFetch.mockImplementation((url) => {
+      if (url === 'http://localhost:4000/api/login') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            token: 'token-incomplete-applicant',
+            user: {
+              email: 'incomplete@peso.gov',
+              role: 'Applicant',
+              emailVerified: true,
+              verificationStatus: 'under_review',
+              registration,
+              profile: { name: 'Incomplete Applicant' },
+            },
+          }),
+        })
+      }
+      if (url === 'http://localhost:4000/api/profile') {
+        return Promise.resolve({ ok: true, json: async () => ({ registration, profile: { name: 'Incomplete Applicant' } }) })
+      }
+      return Promise.resolve({ ok: true, json: async () => [] })
+    })
+
+    render(<App />)
+    fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: 'incomplete@peso.gov' } })
+    fireEvent.change(screen.getByLabelText(/Password/i), { target: { value: 'password123' } })
+    fireEvent.click(screen.getByRole('button', { name: /Sign in/i }))
+
+    expect(await screen.findByText(/Complete your registration/i)).toBeInTheDocument()
+    expect(await screen.findByText('3 of 8 steps done')).toBeInTheDocument()
+    expect(screen.getByText('NSRP Registration Form')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Jobs$/i })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Fill in' })[0])
+    expect(await screen.findByText('Applicant Profile')).toBeInTheDocument()
+  })
+
   it('allows employer login and shows employer module navigation', async () => {
     render(<App />)
     const emailInput = screen.getByLabelText(/Email/i)
@@ -145,8 +239,8 @@ describe('PESO Portal prototype', () => {
     fireEvent.change(passwordInput, { target: { value: 'password123' } })
     fireEvent.click(submitButton)
 
-    expect(await screen.findByRole('heading', { name: /Approved Job Postings/i })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /Job Postings/i }))
+    expect(await screen.findByText(/Online Employment Services Platform/i)).toBeInTheDocument()
+    fireEvent.click(screen.getAllByRole('button', { name: /Job Postings/i })[0])
     expect(await screen.findByText(/Employer Module/i)).toBeInTheDocument()
   })
 
@@ -166,7 +260,7 @@ describe('PESO Portal prototype', () => {
           ok: true,
           json: async () => ({
             token: 'token',
-            user: { email: 'applicant@peso.gov', role: 'Applicant', profile: { name: 'Applicant One' } },
+            user: { email: 'applicant@peso.gov', role: 'Applicant', emailVerified: true, verificationStatus: 'approved', profile: { name: 'Applicant One' } },
           }),
         })
       }
@@ -177,6 +271,8 @@ describe('PESO Portal prototype', () => {
           json: async () => ({
             email: 'applicant@peso.gov',
             role: 'Applicant',
+            emailVerified: true,
+            verificationStatus: 'approved',
             profile: { name: 'Applicant One', skills: ['Cleaning'] },
           }),
         })
@@ -216,11 +312,13 @@ describe('PESO Portal prototype', () => {
     fireEvent.change(screen.getByLabelText(/Password/i), { target: { value: 'password123' } })
     fireEvent.click(screen.getByRole('button', { name: /Sign in/i }))
 
-    expect(await screen.findByText(/Warehouse Helper/i)).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: /^Jobs$/i }))
+    expect((await screen.findAllByText(/Warehouse Helper/i)).length).toBeGreaterThan(0)
 
-    fireEvent.click(screen.getByText(/Warehouse Helper/i))
+    fireEvent.click(screen.getAllByText(/Warehouse Helper/i)[0])
 
-    expect(await screen.findByText(/Job details/i)).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: /Apply Now/i }))
+    expect(await screen.findByText(/Apply for Warehouse Helper/i)).toBeInTheDocument()
     expect(screen.getAllByText(/Acme Logistics/i).length).toBeGreaterThan(0)
   })
 })

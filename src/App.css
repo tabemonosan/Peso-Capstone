@@ -1403,6 +1403,10 @@
   box-shadow: 0 12px 30px rgba(27, 66, 101, 0.08);
 }
 
+.auth-card-wide {
+  width: min(100%, 560px);
+}
+
 .auth-logo {
   display: flex;
   align-items: center;
@@ -1684,10 +1688,13 @@
 @media (max-width: 480px) {
   .auth-page {
     padding: 10px;
+    align-items: flex-start;
   }
 
-  .auth-card {
+  .auth-card,
+  .auth-card-wide {
     padding: 30px 22px 24px;
+    width: 100%;
   }
 }
 .counter {

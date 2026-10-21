@@ -1,17 +1,84 @@
 import mongoose from 'mongoose'
+import { normalizeEmail } from '../utils/emailVerification.js'
 
 const { Schema } = mongoose
 
+// Shared email-verification fields (applicants and employers only; admins are provisioned)
+const emailVerificationFields = {
+  emailNormalized: { type: String, unique: true, sparse: true, index: true },
+  emailVerified: { type: Boolean, default: false },
+  emailVerifyTokenHash: { type: String, select: false },
+  emailVerifyExpires: Date,
+  emailVerifySentAt: Date,
+}
+
 // Separate collections for each account type
+// One version of an uploaded document. Old versions are kept (status: 'superseded')
+// for audit and purged by the retention job.
+const verificationDocVersionSchema = new Schema({
+  originalName: String,
+  storedName: String, // randomized server-side name; never exposed as a public URL
+  mimetype: String,
+  size: Number,
+  uploadedAt: Date,
+  data: { type: Buffer, select: false }, // private: only streamed via signed, expiring URLs
+  version: { type: Number, required: true },
+  status: { type: String, enum: ['pending', 'approved', 'rejected', 'superseded'], default: 'pending' },
+  reviewReason: String,
+  reviewedAt: Date,
+  reviewedBy: String,
+}, { _id: false })
+
+// Per-document slot (including resume) with version history
+const verificationDocSlotSchema = new Schema({
+  idType: String, // only used by validId1 / validId2
+  uploads: { type: Number, default: 0 }, // capped at 5 per document
+  versions: { type: [verificationDocVersionSchema], default: [] },
+}, { _id: false })
+
+const nsrpEducationSchema = new Schema({
+  level: { type: String, maxlength: 40 },
+  school: { type: String, maxlength: 120 },
+  course: { type: String, maxlength: 100 },
+  year: { type: String, maxlength: 20 },
+}, { _id: false })
+
+const nsrpTrainingSchema = new Schema({
+  name: { type: String, maxlength: 120 },
+  provider: { type: String, maxlength: 120 },
+  course: { type: String, maxlength: 100 },
+  year: { type: String, maxlength: 20 },
+}, { _id: false })
+
+const nsrpWorkExperienceSchema = new Schema({
+  company: { type: String, maxlength: 120 },
+  position: { type: String, maxlength: 100 },
+  startDate: { type: String, maxlength: 20 },
+  endDate: { type: String, maxlength: 20 },
+}, { _id: false })
+
 const applicantSchema = new Schema({
   email: { type: String, required: true, unique: true },
   passwordHash: { type: String, required: true },
+  ...emailVerificationFields,
   verificationStatus: { type: String, enum: ['under_review', 'approved', 'declined', 'restricted'], default: 'under_review' },
   verificationReason: String,
+  consentGivenAt: Date, // RA 10173 consent recorded at sign up
+  verificationDocuments: {
+    nsrpForm: verificationDocSlotSchema,
+    birthCertificate: verificationDocSlotSchema,
+    validId1: verificationDocSlotSchema,
+    validId2: verificationDocSlotSchema,
+    resume: verificationDocSlotSchema,
+  },
+  documentsPurgedAt: Date,
   profile: {
     name: String,
     location: String,
     skills: [String],
+    education: { type: [nsrpEducationSchema], default: [] },
+    technicalTraining: { type: [nsrpTrainingSchema], default: [] },
+    workExperience: { type: [nsrpWorkExperienceSchema], default: [] },
     traits: String,
     summary: String,
     profileImage: String,
@@ -36,6 +103,7 @@ const applicantSchema = new Schema({
 const employerSchema = new Schema({
   email: { type: String, required: true, unique: true },
   passwordHash: { type: String, required: true },
+  ...emailVerificationFields,
   verificationStatus: { type: String, enum: ['pending_verification', 'under_review', 'approved', 'declined'], default: 'approved' },
   verificationReason: String,
   requirementsSubmittedAt: Date,
@@ -56,6 +124,11 @@ const adminSchema = new Schema({
   passwordHash: { type: String, required: true },
   profile: { name: String },
 }, { collection: 'admins', timestamps: true })
+
+const jobTitleSchema = new Schema({
+  name: { type: String, required: true, unique: true, trim: true, maxlength: 80 },
+  category: { type: String, required: true, trim: true, maxlength: 60 },
+}, { collection: 'job_titles', timestamps: true })
 
 const notificationSchema = new Schema({
   recipientEmail: { type: String, required: true },
@@ -107,6 +180,7 @@ const ratingSchema = new Schema({
 const Applicant = mongoose.models.Applicant || mongoose.model('Applicant', applicantSchema)
 const Employer = mongoose.models.Employer || mongoose.model('Employer', employerSchema)
 const Admin = mongoose.models.Admin || mongoose.model('Admin', adminSchema)
+const JobTitle = mongoose.models.JobTitle || mongoose.model('JobTitle', jobTitleSchema)
 const Notification = mongoose.models.Notification || mongoose.model('Notification', notificationSchema)
 const Referral = mongoose.models.Referral || mongoose.model('Referral', referralSchema)
 const HireReport = mongoose.models.HireReport || mongoose.model('HireReport', hireReportSchema)
@@ -114,19 +188,35 @@ const Rating = mongoose.models.Rating || mongoose.model('Rating', ratingSchema)
 
 async function findUserByEmail(email) {
   if (!email) return null
-  let user = await Admin.findOne({ email }).lean()
+  const normalized = normalizeEmail(email)
+  let user = await Admin.findOne({ email: email.trim() }).lean()
   if (user) return { user, type: 'Admin' }
-  user = await Employer.findOne({ email }).lean()
+  // Match applicants/employers on the normalized value so gmail aliases collapse
+  user = await Employer.findOne({ $or: [{ emailNormalized: normalized }, { email }] }).lean()
   if (user) return { user, type: 'Employer' }
-  user = await Applicant.findOne({ email }).lean()
+  user = await Applicant.findOne({ $or: [{ emailNormalized: normalized }, { email }] }).lean()
   if (user) return { user, type: 'Applicant' }
   return null
 }
 
+// True if the normalized email is already used in ANY role collection
+async function emailTakenAcrossRoles(email) {
+  const normalized = normalizeEmail(email)
+  if (!normalized) return false
+  const [admin, employer, applicant] = await Promise.all([
+    Admin.findOne({ email: email.trim() }).select('_id').lean(),
+    Employer.findOne({ $or: [{ emailNormalized: normalized }, { email }] }).select('_id').lean(),
+    Applicant.findOne({ $or: [{ emailNormalized: normalized }, { email }] }).select('_id').lean(),
+  ])
+  return Boolean(admin || employer || applicant)
+}
+
 async function createUserInRole(role, data) {
-  if (role === 'Admin') return Admin.create(data)
-  if (role === 'Employer') return Employer.create(data)
-  return Applicant.create(data)
+  const payload = { ...data }
+  if (payload.email) payload.emailNormalized = normalizeEmail(payload.email)
+  if (role === 'Admin') return Admin.create(payload)
+  if (role === 'Employer') return Employer.create(payload)
+  return Applicant.create(payload)
 }
 
 async function updateUserProfileByEmail(email, profile) {
@@ -144,11 +234,13 @@ export {
   Applicant,
   Employer,
   Admin,
+  JobTitle,
   Notification,
   Referral,
   HireReport,
   Rating,
   findUserByEmail,
+  emailTakenAcrossRoles,
   createUserInRole,
   updateUserProfileByEmail,
 }
