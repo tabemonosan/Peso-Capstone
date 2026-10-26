@@ -353,9 +353,166 @@
 }
 
 .portal-table-scroll {
+  /* No fixed height / vertical scroll: the page scrolls, the table grows to fit
+     its rows. overflow-x is only a fallback for very narrow screens. */
   overflow-x: auto;
   border: 1px solid #8ea5bb;
   border-radius: 6px;
+}
+
+/* Fit-to-screen variant: fixed layout, explicit column widths, sticky header */
+.portal-table.portal-table-fit {
+  min-width: 0;
+  table-layout: fixed;
+}
+
+/* Long unbroken values (legacy accounts used an email as the name) wrap instead of overflowing */
+.portal-table-fit td strong,
+.portal-table-fit td {
+  overflow-wrap: anywhere;
+}
+
+/* Column widths stay consistent across pages (colgroup in the tables) */
+.portal-applicants-table col.col-name { width: 22%; }
+.portal-applicants-table col.col-email { width: 26%; }
+.portal-applicants-table col.col-location { width: 14%; }
+.portal-applicants-table col.col-status { width: 22%; }
+.portal-applicants-table col.col-actions { width: 16%; }
+
+.portal-employers-table col.col-name { width: 20%; }
+.portal-employers-table col.col-email { width: 24%; }
+.portal-employers-table col.col-contact { width: 16%; }
+.portal-employers-table col.col-phone { width: 12%; }
+.portal-employers-table col.col-status { width: 14%; }
+.portal-employers-table col.col-actions { width: 14%; }
+
+.portal-table-fit th {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #f3f7fb;
+}
+
+.portal-cell-truncate {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Status cell: badges and counters stack on their own lines, never clipped */
+.portal-status-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  white-space: normal;
+}
+
+.portal-status-stack .portal-status,
+.portal-status-stack .portal-badge {
+  width: fit-content;
+  max-width: 100%;
+}
+
+.portal-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+/* Actions: one line, compact buttons */
+.portal-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Loading skeleton rows */
+.portal-skeleton-cell {
+  display: block;
+  height: 12px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #e2eaf2 25%, #f3f7fb 50%, #e2eaf2 75%);
+  background-size: 200% 100%;
+  animation: portal-skeleton-shimmer 1.2s infinite;
+}
+
+@keyframes portal-skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Below 900px: directory tables become stacked cards (no horizontal scrolling) */
+@media (max-width: 900px) {
+  .portal-applicants-table,
+  .portal-employers-table {
+    min-width: 0; /* override the 680px table minimum */
+  }
+
+  .portal-applicants-table thead,
+  .portal-employers-table thead {
+    display: none;
+  }
+
+  .portal-applicants-table,
+  .portal-applicants-table tbody,
+  .portal-applicants-table tr,
+  .portal-applicants-table td,
+  .portal-employers-table,
+  .portal-employers-table tbody,
+  .portal-employers-table tr,
+  .portal-employers-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .portal-applicants-table tr,
+  .portal-employers-table tr {
+    border-bottom: 8px solid #eef3f8;
+    padding: 6px 0;
+  }
+
+  .portal-applicants-table td,
+  .portal-employers-table td {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    border-bottom: 0;
+    padding: 6px 12px;
+    white-space: normal;
+  }
+
+  /* Long emails wrap instead of truncating on cards */
+  .portal-applicants-table .portal-cell-truncate,
+  .portal-employers-table .portal-cell-truncate {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: right;
+  }
+
+  .portal-applicants-table td::before,
+  .portal-employers-table td::before {
+    content: attr(data-label);
+    flex-shrink: 0;
+    color: #526b84;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  .portal-applicants-table .portal-details-row td::before,
+  .portal-employers-table .portal-details-row td::before {
+    content: none;
+  }
 }
 
 .portal-table {
@@ -383,9 +540,14 @@
 }
 
 .portal-table td {
-  padding: 13px 10px;
+  padding: 8px 10px;
   border-bottom: 1px solid #dce5ee;
   white-space: nowrap;
+}
+
+/* Fixed-layout tables let cells wrap instead of forcing overflow */
+.portal-table-fit td {
+  white-space: normal;
 }
 
 .portal-table tr:last-child td {
@@ -1381,6 +1543,30 @@
 
   .portal-nav {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Very small phones: let the header wrap instead of forcing page-level horizontal scroll */
+@media (max-width: 480px) {
+  .portal-header {
+    height: auto;
+  }
+
+  .portal-header-inner {
+    flex-wrap: wrap;
+    row-gap: 6px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+    width: min(100% - 16px, 1280px);
+  }
+
+  .portal-header-actions {
+    white-space: normal;
+  }
+
+  .portal-brand img {
+    width: 48px;
+    height: auto;
   }
 }
 

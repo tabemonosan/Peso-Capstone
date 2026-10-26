@@ -1,5 +1,6 @@
 import mongoose from 'mongoose'
 import { normalizeEmail } from '../utils/emailVerification.js'
+import { formatFullName, formatDisplayName } from '../../shared/nameFields.js'
 
 const { Schema } = mongoose
 
@@ -34,6 +35,11 @@ const verificationDocSlotSchema = new Schema({
   idType: String, // only used by validId1 / validId2
   uploads: { type: Number, default: 0 }, // capped at 5 per document
   versions: { type: [verificationDocVersionSchema], default: [] },
+  // Admin review action log (approvals, rejections, reverts) for audit
+  history: {
+    type: [{ action: String, reason: String, by: String, at: { type: Date, default: Date.now } }],
+    default: [],
+  },
 }, { _id: false })
 
 const nsrpEducationSchema = new Schema({
@@ -58,8 +64,7 @@ const nsrpWorkExperienceSchema = new Schema({
 }, { _id: false })
 
 const applicantSchema = new Schema({
-  email: { type: String, required: true, unique: true },
-  passwordHash: { type: String, required: true },
+  email: { type: String, required: true, unique: true },  passwordHash: { type: String, required: true },
   ...emailVerificationFields,
   verificationStatus: { type: String, enum: ['under_review', 'approved', 'declined', 'restricted'], default: 'under_review' },
   verificationReason: String,
@@ -72,7 +77,15 @@ const applicantSchema = new Schema({
     resume: verificationDocSlotSchema,
   },
   documentsPurgedAt: Date,
+  // Set by the name-split migration; user is asked to confirm their name on next login
+  needsNameConfirmation: { type: Boolean, default: false },
   profile: {
+    // Structured name parts are canonical; `name` is the legacy field kept in
+    // sync with the computed full name until the migration is fully verified.
+    firstName: { type: String, maxlength: 50 },
+    middleName: { type: String, maxlength: 50 },
+    lastName: { type: String, maxlength: 50 },
+    suffix: { type: String, enum: ['', 'Jr.', 'Sr.', 'II', 'III', 'IV'], default: '' },
     name: String,
     location: String,
     skills: [String],
@@ -99,6 +112,29 @@ const applicantSchema = new Schema({
     data: { type: Buffer, select: false },
   },
 }, { collection: 'applicants', timestamps: true })
+
+// Keep the legacy `profile.name` synced with the structured name parts so
+// older consumers keep working while the new fields are the source of truth.
+applicantSchema.index({ 'profile.lastName': 1, 'profile.firstName': 1, _id: 1 })
+applicantSchema.index({ createdAt: -1, _id: 1 })
+function syncApplicantName(doc) {
+  const profile = doc?.profile
+  if (!profile) return
+  if (profile.firstName || profile.lastName) profile.name = formatFullName(profile)
+}
+applicantSchema.pre('validate', function syncOnValidate() { syncApplicantName(this) })
+applicantSchema.pre('findOneAndUpdate', function syncOnUpdate() {
+  const update = this.getUpdate()
+  const profile = update?.profile || update?.$set?.profile
+  if (profile && (profile.firstName || profile.lastName)) profile.name = formatFullName(profile)
+})
+
+export function applicantFullName(applicant) {
+  return formatFullName(applicant?.profile) || applicant?.email || ''
+}
+export function applicantDisplayName(applicant) {
+  return formatDisplayName(applicant?.profile) || applicant?.email || ''
+}
 
 const employerSchema = new Schema({
   email: { type: String, required: true, unique: true },
@@ -131,11 +167,19 @@ const jobTitleSchema = new Schema({
 }, { collection: 'job_titles', timestamps: true })
 
 const notificationSchema = new Schema({
-  recipientEmail: { type: String, required: true },
+  recipient: {
+    id: { type: Schema.Types.ObjectId },
+    role: { type: String, enum: ['Applicant', 'Employer', 'Admin'] },
+  },
+  recipientEmail: { type: String, lowercase: true, trim: true },
   title: { type: String, required: true },
   message: { type: String, required: true },
-  type: { type: String, default: 'job_review' },
-  kind: { type: String, default: 'job-review' },
+  type: { type: String, default: 'general' },
+  link: { type: String, default: '' },
+  readAt: { type: Date, default: null },
+  metadata: { type: Schema.Types.Mixed, default: {} },
+  // Legacy fields kept so older documents and consumers keep working
+  kind: String,
   read: { type: Boolean, default: false },
   actionable: { type: Boolean, default: false },
   linkPath: String,
@@ -147,6 +191,8 @@ const notificationSchema = new Schema({
   employerName: String,
   createdAt: { type: Date, default: Date.now },
 }, { collection: 'notifications', timestamps: true })
+notificationSchema.index({ 'recipient.id': 1, 'recipient.role': 1, createdAt: -1 })
+notificationSchema.index({ recipientEmail: 1, createdAt: -1 })
 
 const referralSchema = new Schema({
   jobId: { type: Schema.Types.ObjectId, ref: 'Job', required: true },
@@ -156,6 +202,8 @@ const referralSchema = new Schema({
   status: { type: String, enum: ['pending', 'accepted', 'declined'], default: 'pending' },
   createdAt: { type: Date, default: Date.now },
 }, { collection: 'referrals', timestamps: true })
+referralSchema.index({ employerId: 1, createdAt: -1, _id: 1 })
+referralSchema.index({ createdAt: -1, _id: 1 })
 
 const hireReportSchema = new Schema({
   referralId: { type: Schema.Types.ObjectId, ref: 'Referral' },
@@ -165,6 +213,8 @@ const hireReportSchema = new Schema({
   status: { type: String, enum: ['hired', 'deployed'], required: true },
   reportedAt: { type: Date, default: Date.now },
 }, { collection: 'hire_reports', timestamps: true })
+hireReportSchema.index({ reportedAt: -1, _id: 1 })
+hireReportSchema.index({ employerId: 1, reportedAt: -1 })
 
 const ratingSchema = new Schema({
   fromUserId: { type: Schema.Types.ObjectId, required: true },

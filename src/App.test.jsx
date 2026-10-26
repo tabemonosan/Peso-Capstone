@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 
@@ -26,28 +26,32 @@ beforeEach(() => {
       })
     }
 
-    if (url === 'http://localhost:4000/api/jobs?status=approved') {
-      return Promise.resolve({ ok: true, json: async () => [] })
+    if (url.startsWith('http://localhost:4000/api/jobs?status=approved')) {
+      return Promise.resolve({ ok: true, json: async () => (url.includes('page=') ? { items: [], total: 0, page: 1, limit: 10, totalPages: 1 } : []) })
     }
 
-    if (url === 'http://localhost:4000/api/jobs?status=applied') {
-      return Promise.resolve({ ok: true, json: async () => [] })
+    if (url.startsWith('http://localhost:4000/api/jobs?status=applied')) {
+      return Promise.resolve({ ok: true, json: async () => (url.includes('page=') ? { items: [], total: 0, page: 1, limit: 10, totalPages: 1 } : []) })
     }
 
-    if (url === 'http://localhost:4000/api/jobs?status=pending') {
-      return Promise.resolve({ ok: true, json: async () => [] })
+    if (url.startsWith('http://localhost:4000/api/jobs?status=pending')) {
+      return Promise.resolve({ ok: true, json: async () => (url.includes('page=') ? { items: [], total: 0, page: 1, limit: 10, totalPages: 1 } : []) })
     }
 
-    if (url === 'http://localhost:4000/api/jobs?status=mine') {
-      return Promise.resolve({ ok: true, json: async () => [] })
+    if (url.startsWith('http://localhost:4000/api/jobs?status=mine')) {
+      return Promise.resolve({ ok: true, json: async () => (url.includes('page=') ? { items: [], total: 0, page: 1, limit: 10, totalPages: 1 } : []) })
     }
 
-    if (url === 'http://localhost:4000/api/employer-requests') {
-      return Promise.resolve({ ok: true, json: async () => [] })
+    if (url.startsWith('http://localhost:4000/api/jobs?status=declined')) {
+      return Promise.resolve({ ok: true, json: async () => (url.includes('page=') ? { items: [], total: 0, page: 1, limit: 10, totalPages: 1 } : []) })
     }
 
-    if (url === 'http://localhost:4000/api/notifications') {
-      return Promise.resolve({ ok: true, json: async () => [] })
+    if (url.startsWith('http://localhost:4000/api/employer-requests')) {
+      return Promise.resolve({ ok: true, json: async () => (url.includes('page=') ? { items: [], total: 0, page: 1, limit: 10, totalPages: 1 } : []) })
+    }
+
+    if (url.startsWith('http://localhost:4000/api/notifications')) {
+      return Promise.resolve({ ok: true, json: async () => ({ items: [], total: 0, unreadCount: 0, page: 1, limit: 10 }) })
     }
 
     return Promise.resolve({ ok: true, json: async () => [] })
@@ -82,7 +86,8 @@ describe('PESO Portal prototype', () => {
     render(<App />)
 
     fireEvent.click(screen.getByRole('button', { name: /Create an account \(Applicant\)/i }))
-    fireEvent.change(screen.getByLabelText(/Name/i), { target: { value: 'New Applicant' } })
+    fireEvent.change(screen.getByLabelText(/First name/i), { target: { value: 'New' } })
+    fireEvent.change(screen.getByLabelText(/Last name/i), { target: { value: 'Applicant' } })
     fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: 'newapplicant@peso.gov' } })
     fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'password123' } })
     fireEvent.change(screen.getByLabelText(/Confirm password/i), { target: { value: 'password123' } })
@@ -91,7 +96,7 @@ describe('PESO Portal prototype', () => {
     expect(screen.getByRole('button', { name: /Create account/i })).toBeDisabled()
   })
 
-  it('renders the portal after a successful admin login and shows admin access control', async () => {
+  it('renders the portal after a successful admin login without admin role switching controls', async () => {
     render(<App />)
     const emailInput = screen.getByLabelText(/Email/i)
     const passwordInput = screen.getByLabelText(/Password/i)
@@ -102,8 +107,9 @@ describe('PESO Portal prototype', () => {
     fireEvent.click(submitButton)
 
     expect(await screen.findByText(/Online Employment Services Platform/i)).toBeInTheDocument()
-    expect(await screen.findByText(/Access Control/i)).toBeInTheDocument()
-    expect(await screen.findByText(/Role:\s*Admin/i)).toBeInTheDocument()
+    expect(screen.queryByText(/Access Control/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Apply Role/i })).not.toBeInTheDocument()
+    expect(await screen.findByText(/All Dashboard/i)).toBeInTheDocument()
   })
 
   it('opens an accessible admin job review modal and requires a decline reason', async () => {
@@ -128,7 +134,7 @@ describe('PESO Portal prototype', () => {
         verificationStatus: 'approved',
       },
     }
-    let reviewPayload
+    let reviewPayload = null
     mockFetch.mockImplementation((url, options) => {
       if (url === 'http://localhost:4000/api/login') {
         return Promise.resolve({
@@ -139,14 +145,14 @@ describe('PESO Portal prototype', () => {
       if (url === 'http://localhost:4000/api/profile') {
         return Promise.resolve({ ok: true, json: async () => ({ email: 'admin@peso.gov', role: 'Admin', profile: { name: 'Admin' } }) })
       }
-      if (url === 'http://localhost:4000/api/jobs?status=pending') {
-        return Promise.resolve({ ok: true, json: async () => [reviewJob] })
+      if (url.startsWith('http://localhost:4000/api/jobs?status=pending')) {
+        return Promise.resolve({ ok: true, json: async () => (url.includes('page=') ? { items: [reviewJob], total: 1, page: 1, limit: 10, totalPages: 1 } : [reviewJob]) })
       }
-      if (url === 'http://localhost:4000/api/jobs?status=approved' || url === 'http://localhost:4000/api/jobs?status=declined') {
-        return Promise.resolve({ ok: true, json: async () => [] })
+      if (url.startsWith('http://localhost:4000/api/jobs?status=approved') || url.startsWith('http://localhost:4000/api/jobs?status=declined')) {
+        return Promise.resolve({ ok: true, json: async () => (url.includes('page=') ? { items: [], total: 0, page: 1, limit: 10, totalPages: 1 } : []) })
       }
-      if (url === 'http://localhost:4000/api/employer-requests' || url === 'http://localhost:4000/api/notifications') {
-        return Promise.resolve({ ok: true, json: async () => [] })
+      if (url.startsWith('http://localhost:4000/api/employer-requests') || url.startsWith('http://localhost:4000/api/notifications')) {
+        return Promise.resolve({ ok: true, json: async () => (url.includes('page=') || url.includes('limit=') ? { items: [], total: 0, unreadCount: 0, page: 1, limit: 10, totalPages: 1 } : []) })
       }
       if (url === 'http://localhost:4000/api/jobs/review-job-1/status') {
         reviewPayload = JSON.parse(options.body)
@@ -167,13 +173,69 @@ describe('PESO Portal prototype', () => {
     expect(screen.getByText('Full job description for the review.')).toBeInTheDocument()
     expect(screen.getByText('Review Contact')).toBeInTheDocument()
     expect(screen.getByText('approved', { exact: true })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Decline' })).toBeDisabled()
 
-    fireEvent.change(screen.getByLabelText(/Decline reason/i), { target: { value: 'Please add the work schedule.' } })
+    // Decline opens the shared confirm dialog; nothing is sent until confirmed
     fireEvent.click(screen.getByRole('button', { name: 'Decline' }))
+    const confirmDialog = await screen.findByRole('alertdialog', { name: /Decline "Customer Service Representative"\?/i })
+    const confirmReject = within(confirmDialog).getByRole('button', { name: 'Confirm reject' })
+    expect(confirmReject).toBeDisabled() // reason required (min 5 chars)
+    expect(reviewPayload).toBeNull()
+
+    fireEvent.change(within(confirmDialog).getByLabelText('Reason'), { target: { value: 'Please add the work schedule.' } })
+    fireEvent.click(confirmReject)
 
     await waitFor(() => expect(reviewPayload).toEqual({ status: 'declined', reason: 'Please add the work schedule.' }))
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Customer Service Representative' })).not.toBeInTheDocument())
+  })
+
+  it('expands approved job applicants below the job row without opening a modal', async () => {
+    const approvedJob = {
+      _id: 'approved-job-1',
+      title: 'Office Clerk',
+      company: 'PESO Test Company',
+      status: 'approved',
+      requirements: 'Basic computer skills',
+      description: 'Assist with office tasks.',
+      applicants: [{ email: 'applicant@peso.gov', appliedAt: '2026-10-01T00:00:00.000Z' }],
+    }
+    mockFetch.mockImplementation((url) => {
+      if (url === 'http://localhost:4000/api/login') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ token: 'token-admin', user: { email: 'admin@peso.gov', role: 'Admin', emailVerified: true, profile: { name: 'Admin' } } }),
+        })
+      }
+      if (url === 'http://localhost:4000/api/profile') {
+        return Promise.resolve({ ok: true, json: async () => ({ email: 'admin@peso.gov', role: 'Admin', profile: { name: 'Admin' } }) })
+      }
+      if (url.startsWith('http://localhost:4000/api/jobs?status=approved')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => (url.includes('page=')
+            ? { items: [approvedJob], total: 1, page: 1, limit: 10, totalPages: 1 }
+            : [approvedJob]),
+        })
+      }
+      return Promise.resolve({ ok: true, json: async () => [] })
+    })
+
+    render(<App />)
+    fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: 'admin@peso.gov' } })
+    fireEvent.change(screen.getByLabelText(/Password/i), { target: { value: 'password123' } })
+    fireEvent.click(screen.getByRole('button', { name: /Sign in/i }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Job Postings' }))
+    const jobRow = await screen.findByRole('button', { name: 'View Office Clerk details' })
+    expect(jobRow.querySelector('.text-slate-900')).toHaveTextContent('Office Clerk')
+    expect(jobRow.querySelector('.text-slate-700')).toHaveTextContent('PESO Test Company')
+    fireEvent.click(await screen.findByRole('button', { name: 'View 1 applicants' }))
+
+    const details = await screen.findByRole('region', { name: 'Job Offer Details' })
+    expect(screen.getByText(/Assist with office tasks\./)).toBeInTheDocument()
+    expect(details.textContent).toContain('applicant@peso.gov')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hide applicants' }))
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Job Offer Details' })).not.toBeInTheDocument())
   })
 
   it('routes incomplete applicants to the registration checklist and its profile fix', async () => {
@@ -278,20 +340,23 @@ describe('PESO Portal prototype', () => {
         })
       }
 
-      if (url === 'http://localhost:4000/api/jobs?status=approved') {
+      if (url.startsWith('http://localhost:4000/api/jobs?status=approved')) {
+        const job = {
+          _id: 'job-1',
+          title: 'Warehouse Helper',
+          company: 'Acme Logistics',
+          location: 'Quezon City',
+          description: 'Move inventory and support operations.',
+          requirements: 'Fast learner',
+          skills: ['Cleaning', 'Driving'],
+          salary: '₱18,000',
+          createdAt: '2024-01-01T00:00:00.000Z',
+        }
         return Promise.resolve({
           ok: true,
-          json: async () => ([{
-            _id: 'job-1',
-            title: 'Warehouse Helper',
-            company: 'Acme Logistics',
-            location: 'Quezon City',
-            description: 'Move inventory and support operations.',
-            requirements: 'Fast learner',
-            skills: ['Cleaning', 'Driving'],
-            salary: '₱18,000',
-            createdAt: '2024-01-01T00:00:00.000Z',
-          }]),
+          json: async () => (url.includes('page=')
+            ? { items: [job], total: 1, page: 1, limit: 10, totalPages: 1, facets: { skills: [], locations: [], locationTypes: [], employmentTypes: [] } }
+            : [job]),
         })
       }
 
@@ -313,11 +378,15 @@ describe('PESO Portal prototype', () => {
     fireEvent.click(screen.getByRole('button', { name: /Sign in/i }))
 
     fireEvent.click(await screen.findByRole('button', { name: /^Jobs$/i }))
-    expect((await screen.findAllByText(/Warehouse Helper/i)).length).toBeGreaterThan(0)
 
-    fireEvent.click(screen.getAllByText(/Warehouse Helper/i)[0])
+    // Clicking a card opens the job detail modal; Apply starts the wizard from there
+    const card = await screen.findByRole('button', { name: /View Warehouse Helper details/i })
+    fireEvent.click(card)
+    const detail = await screen.findByRole('dialog', { name: 'Warehouse Helper' })
+    expect(within(detail).getByText(/Move inventory/)).toBeInTheDocument()
+    expect(within(detail).getByText(/Fast learner/)).toBeInTheDocument()
 
-    fireEvent.click(await screen.findByRole('button', { name: /Apply Now/i }))
+    fireEvent.click(within(detail).getByRole('button', { name: /Apply Now/i }))
     expect(await screen.findByText(/Apply for Warehouse Helper/i)).toBeInTheDocument()
     expect(screen.getAllByText(/Acme Logistics/i).length).toBeGreaterThan(0)
   })

@@ -1,8 +1,8 @@
-import { Fragment, useCallback, useEffect, useState } from "react"
+import { Fragment, useCallback, useEffect, useRef, useState } from "react"
 import { API_URL } from "./config"
 import JobsView from "./components/JobsView"
 import VerificationDocumentsForm, { emptyVerificationDocs, validateVerificationDocs } from "./components/VerificationDocumentsForm"
-import AdminVerificationDocs from "./components/AdminVerificationDocs"
+import VerificationDocsReviewModal from "./components/VerificationDocsReviewModal"
 import MyDocumentsPage from "./components/MyDocumentsPage"
 import VerifyEmailPage from "./components/VerifyEmailPage"
 import EmailVerificationBanner from "./components/EmailVerificationBanner"
@@ -11,7 +11,15 @@ import JobTitlePicker from "./components/JobTitlePicker"
 import AdminJobTitlesPage from "./components/AdminJobTitlesPage"
 import PasswordChecklist from "./components/PasswordChecklist"
 import { validatePassword } from "./utils/passwordPolicy"
+import { SUFFIX_OPTIONS, capitalizeName, validateNameField, formatFullName, formatDisplayName } from "../shared/nameFields.js"
 import ReferralList from "./components/ReferralList"
+import Pagination from "./components/Pagination"
+import SortControl, { SortableTh } from "./components/SortControl"
+import ConfirmDialog from "./components/ConfirmDialog"
+import { usePagination, useDebouncedValue } from "./hooks/usePagination"
+import { useSort } from "./hooks/useSort"
+import { sortItems } from "./utils/sortItems"
+import AllDashboard from "./components/AllDashboard"
 import PesoReferralPanel from "./components/PesoReferralPanel"
 
 const initialAccounts = [
@@ -23,6 +31,7 @@ const initialAccounts = [
 const navigationByRole = {
   Admin: [
     { id: "employers", label: "Employers" },
+    { id: "all-dashboard", label: "All Dashboard" },
     { id: "applicants", label: "Applicants" },
     { id: "requests", label: "Employer Requests" },
     { id: "jobs", label: "Job Postings" },
@@ -33,6 +42,7 @@ const navigationByRole = {
     { id: "complete", label: "Complete Registration" },
     { id: "home", label: "Home" },
     { id: "dashboard", label: "Dashboard" },
+    { id: "all-dashboard", label: "All Dashboard" },
     { id: "employer", label: "Job Postings" },
     { id: "referrals", label: "Reports" },
     { id: "reviews", label: "Reviews" },
@@ -41,6 +51,7 @@ const navigationByRole = {
   Applicant: [
     { id: "complete", label: "Complete Registration" },
     { id: "home", label: "Home" },
+    { id: "all-dashboard", label: "All Dashboard" },
     { id: "documents", label: "My Documents" },
     { id: "jobs", label: "Jobs" },
     { id: "reputation", label: "Reviews" },
@@ -893,12 +904,62 @@ const albayLocations = {
   ],
 }
 
+const APPLICANT_SORT_OPTIONS = [
+  { id: 'name:asc', sortBy: 'name', order: 'asc', label: 'Name (last name, A to Z)' },
+  { id: 'name:desc', sortBy: 'name', order: 'desc', label: 'Name (last name, Z to A)' },
+  { id: 'createdAt:desc', sortBy: 'createdAt', order: 'desc', label: 'Newest registered' },
+  { id: 'createdAt:asc', sortBy: 'createdAt', order: 'asc', label: 'Oldest registered' },
+  { id: 'status:asc', sortBy: 'status', order: 'asc', label: 'Verification status' },
+  { id: 'docsApproved:desc', sortBy: 'docsApproved', order: 'desc', label: 'Documents approved (most first)' },
+  { id: 'docsApproved:asc', sortBy: 'docsApproved', order: 'asc', label: 'Documents approved (least first)' },
+  { id: 'location:asc', sortBy: 'location', order: 'asc', label: 'Location (A to Z)' },
+  { id: 'location:desc', sortBy: 'location', order: 'desc', label: 'Location (Z to A)' },
+]
+
+const EMPLOYER_SORT_OPTIONS = [
+  { id: 'companyName:asc', sortBy: 'companyName', order: 'asc', label: 'Company name (A to Z)' },
+  { id: 'companyName:desc', sortBy: 'companyName', order: 'desc', label: 'Company name (Z to A)' },
+  { id: 'createdAt:desc', sortBy: 'createdAt', order: 'desc', label: 'Newest' },
+  { id: 'createdAt:asc', sortBy: 'createdAt', order: 'asc', label: 'Oldest' },
+  { id: 'status:asc', sortBy: 'status', order: 'asc', label: 'Verification status' },
+]
+
+const EMPLOYER_REQUEST_SORT_OPTIONS = [
+  { id: 'createdAt:desc', sortBy: 'createdAt', order: 'desc', label: 'Newest submitted' },
+  { id: 'createdAt:asc', sortBy: 'createdAt', order: 'asc', label: 'Oldest submitted (longest waiting)' },
+  { id: 'companyName:asc', sortBy: 'companyName', order: 'asc', label: 'Company name (A to Z)' },
+  { id: 'companyName:desc', sortBy: 'companyName', order: 'desc', label: 'Company name (Z to A)' },
+  { id: 'status:asc', sortBy: 'status', order: 'asc', label: 'Status' },
+]
+
+const MY_JOBS_SORT_OPTIONS = [
+  { id: 'createdAt:desc', sortBy: 'createdAt', order: 'desc', label: 'Newest submitted' },
+  { id: 'createdAt:asc', sortBy: 'createdAt', order: 'asc', label: 'Oldest submitted' },
+  { id: 'title:asc', sortBy: 'title', order: 'asc', label: 'Job title (A to Z)' },
+  { id: 'title:desc', sortBy: 'title', order: 'desc', label: 'Job title (Z to A)' },
+  { id: 'deadline:asc', sortBy: 'deadline', order: 'asc', label: 'Application deadline (soonest first)' },
+]
+
 const albayMunicipalities = Object.keys(albayLocations)
 
 const normalizeSkills = (skills) => {
   if (Array.isArray(skills)) return skills.filter((skill) => typeof skill === 'string' && skill.trim()).map((skill) => skill.trim())
   if (typeof skills === 'string') return skills.split(',').map((skill) => skill.trim()).filter(Boolean)
   return []
+}
+
+// Sorts jobs by how many of the applicant's skills they require.
+// With no applicant skills, every matchCount is 0 and jobs fall back to newest-first.
+export const sortJobsByMatch = (jobs, userSkills) => {
+  const applicantSkills = normalizeSkills(userSkills)
+  return (Array.isArray(jobs) ? jobs : [])
+    .map((job) => {
+      const jobSkills = normalizeSkills(job?.skills)
+      const matchCount = applicantSkills.filter((skill) => jobSkills.includes(skill)).length
+      return { job, matchCount }
+    })
+    .sort((a, b) => b.matchCount - a.matchCount || new Date(b.job.createdAt) - new Date(a.job.createdAt))
+    .map(({ job }) => job)
 }
 
 function App() {
@@ -917,9 +978,13 @@ function App() {
   const [showPassword, setShowPassword] = useState(false)
   const [showSignupPassword, setShowSignupPassword] = useState(false)
   const [showEmployerPasswords, setShowEmployerPasswords] = useState(false)
-  const [adminSelectedRole, setAdminSelectedRole] = useState("Admin")
   const [profileData, setProfileData] = useState({
     name: "",
+    firstName: "",
+    middleName: "",
+    lastName: "",
+    suffix: "",
+    noMiddleName: false,
     location: "",
     skills: [],
     traits: "",
@@ -956,7 +1021,12 @@ function App() {
     }
     // Applicant/Admin default mapping
     return {
-      name: base.name || '',
+      name: formatFullName(base) || base.name || '',
+      firstName: base.firstName || '',
+      middleName: base.middleName || '',
+      lastName: base.lastName || '',
+      suffix: base.suffix || '',
+      noMiddleName: !base.middleName,
       location: base.location || '',
       skills: normalizeSkills(base.skills),
       traits: base.traits || '',
@@ -1048,28 +1118,20 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
   )
 }
 
-const sortJobsByMatch = (jobs, userSkills) => {
-  const applicantSkills = normalizeSkills(userSkills)
-  return jobs
-    .map((job) => {
-      const jobSkills = normalizeSkills(job.skills)
-      const matchCount = applicantSkills.filter((skill) => jobSkills.includes(skill)).length
-      return { job, matchCount }
-    })
-    .sort((a, b) => b.matchCount - a.matchCount || new Date(b.job.createdAt) - new Date(a.job.createdAt))
-    .map(({ job }) => job)
-}
-
 const [authView, setAuthView] = useState("login")
   const [signupForm, setSignupForm] = useState({
     email: "",
     password: "",
     confirmPassword: "",
-    name: "",
+    firstName: "",
+    middleName: "",
+    lastName: "",
+    suffix: "",
+    noMiddleName: false,
     location: "",
-    skills: "",
     summary: "",
   })
+  const [signupNameErrors, setSignupNameErrors] = useState({})
   const [signupResumeFile, setSignupResumeFile] = useState(null)
   const [signupDocs, setSignupDocs] = useState(emptyVerificationDocs)
   const [signupConsent, setSignupConsent] = useState(false)
@@ -1094,7 +1156,7 @@ const [authView, setAuthView] = useState("login")
   })
   const [requirementsFile, setRequirementsFile] = useState(null)
   const [employerSignupFile, setEmployerSignupFile] = useState(null)
-  const [employerRequests, setEmployerRequests] = useState([])
+  const [employerRequests, setEmployerRequests] = useState({ items: [], total: 0, totalPages: 1, loading: false })
   const [adminUsers, setAdminUsers] = useState([])
   const [jobForm, setJobForm] = useState({
     title: "",
@@ -1134,6 +1196,7 @@ const [authView, setAuthView] = useState("login")
   const [appliedJobs, setAppliedJobs] = useState([])
   const [pendingJobs, setPendingJobs] = useState([])
   const [notifications, setNotifications] = useState([])
+  const [unreadCount, setUnreadCount] = useState(0)
   const [approvedJobs, setApprovedJobs] = useState([])
   const [declinedJobs, setDeclinedJobs] = useState([])
   const [referredApplicantIdsByJob, setReferredApplicantIdsByJob] = useState({})
@@ -1153,16 +1216,70 @@ const [authView, setAuthView] = useState("login")
   const [selectedNotification, setSelectedNotification] = useState(null)
   const [referralPrefill, setReferralPrefill] = useState({ jobId: '', applicantIds: [] })
   const [appMessage, setAppMessage] = useState(null)
-  const [declineRequestTarget, setDeclineRequestTarget] = useState(null)
-  const [declineReason, setDeclineReason] = useState('')
-  const [approveRequestTarget, setApproveRequestTarget] = useState(null)
   const [expandedDirectoryUserId, setExpandedDirectoryUserId] = useState(null)
+  // Promise-based confirm dialog (one instance, used by every approve/decline flow)
+  const [confirmDialog, setConfirmDialog] = useState(null)
+  const [confirmBusy, setConfirmBusy] = useState(false)
+  const [confirmError, setConfirmError] = useState('')
+  const confirmResolveRef = useRef(null)
+
+  // requestConfirm(config) -> Promise<{ confirmed, reason }>
+  // config.onConfirm(reason) runs the actual request and returns { ok } or { error };
+  // the dialog stays open (busy, then inline error + Retry) until it succeeds.
+  const requestConfirm = useCallback((config) => new Promise((resolve) => {
+    confirmResolveRef.current = resolve
+    setConfirmError('')
+    setConfirmBusy(false)
+    setConfirmDialog(config)
+  }), [])
+
+  const closeConfirmDialog = useCallback((result) => {
+    confirmResolveRef.current?.(result)
+    confirmResolveRef.current = null
+    setConfirmDialog(null)
+    setConfirmBusy(false)
+    setConfirmError('')
+  }, [])
+
+  const handleConfirmDialogConfirm = useCallback(async (reason) => {
+    if (!confirmDialog?.onConfirm || confirmBusy) return
+    setConfirmBusy(true)
+    setConfirmError('')
+    const result = await confirmDialog.onConfirm(reason)
+    setConfirmBusy(false)
+    if (result?.error) {
+      setConfirmError(result.error)
+      return
+    }
+    closeConfirmDialog({ confirmed: true, reason })
+  }, [confirmDialog, confirmBusy, closeConfirmDialog])
   const [showVerificationModal, setShowVerificationModal] = useState(false)
+  const [reviewDocsApplicant, setReviewDocsApplicant] = useState(null)
   const [verificationEmail, setVerificationEmail] = useState('')
   const [verificationCode, setVerificationCode] = useState('')
   const [showSkillPrompt, setShowSkillPrompt] = useState(false)
 
-  const applicantProfileInitials = (profileData.name || currentUser?.email || 'Applicant')
+  // Admin Applicants: server-side pagination + sorting (search debounced, page/sort kept in the URL)
+  const debouncedDirectorySearch = useDebouncedValue(adminEmployerSearchTerm, 300)
+  const applicantsPagination = usePagination({ resetDeps: [debouncedDirectorySearch], urlKey: 'page' })
+  const applicantSort = useSort({ options: APPLICANT_SORT_OPTIONS, defaultId: 'name:asc', onChange: () => applicantsPagination.setPage(1) })
+  const [adminApplicantsData, setAdminApplicantsData] = useState({ items: [], total: 0, totalPages: 1 })
+  const [adminApplicantsLoading, setAdminApplicantsLoading] = useState(false)
+  // Admin Employers: server-side pagination + sorting
+  const employersPagination = usePagination({ resetDeps: [debouncedDirectorySearch, adminEmployerStatusFilter], urlKey: 'empPage' })
+  const employerSort = useSort({ options: EMPLOYER_SORT_OPTIONS, defaultId: 'companyName:asc', urlSync: false, onChange: () => employersPagination.setPage(1) })
+  const [adminEmployersData, setAdminEmployersData] = useState({ items: [], total: 0, totalPages: 1 })
+  const [adminEmployersLoading, setAdminEmployersLoading] = useState(false)
+  // Other long lists share the same hook with client-side slicing (no URL sync)
+  const myJobsPagination = usePagination({ resetDeps: [employerJobStatusFilter], syncUrl: false })
+  const myJobsSort = useSort({ options: MY_JOBS_SORT_OPTIONS, defaultId: 'createdAt:desc', urlSync: false, onChange: () => myJobsPagination.setPage(1) })
+  const notifPagination = usePagination({ urlKey: 'notifPage' })
+  const [notifTotal, setNotifTotal] = useState(0)
+  const notifPageRef = useRef({ page: 1, pageSize: 10 })
+  const employerRequestsPagination = usePagination({ urlKey: 'reqPage' })
+  const requestSort = useSort({ options: EMPLOYER_REQUEST_SORT_OPTIONS, defaultId: 'createdAt:desc', urlSync: false, onChange: () => employerRequestsPagination.setPage(1) })
+
+  const applicantProfileInitials = (formatFullName(profileData) || profileData.name || currentUser?.email || 'Applicant')
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
@@ -1184,6 +1301,8 @@ const [authView, setAuthView] = useState("login")
           alert(data.error)
           return { ok: false }
         }
+        // Saving the profile confirms the (possibly migrated) name
+        setCurrentUser((current) => current ? { ...current, needsNameConfirmation: false } : current)
         return { ok: true, data }
       })
       .catch((err) => {
@@ -1267,28 +1386,44 @@ const [authView, setAuthView] = useState("login")
     }
   }
 
-  const fetchEmployerRequests = () => {
+  // Employer requests: server-side pagination + sorting (newest submitted by default)
+  const fetchEmployerRequests = useCallback(() => {
     const token = getToken()
     if (!token) return
-
-    fetch(`${API_URL}/api/employer-requests`, {
+    setEmployerRequests((current) => ({ ...current, loading: true }))
+    const params = new URLSearchParams({
+      page: String(employerRequestsPagination.page),
+      limit: String(employerRequestsPagination.pageSize),
+      sortBy: requestSort.sortBy,
+      order: requestSort.order,
+    })
+    fetch(`${API_URL}/api/employer-requests?${params}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((r) => r.json())
-      .then((data) => setEmployerRequests(Array.isArray(data) ? data : []))
-      .catch(() => setEmployerRequests([]))
-  }
+      .then((data) => {
+        if (Array.isArray(data?.items)) {
+          if (data.items.length === 0 && data.total > 0 && employerRequestsPagination.page > 1) {
+            employerRequestsPagination.setPage(employerRequestsPagination.page - 1) // action emptied this page
+            return
+          }
+          setEmployerRequests({ ...data, loading: false })
+        }
+      })
+      .catch(() => setEmployerRequests((current) => ({ ...current, loading: false })))
+  }, [employerRequestsPagination, requestSort.sortBy, requestSort.order])
 
   const fetchNotifications = () => {
     const token = getToken()
     if (!token) return
 
-    fetch(`${API_URL}/api/notifications`, {
+    const { page, pageSize } = notifPageRef.current
+    fetch(`${API_URL}/api/notifications?page=${page}&limit=${pageSize}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((r) => r.json())
       .then((data) => {
-        const list = Array.isArray(data) ? data : []
+        const list = Array.isArray(data?.items) ? data.items : []
         // Deduplicate by _id to guard against double-fetch (StrictMode / overlapping effects)
         const seen = new Set()
         const unique = list.filter((n) => {
@@ -1298,9 +1433,26 @@ const [authView, setAuthView] = useState("login")
           return true
         })
         setNotifications(unique)
+        setUnreadCount(Number(data?.unreadCount) || 0)
+        setNotifTotal(Number(data?.total) || 0)
       })
-      .catch(() => setNotifications([]))
+      .catch(() => {
+        setNotifications([])
+        setUnreadCount(0)
+        setNotifTotal(0)
+      })
   }
+
+  // Keep the ref current so the 30s polling interval reads the live page
+  useEffect(() => {
+    notifPageRef.current = { page: notifPagination.page, pageSize: notifPagination.pageSize }
+  }, [notifPagination.page, notifPagination.pageSize])
+
+  // Refetch when the notifications page changes
+  useEffect(() => {
+    if (isLoggedIn) fetchNotifications()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notifPagination.page, notifPagination.pageSize])
 
   const fetchJobs = () => {
     const token = getToken()
@@ -1384,6 +1536,80 @@ const [authView, setAuthView] = useState("login")
       .then((data) => setAdminUsers(Array.isArray(data) ? data : []))
       .catch(() => setAdminUsers([]))
   }
+
+  // Server-paginated applicants for the admin Applicants directory.
+  // Previous rows stay visible while the next page loads.
+  const fetchAdminApplicants = useCallback(async () => {
+    if (activeRole !== 'Admin') return
+    const token = getToken()
+    if (!token) return
+    setAdminApplicantsLoading(true)
+    try {
+      const params = new URLSearchParams({
+        role: 'Applicant',
+        page: String(applicantsPagination.page),
+        limit: String(applicantsPagination.pageSize),
+        search: debouncedDirectorySearch,
+        sortBy: applicantSort.sortBy,
+        order: applicantSort.order,
+      })
+      const response = await fetch(`${API_URL}/api/admin/users?${params}`, { headers: { Authorization: `Bearer ${token}` } })
+      const data = await response.json().catch(() => null)
+      if (!Array.isArray(data?.items)) return
+      if (data.items.length === 0 && data.total > 0 && applicantsPagination.page > 1) {
+        // An action emptied this page — step back one page
+        applicantsPagination.setPage(applicantsPagination.page - 1)
+        return
+      }
+      setAdminApplicantsData(data)
+    } catch {
+      // Keep the previous page's rows on failure
+    } finally {
+      setAdminApplicantsLoading(false)
+    }
+  }, [activeRole, applicantsPagination, debouncedDirectorySearch, applicantSort.sortBy, applicantSort.order])
+
+  useEffect(() => {
+    if (activeRole === 'Admin' && activeView === 'applicants') fetchAdminApplicants()
+  }, [fetchAdminApplicants, activeRole, activeView])
+
+  // Server-paginated + sorted employers for the admin Employers directory
+  const fetchAdminEmployers = useCallback(async () => {
+    if (activeRole !== 'Admin') return
+    const token = getToken()
+    if (!token) return
+    setAdminEmployersLoading(true)
+    try {
+      const params = new URLSearchParams({
+        role: 'Employer',
+        page: String(employersPagination.page),
+        limit: String(employersPagination.pageSize),
+        search: debouncedDirectorySearch,
+        sortBy: employerSort.sortBy,
+        order: employerSort.order,
+      })
+      const response = await fetch(`${API_URL}/api/admin/users?${params}`, { headers: { Authorization: `Bearer ${token}` } })
+      const data = await response.json().catch(() => null)
+      if (!Array.isArray(data?.items)) return
+      if (data.items.length === 0 && data.total > 0 && employersPagination.page > 1) {
+        employersPagination.setPage(employersPagination.page - 1)
+        return
+      }
+      setAdminEmployersData(data)
+    } catch {
+      // Keep previous rows
+    } finally {
+      setAdminEmployersLoading(false)
+    }
+  }, [activeRole, employersPagination, debouncedDirectorySearch, employerSort.sortBy, employerSort.order])
+
+  useEffect(() => {
+    if (activeRole === 'Admin' && activeView === 'employers') fetchAdminEmployers()
+  }, [fetchAdminEmployers, activeRole, activeView])
+
+  useEffect(() => {
+    if (activeRole === 'Admin' && activeView === 'requests') fetchEmployerRequests()
+  }, [fetchEmployerRequests, activeRole, activeView])
 
   const fetchAdminReferrals = () => {
     const token = getToken()
@@ -1494,11 +1720,20 @@ const [authView, setAuthView] = useState("login")
     const declineReasonValue = typeof options.reason === 'string' ? options.reason.trim() : ''
     if (status === 'declined' && !declineReasonValue) return { error: 'Enter a reason before declining this job posting.' }
 
-    if (status === 'approved') {
+    // Approve must be confirmed via the shared ConfirmDialog by the caller;
+    // options.confirm !== false callers (none in the UI) get the dialog here as a safety net.
+    if (status === 'approved' && options.confirm !== false) {
       const allKnownJobs = [...pendingJobs, ...approvedJobs, ...declinedJobs]
       const matchedJob = allKnownJobs.find((job) => String(job?._id) === String(jobId))
       const jobTitle = matchedJob?.title || 'this job posting'
-      if (options.confirm !== false && !window.confirm(`Approve "${jobTitle}"? It will become visible to applicants.`)) return { ok: false, cancelled: true }
+      const confirmation = await requestConfirm({
+        title: `Approve "${jobTitle}"?`,
+        note: 'It will become visible to applicants and the employer will be notified.',
+        confirmLabel: 'Yes, approve',
+        busyLabel: 'Approving...',
+        onConfirm: async () => ({ ok: true }),
+      })
+      if (!confirmation.confirmed) return { ok: false, cancelled: true }
     }
 
     return fetch(`${API_URL}/api/jobs/${jobId}/status`, {
@@ -1534,34 +1769,39 @@ const [authView, setAuthView] = useState("login")
     if (!token) return alert('Not authenticated')
     const ids = Array.isArray(jobIds) ? jobIds : []
     if (ids.length === 0) return alert('Select at least one job posting first')
-    let reason = ''
-    if (status === 'declined') {
-      reason = window.prompt('Enter a reason to share with the employer:')
-      if (!reason?.trim()) return alert('A reason is required to decline job postings')
-      if (reason.trim().length > 500) return alert('The decline reason must be 500 characters or fewer')
-    }
-    if (!window.confirm(`${status === 'approved' ? 'Approve' : 'Decline'} ${ids.length} selected job posting${ids.length === 1 ? '' : 's'}?`)) return
 
-    try {
-      const results = await Promise.all(ids.map((jobId) =>
-        fetch(`${API_URL}/api/jobs/${jobId}/status`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ status, reason }),
-        }).then((r) => r.json()),
-      ))
-      const failed = results.filter((r) => r && r.error)
-      fetchJobs()
-      fetchNotifications()
-      if (failed.length > 0) {
-        alert(`${ids.length - failed.length} job(s) ${status}; ${failed.length} failed`)
-      } else {
-        alert(`${ids.length} job posting${ids.length === 1 ? '' : 's'} ${status}`)
-      }
-    } catch (err) {
-      console.error(err)
-      alert('Failed to update job statuses')
-    }
+    const isApprove = status === 'approved'
+    const confirmation = await requestConfirm({
+      title: `${isApprove ? 'Approve' : 'Decline'} ${ids.length} selected job posting${ids.length === 1 ? '' : 's'}?`,
+      note: isApprove ? 'They will become visible to applicants and employers will be notified.' : 'Employers will be notified with your reason.',
+      confirmLabel: isApprove ? 'Yes, approve all' : 'Confirm decline',
+      confirmTone: isApprove ? 'primary' : 'danger',
+      busyLabel: isApprove ? 'Approving...' : 'Declining...',
+      requireReason: !isApprove,
+      quickReasons: isApprove ? [] : ['Incomplete details', 'Policy violation', 'Duplicate posting', 'Misleading information'],
+      onConfirm: async (reason) => {
+        if (!isApprove && reason.trim().length > 500) return { error: 'The decline reason must be 500 characters or fewer' }
+        try {
+          const results = await Promise.all(ids.map((jobId) =>
+            fetch(`${API_URL}/api/jobs/${jobId}/status`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+              body: JSON.stringify({ status, reason: reason || '' }),
+            }).then((r) => r.json()),
+          ))
+          const failed = results.filter((r) => r && r.error)
+          fetchJobs()
+          fetchNotifications()
+          if (failed.length > 0) return { error: `${ids.length - failed.length} job(s) ${status}; ${failed.length} failed` }
+          setAppMessage({ type: 'success', text: `${ids.length} job posting${ids.length === 1 ? '' : 's'} ${status}` })
+          return { ok: true }
+        } catch (err) {
+          console.error(err)
+          return { error: 'Failed to update job statuses' }
+        }
+      },
+    })
+    return confirmation
   }
 
   const handleApplyJob = async (jobId, nsrpAnswers) => {
@@ -1687,6 +1927,7 @@ const [authView, setAuthView] = useState("login")
       .then((data) => {
         if (data.error) return setAppMessage({ type: 'error', text: data.error })
         fetchAdminUsers()
+        fetchAdminApplicants()
         setAppMessage({ type: 'success', text: `Applicant ${status}.` })
       })
       .catch((err) => {
@@ -1695,27 +1936,49 @@ const [authView, setAuthView] = useState("login")
       })
   }
 
-  const handleReviewEmployerRequest = (requestId, status) => {
+  const handleReviewEmployerRequest = async (requestId, status, reason = '') => {
     const token = getToken()
-    if (!token) return alert('Not authenticated')
-    fetch(`${API_URL}/api/employer-requests/${requestId}/status`, {
-      method: 'PUT',
+    if (!token) return { error: 'Not authenticated' }
+    try {
+      const response = await fetch(`${API_URL}/api/employer-requests/${requestId}/status`, {
+        method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ status, reason: status === 'declined' ? declineReason.trim() : '' }),
+      body: JSON.stringify({ status, reason: status === 'declined' ? reason.trim() : '' }),
     })
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.error) return setAppMessage({ type: 'error', text: data.error })
-        fetchEmployerRequests()
-        fetchNotifications()
-        setDeclineRequestTarget(null)
-        setDeclineReason('')
-        setAppMessage({ type: 'success', text: `Employer request ${status}.` })
-      })
-      .catch((err) => {
-        console.error(err)
-        setAppMessage({ type: 'error', text: err?.message || 'Failed to update employer request' })
-      })
+    const data = await response.json().catch(() => null)
+    if (!response.ok || data?.error) return { error: data?.error || 'Failed to update employer request' }
+    fetchEmployerRequests()
+    fetchAdminEmployers()
+    fetchNotifications()
+    setAppMessage({ type: 'success', text: `Employer request ${status}.` })
+    return { ok: true }
+    } catch (err) {
+    console.error(err)
+    return { error: err?.message || 'Failed to update employer request' }
+    }
+  }
+
+  // All employer request decisions go through the shared confirm dialog
+  const confirmEmployerRequest = (requestId, companyName, status) => {
+    if (status === 'approved') {
+    return requestConfirm({
+      title: `Approve ${companyName || 'this employer'}?`,
+      note: 'The employer will be notified and gain access to employer features.',
+      confirmLabel: 'Yes, approve',
+      busyLabel: 'Approving...',
+      onConfirm: () => handleReviewEmployerRequest(requestId, 'approved'),
+    })
+    }
+    return requestConfirm({
+    title: `Decline ${companyName || 'this employer'}?`,
+    note: 'The employer will be notified with your reason.',
+    confirmLabel: 'Confirm decline',
+    confirmTone: 'danger',
+    busyLabel: 'Declining...',
+    requireReason: true,
+    quickReasons: ['Incomplete requirements', 'Wrong document type', 'Unreadable document', 'Duplicate request'],
+    onConfirm: (reason) => handleReviewEmployerRequest(requestId, 'declined', reason),
+    })
   }
 
   const handleDownloadRequirements = async (requestId, filename) => {
@@ -1810,7 +2073,7 @@ const [authView, setAuthView] = useState("login")
     }
 
     const applicantId = String(applicant.id || applicant._id)
-    const applicantName = applicant.profile?.name || applicant.email
+    const applicantName = formatFullName(applicant.profile) || applicant.email
     if (!window.confirm(`${isReferred ? 'Cancel referral for' : 'Refer'} ${applicantName}${isReferred ? '?' : ' to this job?'}`)) return
 
     try {
@@ -1865,13 +2128,15 @@ const [authView, setAuthView] = useState("login")
   const isNewApplicationNotification = (notification) =>
     notification?.type === 'new_application' || notification?.kind === 'new_application'
 
+  const isNotificationUnread = (notification) => !notification?.readAt && notification?.read !== true
+
   const markNotificationAsRead = async (notificationId) => {
     const token = getToken()
     if (!token || !notificationId) return
 
     try {
       const response = await fetch(`${API_URL}/api/notifications/${notificationId}/read`, {
-        method: 'PUT',
+        method: 'PATCH',
         headers: { Authorization: `Bearer ${token}` },
       })
       if (!response.ok) {
@@ -1883,22 +2148,44 @@ const [authView, setAuthView] = useState("login")
     }
   }
 
+  const markNotificationLocallyRead = (notificationId) => {
+    const stillUnread = notifications.some((item) => String(item._id) === String(notificationId) && isNotificationUnread(item))
+    setNotifications((current) =>
+      current.map((item) =>
+        String(item._id) === String(notificationId) ? { ...item, read: true, readAt: item.readAt || new Date().toISOString() } : item,
+      ),
+    )
+    if (stillUnread) setUnreadCount((count) => Math.max(0, count - 1))
+  }
+
+  const markAllNotificationsAsRead = async () => {
+    const token = getToken()
+    if (!token) return
+    try {
+      const response = await fetch(`${API_URL}/api/notifications/read-all`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!response.ok) return
+      const now = new Date().toISOString()
+      setNotifications((current) => current.map((item) => ({ ...item, read: true, readAt: item.readAt || now })))
+      setUnreadCount(0)
+    } catch (err) {
+      console.warn('Failed to mark notifications as read:', err?.message || err)
+    }
+  }
+
   const handleNotificationClick = async (notification) => {
+    const notificationId = String(notification?._id || '')
+    if (notificationId && isNotificationUnread(notification)) {
+      markNotificationLocallyRead(notificationId)
+      markNotificationAsRead(notificationId)
+    }
+
     if (activeRole === 'Admin' && isNewApplicationNotification(notification)) {
-      const notificationId = String(notification?._id || '')
-      if (notificationId && !notificationId.startsWith('job-')) {
-        await markNotificationAsRead(notificationId)
-      }
-
-      setNotifications((current) =>
-        current.map((item) =>
-          String(item._id) === String(notification._id) ? { ...item, read: true } : item,
-        ),
-      )
-
       setReferralPrefill({
-        jobId: notification?.jobId ? String(notification.jobId) : '',
-        applicantIds: notification?.applicantId ? [String(notification.applicantId)] : [],
+        jobId: notification?.metadata?.jobId ? String(notification.metadata.jobId) : '',
+        applicantIds: notification?.metadata?.applicantId ? [String(notification.metadata.applicantId)] : [],
       })
       setSelectedNotification(null)
       setActiveView('peso-referrals')
@@ -1928,6 +2215,13 @@ const [authView, setAuthView] = useState("login")
       fetchNotifications()
     }
   }, [isLoggedIn, currentUser?.email, activeRole, currentUser?.registration])
+
+  // Poll so the navbar bell badge stays current
+  useEffect(() => {
+    if (!isLoggedIn) return undefined
+    const timer = setInterval(() => fetchNotifications(), 30000)
+    return () => clearInterval(timer)
+  }, [isLoggedIn, currentUser?.email, activeRole])
 
   useEffect(() => {
     const token = localStorage.getItem('peso-token')
@@ -2033,8 +2327,32 @@ const [authView, setAuthView] = useState("login")
     return data
   }
 
+  const validateSignupNameFields = (form) => {
+    const errors = {}
+    const firstError = validateNameField(form.firstName, { label: 'First name', required: true })
+    if (firstError) errors.firstName = firstError
+    const lastError = validateNameField(form.lastName, { label: 'Last name', required: true })
+    if (lastError) errors.lastName = lastError
+    if (!form.noMiddleName) {
+      const middleError = validateNameField(form.middleName, { label: 'Middle name', required: false })
+      if (middleError) errors.middleName = middleError
+    }
+    return errors
+  }
+
+  const handleSignupNameBlur = (field) => {
+    if (field === 'suffix') return
+    const capitalized = capitalizeName(signupForm[field])
+    const nextForm = { ...signupForm, [field]: capitalized }
+    setSignupForm(nextForm)
+    setSignupNameErrors(validateSignupNameFields(nextForm))
+  }
+
   const handleSignup = async (event) => {
     event.preventDefault()
+    const nameErrors = validateSignupNameFields(signupForm)
+    setSignupNameErrors(nameErrors)
+    if (Object.keys(nameErrors).length > 0) return
     const passwordErrors = validatePassword(signupForm.password)
     if (passwordErrors.length > 0) {
       alert('Password requirements not met. Check the rules under the password field.')
@@ -2161,12 +2479,13 @@ const [authView, setAuthView] = useState("login")
   const employerDeclinedJobs = myJobs.filter((job) => job.status === 'declined')
   const employerApprovedJobs = myJobs.filter((job) => job.status === 'approved')
   const filteredMyJobs = employerJobStatusFilter === 'all' ? myJobs : myJobs.filter((job) => (job.status || 'pending') === employerJobStatusFilter)
+  const sortedMyJobs = sortItems(filteredMyJobs, myJobsSort.sortBy, myJobsSort.order)
   const showPendingAdminSection = activeRole === 'Admin' && (adminJobStatusFilter === 'all' || adminJobStatusFilter === 'pending')
   const showApprovedAdminSection = activeRole === 'Admin' && (adminJobStatusFilter === 'all' || adminJobStatusFilter === 'approved')
   const showDeclinedAdminSection = activeRole === 'Admin' && (adminJobStatusFilter === 'all' || adminJobStatusFilter === 'declined')
 
   const selectedJobIsApplied = Boolean(selectedJob && (appliedJobIds.has(String(selectedJob._id)) || (selectedJob.applicants || []).some((applicant) => applicant.email === currentUser?.email)))
-  const selectedNotificationIsPending = selectedNotification?.kind === 'job-review'
+  const selectedNotificationIsPending = selectedNotification?.type === 'job_pending_review'
     && (selectedNotification?.status === 'pending' || (selectedNotification?.title || '').toLowerCase().includes('pending'))
   const accountNeedsVerification = Boolean(
     currentUser?.verificationStatus && currentUser.verificationStatus !== 'approved',
@@ -2492,17 +2811,77 @@ const [authView, setAuthView] = useState("login")
           ) : (
             <form className="auth-form auth-detail-form applicant-signup-form" onSubmit={handleSignup}>
               <div>
-                <label htmlFor="signup-name" className="block text-sm font-medium text-slate-200">
-                  Name
+                <label htmlFor="signup-first-name" className="block text-sm font-medium text-slate-200">
+                  First name
                 </label>
                 <input
-                  id="signup-name"
+                  id="signup-first-name"
                   type="text"
-                  value={signupForm.name}
-                  onChange={(e) => setSignupForm({ ...signupForm, name: e.target.value })}
+                  value={signupForm.firstName}
+                  onChange={(e) => setSignupForm({ ...signupForm, firstName: e.target.value })}
+                  onBlur={() => handleSignupNameBlur('firstName')}
                   className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
                   required
                 />
+                {signupNameErrors.firstName && <p className="mt-1 text-xs text-rose-300">{signupNameErrors.firstName}</p>}
+              </div>
+              <div>
+                <label htmlFor="signup-middle-name" className="block text-sm font-medium text-slate-200">
+                  Middle name <span className="text-slate-400">(optional)</span>
+                </label>
+                <input
+                  id="signup-middle-name"
+                  type="text"
+                  value={signupForm.middleName}
+                  onChange={(e) => setSignupForm({ ...signupForm, middleName: e.target.value })}
+                  onBlur={() => handleSignupNameBlur('middleName')}
+                  disabled={signupForm.noMiddleName}
+                  className={`mt-2 w-full rounded-2xl border px-3 py-2 text-sm ${signupForm.noMiddleName ? 'cursor-not-allowed border-slate-700 bg-slate-900 text-slate-400' : 'border-slate-700 bg-slate-800 text-white'}`}
+                />
+                <label className="mt-2 flex items-center gap-2 text-xs text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={signupForm.noMiddleName}
+                    onChange={(e) => {
+                      const noMiddleName = e.target.checked
+                      const nextForm = { ...signupForm, noMiddleName, middleName: noMiddleName ? '' : signupForm.middleName }
+                      setSignupForm(nextForm)
+                      setSignupNameErrors(validateSignupNameFields(nextForm))
+                    }}
+                  />
+                  No middle name
+                </label>
+                {signupNameErrors.middleName && <p className="mt-1 text-xs text-rose-300">{signupNameErrors.middleName}</p>}
+              </div>
+              <div>
+                <label htmlFor="signup-last-name" className="block text-sm font-medium text-slate-200">
+                  Last name
+                </label>
+                <input
+                  id="signup-last-name"
+                  type="text"
+                  value={signupForm.lastName}
+                  onChange={(e) => setSignupForm({ ...signupForm, lastName: e.target.value })}
+                  onBlur={() => handleSignupNameBlur('lastName')}
+                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                  required
+                />
+                {signupNameErrors.lastName && <p className="mt-1 text-xs text-rose-300">{signupNameErrors.lastName}</p>}
+              </div>
+              <div>
+                <label htmlFor="signup-suffix" className="block text-sm font-medium text-slate-200">
+                  Suffix <span className="text-slate-400">(optional)</span>
+                </label>
+                <select
+                  id="signup-suffix"
+                  value={signupForm.suffix}
+                  onChange={(e) => setSignupForm({ ...signupForm, suffix: e.target.value })}
+                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                >
+                  {SUFFIX_OPTIONS.map((option) => (
+                    <option key={option} value={option}>{option === '' ? 'None' : option}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label htmlFor="signup-location" className="block text-sm font-medium text-slate-200">
@@ -2514,20 +2893,6 @@ const [authView, setAuthView] = useState("login")
                   value={signupForm.location}
                   onChange={(e) => setSignupForm({ ...signupForm, location: e.target.value })}
                   className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-                  required
-                />
-              </div>
-              <div>
-                <label htmlFor="signup-skills" className="block text-sm font-medium text-slate-200">
-                  Skills
-                </label>
-                <input
-                  id="signup-skills"
-                  type="text"
-                  value={signupForm.skills}
-                  onChange={(e) => setSignupForm({ ...signupForm, skills: e.target.value })}
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-                  placeholder="For example: Customer service, Data entry"
                   required
                 />
               </div>
@@ -2614,7 +2979,7 @@ const [authView, setAuthView] = useState("login")
               />
               {signupProgress && <p className="text-sm font-medium text-cyan-300">{signupProgress}</p>}
               <div className="flex gap-2">
-                <button type="submit" disabled={signupUploading || !signupResumeFile || !signupForm.name.trim() || !signupForm.location.trim() || !signupForm.skills.trim() || !signupForm.summary.trim() || !validateVerificationDocs(signupDocs, signupConsent)} className="auth-primary-button auth-account-submit disabled:cursor-not-allowed disabled:opacity-40">
+                <button type="submit" disabled={signupUploading || !signupResumeFile || !signupForm.firstName.trim() || !signupForm.lastName.trim() || !signupForm.location.trim() || !signupForm.summary.trim() || !validateVerificationDocs(signupDocs, signupConsent)} className="auth-primary-button auth-account-submit disabled:cursor-not-allowed disabled:opacity-40">
                   {signupUploading ? 'Creating account…' : 'Create account'}
                 </button>
                 <button type="button" onClick={() => setAuthView("login")} className="auth-secondary-button">
@@ -2664,6 +3029,22 @@ const [authView, setAuthView] = useState("login")
             </div>
           </div>
           <div className="portal-header-actions flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setActiveView("notify")}
+              aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : 'Notifications'}
+              className="portal-bell relative inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-700 bg-slate-800 text-slate-200"
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+              </svg>
+              {unreadCount > 0 && (
+                <span data-testid="notification-badge" className="absolute -right-1 -top-1 inline-flex min-w-5 items-center justify-center rounded-full bg-rose-600 px-1 text-xs font-bold text-white">
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </span>
+              )}
+            </button>
             {showProfileTab && (
               <button
                 type="button"
@@ -2727,6 +3108,14 @@ const [authView, setAuthView] = useState("login")
               onVerified={() => setCurrentUser((current) => ({ ...current, emailVerified: true }))}
             />
           )}
+          {activeRole === 'Applicant' && currentUser?.needsNameConfirmation && (
+            <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-cyan-300 bg-cyan-50 p-4 text-sm font-medium text-cyan-900" role="alert">
+              <span>We updated how names are stored. Please review and confirm your first, middle, and last name on your profile.</span>
+              <button type="button" onClick={() => { setIsEditingProfile(true); setActiveView('profile') }} className="rounded-xl bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-slate-950">
+                Confirm my name
+              </button>
+            </div>
+          )}
           {applicantDocAttention > 0 && (
             <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm font-medium text-amber-800" role="alert">
               <span>{applicantDocAttention} document{applicantDocAttention === 1 ? '' : 's'} need{applicantDocAttention === 1 ? 's' : ''} your attention.</span>
@@ -2734,42 +3123,6 @@ const [authView, setAuthView] = useState("login")
                 Review now
               </button>
             </div>
-          )}
-
-          {currentUser?.role === "Admin" && (
-          <section className="portal-card access-card">
-            <h2 className="text-xl font-semibold text-black">Access Control</h2>
-            <p className="mt-2 text-sm text-black">Admin can switch the portal role instantly.</p>
-            <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-[220px]">
-                <label htmlFor="admin-role" className="block text-sm font-medium text-black">
-                  Selected role
-                </label>
-                <select
-                  id="admin-role"
-                  value={adminSelectedRole}
-                  onChange={(event) => setAdminSelectedRole(event.target.value)}
-                  className="portal-control"
-                >
-                  <option value="Admin">Admin</option>
-                  <option value="Employer">Employer</option>
-                  <option value="Applicant">Applicant</option>
-                </select>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveRole(adminSelectedRole)
-                  const nextItems = navigationByRole[adminSelectedRole] || []
-                  setActiveView(nextItems[0]?.id || "dashboard")
-                }}
-                className="portal-primary-button"
-              >
-                Apply Role
-              </button>
-            </div>
-            <p className="mt-4 text-sm text-black">Current portal role: {activeRole}</p>
-          </section>
           )}
 
           <main className="space-y-6">
@@ -2826,7 +3179,7 @@ const [authView, setAuthView] = useState("login")
               <h2 className="mt-2 text-3xl font-bold text-black">
                 {activeRole === 'Employer'
                   ? `Welcome back, ${profileData.companyName || currentUser?.companyName || 'Employer'}`
-                  : `Welcome back, ${profileData.name || currentUser?.email || 'Applicant'}`}
+                  : `Welcome back, ${formatFullName(profileData) || profileData.name || currentUser?.email || 'Applicant'}`}
               </h2>
               <p className="mt-3 max-w-2xl text-slate-600">
                 {activeRole === 'Employer'
@@ -2945,6 +3298,13 @@ const [authView, setAuthView] = useState("login")
                   )}
                 </ul>
               </div>
+            </section>
+          )}
+          {activeView === "all-dashboard" && (
+            <section className="portal-card rounded-2xl border border-slate-300 bg-white p-6 text-black">
+              <h2 className="text-xl font-semibold text-black">All Dashboard</h2>
+              <p className="mb-6 mt-2 text-sm text-black">Read-only overview. Select a card to open its list.</p>
+              <AllDashboard token={getToken()} onNavigate={setActiveView} />
             </section>
           )}
           {activeView === "dashboard" && (
@@ -3100,16 +3460,17 @@ const [authView, setAuthView] = useState("login")
                     <h2 className="text-xl font-semibold text-white">{activeView === "employers" ? "Employers" : "Applicants"}</h2>
                     <p className="mt-2 text-sm text-slate-400">Review employer approval status and applicant contact information.</p>
 
-                    {activeView === 'employers' && (
+                    {(activeView === 'employers' || activeView === 'applicants') && (
                       <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_180px]">
                         <input
                           type="search"
                           value={adminEmployerSearchTerm}
                           onChange={(event) => setAdminEmployerSearchTerm(event.target.value)}
-                          placeholder="Search company, email, contact, phone, or status"
-                          aria-label="Search employers"
+                          placeholder={activeView === 'employers' ? "Search company, email, contact, phone, or status" : "Search first, middle, or last name, or email"}
+                          aria-label={activeView === 'employers' ? "Search employers" : "Search applicants"}
                           className="portal-control w-full"
                         />
+                        {activeView === 'employers' ? (
                         <select
                           value={adminEmployerStatusFilter}
                           onChange={(event) => setAdminEmployerStatusFilter(event.target.value)}
@@ -3122,6 +3483,21 @@ const [authView, setAuthView] = useState("login")
                           <option value="approved">Approved</option>
                           <option value="declined">Declined</option>
                         </select>
+                        ) : (
+                          <span aria-hidden="true" />
+                        )}
+                      </div>
+                    )}
+
+                    {(activeView === 'employers' || activeView === 'applicants') && (
+                      <div className="mt-3">
+                        <SortControl
+                          options={activeView === 'applicants' ? APPLICANT_SORT_OPTIONS : EMPLOYER_SORT_OPTIONS}
+                          value={activeView === 'applicants' ? applicantSort : employerSort}
+                          onChange={activeView === 'applicants' ? applicantSort.setSortOption : employerSort.setSortOption}
+                          onReset={activeView === 'applicants' ? applicantSort.resetSort : employerSort.resetSort}
+                          ariaLabel={activeView === 'applicants' ? 'Sort applicants' : 'Sort employers'}
+                        />
                       </div>
                     )}
 
@@ -3130,61 +3506,115 @@ const [authView, setAuthView] = useState("login")
                         { role: 'Employer', title: 'Employers', view: 'employers' },
                         { role: 'Applicant', title: 'Applicants', view: 'applicants' },
                       ].filter((directory) => directory.view === activeView).map((directory) => {
-                        const normalizedEmployerSearch = adminEmployerSearchTerm.trim().toLowerCase()
-                        const users = adminUsers
-                          .filter((user) => user.role === directory.role)
-                          .filter((user) => {
-                            if (directory.role !== 'Employer' || !normalizedEmployerSearch) return true
-                            return [user.companyName, user.email, user.contactName, user.phone, user.approvalStatus]
-                              .filter((value) => typeof value === 'string')
-                              .some((value) => value.toLowerCase().includes(normalizedEmployerSearch))
-                          })
-                              .filter((user) => directory.role !== 'Employer' || adminEmployerStatusFilter === 'all' || user.approvalStatus === adminEmployerStatusFilter)
-                          .sort((userA, userB) => {
-                            if (directory.role !== 'Employer') return 0
-                            const pendingA = ['pending', 'under_review'].includes(userA.approvalStatus)
-                            const pendingB = ['pending', 'under_review'].includes(userB.approvalStatus)
-                            return Number(pendingB) - Number(pendingA)
-                          })
+                        const isApplicantDirectory = directory.role === 'Applicant'
+                        // Both directories are server-paginated + server-sorted
+                        const directorySort = isApplicantDirectory ? applicantSort : employerSort
+                        const directorySortOptions = isApplicantDirectory ? APPLICANT_SORT_OPTIONS : EMPLOYER_SORT_OPTIONS
+                        const directoryPagination = isApplicantDirectory ? applicantsPagination : employersPagination
+                        const users = isApplicantDirectory ? adminApplicantsData.items : adminEmployersData.items
+                        const listTotal = isApplicantDirectory ? adminApplicantsData.total : adminEmployersData.total
+                        const listLoading = isApplicantDirectory ? adminApplicantsLoading : adminEmployersLoading
+                        const listEmptyMessage = isApplicantDirectory ? 'No applicants found.' : 'No employers found.'
                         return (
                           <div key={directory.role}>
                             <h3 className="portal-section-title">{directory.title}</h3>
-                            {users.length === 0 ? (
-                              <p className="portal-empty">No {directory.title.toLowerCase()} found.</p>
+                            {users.length === 0 && !listLoading ? (
+                              <p className="portal-empty">{listEmptyMessage}</p>
                             ) : (
-                              <div className="portal-table-scroll">
-                                <table className={`portal-table ${directory.role === 'Employer' ? 'portal-employers-table' : ''}`}>
+                              <div className={`portal-table-scroll${listLoading && users.length > 0 ? ' opacity-60 transition-opacity' : ''}`} aria-busy={listLoading}>
+                                <table className={`portal-table portal-table-fit ${directory.role === 'Employer' ? 'portal-employers-table' : 'portal-applicants-table'}`}>
+                                  <colgroup>
+                                    {directory.role === 'Employer' ? (
+                                      <>
+                                        <col className="col-name" />
+                                        <col className="col-email" />
+                                        <col className="col-contact" />
+                                        <col className="col-phone" />
+                                        <col className="col-status" />
+                                        <col className="col-actions" />
+                                      </>
+                                    ) : (
+                                      <>
+                                        <col className="col-name" />
+                                        <col className="col-email" />
+                                        <col className="col-location" />
+                                        <col className="col-status" />
+                                        <col className="col-actions" />
+                                      </>
+                                    )}
+                                  </colgroup>
                                   <thead>
                                     <tr>
-                                      <th>{directory.role === 'Employer' ? 'Company' : 'Name'}</th>
+                                      {directory.role === 'Employer' ? (
+                                        <SortableTh label="Company" sortKey="companyName" activeSortBy={employerSort.sortBy} order={employerSort.order} onSort={employerSort.toggleSort} />
+                                      ) : (
+                                        <SortableTh label="Name" sortKey="name" activeSortBy={applicantSort.sortBy} order={applicantSort.order} onSort={applicantSort.toggleSort} />
+                                      )}
                                       <th>Email</th>
-                                      <th>{directory.role === 'Employer' ? 'Contact' : 'Location'}</th>
-                                      <th>{directory.role === 'Employer' ? 'Phone' : 'Skills'}</th>
+                                      {directory.role === 'Employer' ? (
+                                        <th>Contact</th>
+                                      ) : (
+                                        <SortableTh label="Location" sortKey="location" activeSortBy={applicantSort.sortBy} order={applicantSort.order} onSort={applicantSort.toggleSort} />
+                                      )}
+                                      {directory.role === 'Employer' && <th>Phone</th>}
                                       <th>Status</th>
                                       <th>Actions</th>
                                     </tr>
                                   </thead>
                                   <tbody>
-                                    {users.map((user) => {
+                                    {users.length === 0 && listLoading ? (
+                                      Array.from({ length: 5 }).map((_, skeletonIndex) => (
+                                        <tr key={`skeleton-${skeletonIndex}`} aria-hidden="true" className="portal-skeleton-row">
+                                          {Array.from({ length: directory.role === 'Employer' ? 6 : 5 }).map((_, cellIndex) => (
+                                            <td key={cellIndex}><span className="portal-skeleton-cell" /></td>
+                                          ))}
+                                        </tr>
+                                      ))
+                                    ) : users.map((user) => {
                                       const isExpanded = expandedDirectoryUserId === user.id
-                                      const detailColSpan = 6
+                                      const detailColSpan = directory.role === 'Employer' ? 6 : 5
                                       return (
                                         <Fragment key={user.id}>
                                           <tr>
-                                            <td><strong>{directory.role === 'Employer' ? user.companyName || 'Unnamed employer' : user.profile?.name || 'Unnamed applicant'}</strong></td>
-                                            <td>{user.email}</td>
-                                            <td>{directory.role === 'Employer' ? user.contactName || 'N/A' : user.profile?.location || 'N/A'}</td>
-                                            <td>{directory.role === 'Employer' ? user.phone || 'N/A' : Array.isArray(user.profile?.skills) ? user.profile.skills.join(', ') : user.profile?.skills || 'N/A'}</td>
-                                            <td><span className={`portal-status status-${(directory.role === 'Employer' ? user.approvalStatus : user.verificationStatus) || 'approved'}`}>{(directory.role === 'Employer' ? user.approvalStatus : user.verificationStatus) || 'approved'}</span></td>
-                                            <td>
-                                              <button
-                                                type="button"
-                                                className="portal-table-action"
-                                                aria-expanded={isExpanded}
-                                                onClick={() => setExpandedDirectoryUserId(isExpanded ? null : user.id)}
-                                              >
-                                                {isExpanded ? 'Hide' : 'View'}
-                                              </button>
+                                            <td data-label={directory.role === 'Employer' ? 'Company' : 'Name'}><strong>{directory.role === 'Employer' ? user.companyName || 'Unnamed employer' : user.displayName || formatDisplayName(user.profile) || 'Unnamed applicant'}</strong></td>
+                                            <td data-label="Email"><span className="portal-cell-truncate" title={user.email}>{user.email}</span></td>
+                                            <td data-label={directory.role === 'Employer' ? 'Contact' : 'Location'}>{directory.role === 'Employer' ? user.contactName || 'N/A' : user.profile?.location || 'N/A'}</td>
+                                            {directory.role === 'Employer' && <td data-label="Phone">{user.phone || 'N/A'}</td>}
+                                            <td data-label="Status">
+                                              <div className="portal-status-stack">
+                                                <span className={`portal-status status-${(directory.role === 'Employer' ? user.approvalStatus : user.verificationStatus) || 'approved'}`}>{(directory.role === 'Employer' ? user.approvalStatus : user.verificationStatus) || 'approved'}</span>
+                                                {directory.role === 'Applicant' && user.emailVerified === false && (
+                                                  <span className="portal-badge border border-amber-400/60 bg-amber-500/10 text-amber-700">
+                                                    Unverified email
+                                                  </span>
+                                                )}
+                                                {directory.role === 'Applicant' && Array.isArray(user.verificationDocuments) && (
+                                                  <span className="text-xs text-slate-500">
+                                                    {user.verificationDocuments.filter((doc) => doc.status === 'approved').length} of {user.verificationDocuments.length} approved
+                                                  </span>
+                                                )}
+                                              </div>
+                                            </td>
+                                            <td data-label="Actions">
+                                              <div className="portal-actions-row">
+                                                <button
+                                                  type="button"
+                                                  className="portal-table-action"
+                                                  aria-expanded={isExpanded}
+                                                  onClick={() => setExpandedDirectoryUserId(isExpanded ? null : user.id)}
+                                                >
+                                                  {isExpanded ? 'Hide' : 'View'}
+                                                </button>
+                                                {directory.role === 'Applicant' && (
+                                                  <button
+                                                    type="button"
+                                                    className="portal-table-action"
+                                                    onClick={() => setReviewDocsApplicant(user)}
+                                                  >
+                                                    Review
+                                                  </button>
+                                                )}
+                                              </div>
                                             </td>
                                           </tr>
                                           {isExpanded && (
@@ -3203,14 +3633,14 @@ const [authView, setAuthView] = useState("login")
                                                         <div className="mt-3 flex flex-wrap gap-2">
                                                           <button
                                                             type="button"
-                                                            onClick={() => handleReviewEmployerRequest(user.requestId, 'approved')}
+                                                            onClick={() => confirmEmployerRequest(user.requestId, user.companyName, 'approved')}
                                                             className="rounded-2xl bg-green-500 px-3 py-2 text-sm font-semibold text-white"
                                                           >
                                                             Approve
                                                           </button>
                                                           <button
                                                             type="button"
-                                                            onClick={() => setDeclineRequestTarget({ id: user.requestId, companyName: user.companyName })}
+                                                            onClick={() => confirmEmployerRequest(user.requestId, user.companyName, 'declined')}
                                                             className="rounded-2xl bg-red-500 px-3 py-2 text-sm font-semibold text-white"
                                                           >
                                                             Decline
@@ -3220,14 +3650,13 @@ const [authView, setAuthView] = useState("login")
                                                     </>
                                                   ) : (
                                                     <>
-                                                      <p><span className="font-semibold text-white">Name:</span> {user.profile?.name || 'N/A'}</p>
+                                                      <p><span className="font-semibold text-white">Name:</span> {formatFullName(user.profile) || 'N/A'}</p>
                                                       <p><span className="font-semibold text-white">Location:</span> {user.profile?.location || 'N/A'}</p>
                                                       <p><span className="font-semibold text-white">Phone:</span> {user.phone || user.profile?.phone || 'N/A'}</p>
                                                       <p><span className="font-semibold text-white">Skills:</span> {Array.isArray(user.profile?.skills) ? user.profile.skills.join(', ') : user.profile?.skills || 'N/A'}</p>
                                                       <p><span className="font-semibold text-white">Traits:</span> {user.profile?.traits || 'N/A'}</p>
                                                       <p><span className="font-semibold text-white">About me:</span> {user.profile?.summary || 'N/A'}</p>
                                                       <p><span className="font-semibold text-white">NSRP / Resume:</span> {user.hasResume ? 'Submitted' : 'Not submitted'}</p>
-                                                      <AdminVerificationDocs applicant={user} token={getToken()} onReviewed={() => fetchAdminUsers()} />
                                                       <div className="mt-3 flex flex-wrap items-center gap-2">
                                                         {user.hasResume && (
                                                           <button
@@ -3286,6 +3715,18 @@ const [authView, setAuthView] = useState("login")
                                 </table>
                               </div>
                             )}
+                            {(listTotal > 0 || listLoading) && (
+                              <Pagination
+                                page={directoryPagination.page}
+                                pageSize={directoryPagination.pageSize}
+                                totalItems={listTotal}
+                                onPageChange={directoryPagination.setPage}
+                                onPageSizeChange={directoryPagination.setPageSize}
+                                loading={listLoading}
+                                itemLabel={isApplicantDirectory ? 'applicants' : 'employers'}
+                                ariaLabel={isApplicantDirectory ? 'Applicants pagination' : 'Employers pagination'}
+                              />
+                            )}
                           </div>
                         )
                       })}
@@ -3293,8 +3734,16 @@ const [authView, setAuthView] = useState("login")
                   </section>
                 )}
 
-          {activeView === "profile" && (
-            <section className={`${activeRole === 'Employer' ? 'employer-profile-card portal-card' : activeRole === 'Applicant' ? 'applicant-profile-card portal-card' : ''} rounded-2xl border border-slate-800 bg-slate-900/70 p-6`}>
+          {reviewDocsApplicant && (
+            <VerificationDocsReviewModal
+              applicant={reviewDocsApplicant}
+              token={getToken()}
+              onClose={() => setReviewDocsApplicant(null)}
+              onReviewed={() => { fetchAdminUsers(); fetchAdminApplicants() }}
+            />
+          )}
+
+          {activeView === "profile" && (<section className={`${activeRole === 'Employer' ? 'employer-profile-card portal-card' : activeRole === 'Applicant' ? 'applicant-profile-card portal-card' : ''} rounded-2xl border border-slate-800 bg-slate-900/70 p-6`}>
               {activeRole === 'Applicant' ? (
                 <>
                   <h2 className="text-xl font-semibold text-white">Applicant Profile</h2>
@@ -3314,7 +3763,7 @@ const [authView, setAuthView] = useState("login")
                           applicantProfileInitials
                         )}
                       </div>
-                      <p className="pb-1 text-lg font-semibold text-white">{profileData.name || 'Your name'}</p>
+                      <p className="pb-1 text-lg font-semibold text-white">{formatFullName(profileData) || profileData.name || 'Your name'}</p>
                     </div>
                   </div>
 
@@ -3349,7 +3798,7 @@ const [authView, setAuthView] = useState("login")
                         {applicantProfileInitials}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <p className="text-xl font-semibold text-white">{profileData.name || 'Your name'}</p>
+                        <p className="text-xl font-semibold text-white">{formatFullName(profileData) || profileData.name || 'Your name'}</p>
                         <p className="text-sm text-slate-400">{profileData.location || 'Add your location'}</p>
                         <p className="mt-1 text-sm text-cyan-300">{profileData.traits || 'Add a few key traits'}</p>
                       </div>
@@ -3369,17 +3818,72 @@ const [authView, setAuthView] = useState("login")
 
                   <form className="mt-6 space-y-4" onSubmit={(event) => event.preventDefault()}>
                     <div>
-                      <label htmlFor="name" className="block text-sm font-medium text-slate-300">
-                        Full Name
+                      <label htmlFor="firstName" className="block text-sm font-medium text-slate-300">
+                        First Name
                       </label>
                       <input
-                        id="name"
+                        id="firstName"
                         type="text"
-                        value={profileData.name}
+                        value={profileData.firstName}
                         disabled={!isEditingProfile}
-                        onChange={(event) => setProfileData({ ...profileData, name: event.target.value })}
+                        onChange={(event) => setProfileData({ ...profileData, firstName: event.target.value })}
+                        onBlur={() => isEditingProfile && setProfileData((current) => ({ ...current, firstName: capitalizeName(current.firstName) }))}
                         className={`mt-2 w-full rounded-2xl border px-3 py-2 text-sm ${isEditingProfile ? 'border-slate-700 bg-slate-800 text-white' : 'cursor-not-allowed border-slate-700 bg-slate-900 text-slate-400'}`}
                       />
+                    </div>
+                    <div>
+                      <label htmlFor="middleName" className="block text-sm font-medium text-slate-300">
+                        Middle Name <span className="text-slate-500">(optional)</span>
+                      </label>
+                      <input
+                        id="middleName"
+                        type="text"
+                        value={profileData.middleName}
+                        disabled={!isEditingProfile || profileData.noMiddleName}
+                        onChange={(event) => setProfileData({ ...profileData, middleName: event.target.value })}
+                        onBlur={() => isEditingProfile && setProfileData((current) => ({ ...current, middleName: capitalizeName(current.middleName) }))}
+                        className={`mt-2 w-full rounded-2xl border px-3 py-2 text-sm ${isEditingProfile && !profileData.noMiddleName ? 'border-slate-700 bg-slate-800 text-white' : 'cursor-not-allowed border-slate-700 bg-slate-900 text-slate-400'}`}
+                      />
+                      {isEditingProfile && (
+                        <label className="mt-2 flex items-center gap-2 text-xs text-slate-400">
+                          <input
+                            type="checkbox"
+                            checked={profileData.noMiddleName}
+                            onChange={(event) => setProfileData({ ...profileData, noMiddleName: event.target.checked, middleName: event.target.checked ? '' : profileData.middleName })}
+                          />
+                          No middle name
+                        </label>
+                      )}
+                    </div>
+                    <div>
+                      <label htmlFor="lastName" className="block text-sm font-medium text-slate-300">
+                        Last Name
+                      </label>
+                      <input
+                        id="lastName"
+                        type="text"
+                        value={profileData.lastName}
+                        disabled={!isEditingProfile}
+                        onChange={(event) => setProfileData({ ...profileData, lastName: event.target.value })}
+                        onBlur={() => isEditingProfile && setProfileData((current) => ({ ...current, lastName: capitalizeName(current.lastName) }))}
+                        className={`mt-2 w-full rounded-2xl border px-3 py-2 text-sm ${isEditingProfile ? 'border-slate-700 bg-slate-800 text-white' : 'cursor-not-allowed border-slate-700 bg-slate-900 text-slate-400'}`}
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="suffix" className="block text-sm font-medium text-slate-300">
+                        Suffix <span className="text-slate-500">(optional)</span>
+                      </label>
+                      <select
+                        id="suffix"
+                        value={profileData.suffix}
+                        disabled={!isEditingProfile}
+                        onChange={(event) => setProfileData({ ...profileData, suffix: event.target.value })}
+                        className={`mt-2 w-full rounded-2xl border px-3 py-2 text-sm ${isEditingProfile ? 'border-slate-700 bg-slate-800 text-white' : 'cursor-not-allowed border-slate-700 bg-slate-900 text-slate-400'}`}
+                      >
+                        {SUFFIX_OPTIONS.map((option) => (
+                          <option key={option} value={option}>{option === '' ? 'None' : option}</option>
+                        ))}
+                      </select>
                     </div>
                     <div>
                       <label htmlFor="summary" className="block text-sm font-medium text-slate-300">
@@ -3423,7 +3927,7 @@ const [authView, setAuthView] = useState("login")
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-slate-300">Skills</label>
+                      <label className="block text-sm font-medium text-slate-300">Skills <span className="text-slate-500">(optional)</span></label>
                       <SkillTagPicker
                         selected={profileData.skills}
                         disabled={!isEditingProfile}
@@ -3923,25 +4427,45 @@ const [authView, setAuthView] = useState("login")
                 {filteredMyJobs.length === 0 ? (
                   <p className="mt-3 text-slate-400">{myJobs.length === 0 ? 'No job requests submitted yet.' : `No ${employerJobStatusFilter} job requests.`}</p>
                 ) : (
-                  <div className="mt-4 space-y-4">
-                    {filteredMyJobs.map((job) => (
-                      <div key={job._id} className="employer-pending-item rounded-2xl border border-slate-700 bg-slate-900 p-4">
-                        <div className="flex items-center justify-between gap-4">
-                          <div>
-                            <p className="text-lg font-semibold text-white">{job.title}</p>
-                            <p className="text-sm text-slate-400">{job.company} \u2022 {job.location || 'Remote'}</p>
+                  <>
+                    <div className="mt-3">
+                      <SortControl
+                        options={MY_JOBS_SORT_OPTIONS}
+                        value={myJobsSort}
+                        onChange={myJobsSort.setSortOption}
+                        onReset={myJobsSort.resetSort}
+                        ariaLabel="Sort my job requests"
+                      />
+                    </div>
+                    <div className="mt-4 space-y-4">
+                      {myJobsPagination.paginate(sortedMyJobs).map((job) => (
+                        <div key={job._id} className="employer-pending-item rounded-2xl border border-slate-700 bg-slate-900 p-4">
+                          <div className="flex items-center justify-between gap-4">
+                            <div>
+                              <p className="text-lg font-semibold text-white">{job.title}</p>
+                              <p className="text-sm text-slate-400">{job.company} \u2022 {job.location || 'Remote'}</p>
+                            </div>
+                            <span className={`rounded-full px-3 py-1 text-xs uppercase tracking-[0.2em] ${job.status === 'approved' ? 'bg-cyan-500 text-slate-950' : job.status === 'declined' ? 'bg-rose-400 text-slate-950' : 'bg-amber-400 text-slate-950'}`}>
+                              {job.status || 'pending'}
+                            </span>
                           </div>
-                          <span className={`rounded-full px-3 py-1 text-xs uppercase tracking-[0.2em] ${job.status === 'approved' ? 'bg-cyan-500 text-slate-950' : job.status === 'declined' ? 'bg-rose-400 text-slate-950' : 'bg-amber-400 text-slate-950'}`}>
-                            {job.status || 'pending'}
-                          </span>
+                          <p className="mt-3 text-sm text-slate-300">{job.description}</p>
+                          {job.status === 'declined' && (
+                            <p className="mt-2 text-sm text-rose-300">Reason: {job.reviewReason || 'No reason provided.'}</p>
+                          )}
                         </div>
-                        <p className="mt-3 text-sm text-slate-300">{job.description}</p>
-                        {job.status === 'declined' && (
-                          <p className="mt-2 text-sm text-rose-300">Reason: {job.reviewReason || 'No reason provided.'}</p>
-                        )}
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                    <Pagination
+                      page={myJobsPagination.page}
+                      pageSize={myJobsPagination.pageSize}
+                      totalItems={filteredMyJobs.length}
+                      onPageChange={myJobsPagination.setPage}
+                      onPageSizeChange={myJobsPagination.setPageSize}
+                      itemLabel="job requests"
+                      ariaLabel="My job requests pagination"
+                    />
+                  </>
                 )}
               </div>
 
@@ -3995,6 +4519,8 @@ const [authView, setAuthView] = useState("login")
               handleBulkReferApplicants={handleBulkReferApplicants}
               token={getToken()}
               handleEditPendingJob={openEditJob}
+              applicantSkills={profileData.skills}
+              onGoToProfile={() => { setIsEditingProfile(true); setActiveView('profile') }}
             />
           )}
           {activeView === "job-titles" && activeRole === "Admin" && (
@@ -4017,14 +4543,24 @@ const [authView, setAuthView] = useState("login")
                 <p className="mt-6 text-black">You have no notifications yet.</p>
               ) : (
                 <>
-                  <p className="mt-6 text-sm text-black">Click a notification to enlarge and view full details.</p>
+                  <div className="mt-6 flex items-center justify-between gap-3">
+                    <p className="text-sm text-black">Click a notification to view full details.</p>
+                    <button
+                      type="button"
+                      onClick={markAllNotificationsAsRead}
+                      disabled={unreadCount === 0}
+                      className="rounded-full border border-slate-300 bg-white px-3 py-1 text-sm font-semibold text-black disabled:opacity-50"
+                    >
+                      Mark all as read
+                    </button>
+                  </div>
                   <div className="mt-3 space-y-3">
                     {notifications.map((notification) => (
                       <button
                         key={notification._id}
                         type="button"
                         onClick={() => handleNotificationClick(notification)}
-                        className={`${activeRole === 'Employer' ? 'employer-notification-item' : ''} w-full rounded-2xl border bg-white p-4 text-left ${isNewApplicationNotification(notification) && !notification.read ? 'border-cyan-500/50' : 'border-slate-300'}`}
+                        className={`${activeRole === 'Employer' ? 'employer-notification-item' : ''} w-full rounded-2xl border bg-white p-4 text-left ${isNotificationUnread(notification) ? 'border-cyan-500/50' : 'border-slate-300'}`}
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div>
@@ -4032,15 +4568,15 @@ const [authView, setAuthView] = useState("login")
                             <p className="mt-2 line-clamp-2 text-sm text-black">{notification.message}</p>
                             {activeRole === 'Admin' && isNewApplicationNotification(notification) && (
                               <>
-                                <p className="mt-2 text-sm text-black">Applicant: {notification.applicantName || 'Unknown applicant'}</p>
-                                <p className="mt-1 text-sm text-black">Job: {notification.jobTitle || 'Unknown job'} \u2022 Employer: {notification.employerName || 'Unknown employer'}</p>
+                                <p className="mt-2 text-sm text-black">Applicant: {notification.metadata?.applicantName || 'Unknown applicant'}</p>
+                                <p className="mt-1 text-sm text-black">Job: {notification.metadata?.jobTitle || 'Unknown job'} \u2022 Employer: {notification.metadata?.employerName || 'Unknown employer'}</p>
                               </>
                             )}
-                            {activeRole === 'Admin' && ((notification.actionable && notification.status === 'pending') || String(notification._id || '').startsWith('job-pending-')) && (
+                            {activeRole === 'Admin' && notification.type === 'job_pending_review' && (
                               <p className="mt-2 text-xs uppercase tracking-[0.2em] text-cyan-300">Action available</p>
                             )}
-                            {activeRole === 'Admin' && isNewApplicationNotification(notification) && !notification.read && (
-                              <p className="mt-2 text-xs uppercase tracking-[0.2em] text-cyan-300">Unread application alert</p>
+                            {isNotificationUnread(notification) && (
+                              <p className="mt-2 text-xs uppercase tracking-[0.2em] text-cyan-300">Unread</p>
                             )}
                           </div>
                           <span className="text-xs uppercase tracking-[0.2em] text-black">
@@ -4051,6 +4587,15 @@ const [authView, setAuthView] = useState("login")
                     ))}
                   </div>
 
+                  <Pagination
+                    page={notifPagination.page}
+                    pageSize={notifPagination.pageSize}
+                    totalItems={notifTotal}
+                    onPageChange={notifPagination.setPage}
+                    onPageSizeChange={notifPagination.setPageSize}
+                    itemLabel="notifications"
+                    ariaLabel="Notifications pagination"
+                  />
                 </>
               )}
             </section>
@@ -4267,103 +4812,20 @@ const [authView, setAuthView] = useState("login")
             </div>
           )}
 
-          {approveRequestTarget && (
-            <div
-              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="approve-request-title"
-              onClick={() => setApproveRequestTarget(null)}
-            >
-              <div
-                className="w-full max-w-md rounded-2xl border border-cyan-500/40 bg-slate-900 p-6 shadow-2xl"
-                onClick={(event) => event.stopPropagation()}
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <h2 id="approve-request-title" className="text-lg font-semibold text-white">Approve employer request</h2>
-                    <p className="mt-2 text-sm text-slate-400">{approveRequestTarget.companyName}</p>
-                  </div>
-                </div>
-                <p className="mt-5 text-sm text-slate-300">Approve this employer? They will gain access to employer features.</p>
-                <div className="mt-5 flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setApproveRequestTarget(null)}
-                    className="rounded-2xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm text-slate-200"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const requestId = approveRequestTarget._id
-                      setApproveRequestTarget(null)
-                      handleReviewEmployerRequest(requestId, 'approved')
-                    }}
-                    className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
-                  >
-                    Confirm approval
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {declineRequestTarget && (
-            <div
-              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="decline-request-title"
-              onClick={() => setDeclineRequestTarget(null)}
-            >
-              <form
-                className="w-full max-w-md rounded-2xl border border-cyan-500/40 bg-slate-900 p-6 shadow-2xl"
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  const requestId = declineRequestTarget._id || declineRequestTarget.id
-                  setDeclineRequestTarget(null)
-                  setDeclineReason('')
-                  handleReviewEmployerRequest(requestId, 'declined')
-                }}
-                onClick={(event) => event.stopPropagation()}
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <h2 id="decline-request-title" className="text-lg font-semibold text-white">Decline employer request</h2>
-                    <p className="mt-2 text-sm text-slate-400">{declineRequestTarget.companyName}</p>
-                  </div>
-                </div>
-                <label htmlFor="decline-reason" className="mt-5 block text-sm font-medium text-slate-200">
-                  Reason for declining
-                </label>
-                <textarea
-                  id="decline-reason"
-                  value={declineReason}
-                  onChange={(event) => setDeclineReason(event.target.value)}
-                  rows="4"
-                  required
-                  placeholder="Explain what the employer needs to correct before resubmitting."
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-                />
-                <div className="mt-5 flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setDeclineRequestTarget(null)}
-                    className="rounded-2xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm text-slate-200"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="rounded-2xl bg-rose-400 px-4 py-2 text-sm font-semibold text-slate-950"
-                  >
-                    Confirm decline
-                  </button>
-                </div>
-              </form>
-            </div>
+          {confirmDialog && (
+            <ConfirmDialog
+              title={confirmDialog.title}
+              note={confirmDialog.note}
+              confirmLabel={confirmDialog.confirmLabel}
+              confirmTone={confirmDialog.confirmTone}
+              busyLabel={confirmDialog.busyLabel}
+              busy={confirmBusy}
+              requireReason={confirmDialog.requireReason}
+              quickReasons={confirmDialog.quickReasons || []}
+              error={confirmError}
+              onConfirm={handleConfirmDialogConfirm}
+              onCancel={() => !confirmBusy && closeConfirmDialog({ confirmed: false })}
+            />
           )}
 
           {selectedNotification && (
@@ -4436,11 +4898,21 @@ const [authView, setAuthView] = useState("login")
               <h2 className="text-xl font-semibold text-black">Employer Requests</h2>
               <p className="mt-3 text-black">Review pending employer account requests.</p>
 
-              {employerRequests.length === 0 ? (
+              <div className="mt-4">
+                <SortControl
+                  options={EMPLOYER_REQUEST_SORT_OPTIONS}
+                  value={requestSort}
+                  onChange={requestSort.setSortOption}
+                  onReset={requestSort.resetSort}
+                  ariaLabel="Sort employer requests"
+                />
+              </div>
+
+              {employerRequests.items.length === 0 && !employerRequests.loading ? (
                 <p className="mt-4 text-black">No pending employer requests.</p>
               ) : (
-                <div className="mt-6 space-y-4">
-                  {employerRequests.map((request) => (
+                <div className={`mt-6 space-y-4${employerRequests.loading ? ' opacity-60 transition-opacity' : ''}`} aria-busy={employerRequests.loading}>
+                  {employerRequests.items.map((request) => (
                     <div key={request._id} className="admin-request-item rounded-2xl border border-slate-700 bg-slate-950/80 p-5">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div>
@@ -4474,17 +4946,14 @@ const [authView, setAuthView] = useState("login")
                         <div className="flex flex-wrap items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => setApproveRequestTarget(request)}
+                            onClick={() => confirmEmployerRequest(request._id, request.companyName, 'approved')}
                             className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
                           >
                             Approve
                           </button>
                           <button
                             type="button"
-                            onClick={() => {
-                              setDeclineRequestTarget(request)
-                              setDeclineReason('')
-                            }}
+                            onClick={() => confirmEmployerRequest(request._id, request.companyName, 'declined')}
                             className="rounded-2xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-200"
                           >
                             Decline
@@ -4494,6 +4963,18 @@ const [authView, setAuthView] = useState("login")
                     </div>
                   ))}
                 </div>
+              )}
+              {employerRequests.total > 0 && (
+                <Pagination
+                  page={employerRequestsPagination.page}
+                  pageSize={employerRequestsPagination.pageSize}
+                  totalItems={employerRequests.total}
+                  onPageChange={employerRequestsPagination.setPage}
+                  onPageSizeChange={employerRequestsPagination.setPageSize}
+                  loading={employerRequests.loading}
+                  itemLabel="requests"
+                  ariaLabel="Employer requests pagination"
+                />
               )}
             </section>
           )}

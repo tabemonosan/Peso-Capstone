@@ -1,11 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { API_URL } from "../config"
+import Pagination from "./Pagination"
+import { usePagination } from "../hooks/usePagination"
+import { formatFullName } from "../../shared/nameFields.js"
 
 function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, initialApplicantIds = [] }) {
   const [jobs, setJobs] = useState([])
   const [referredApplicantIdsByJob, setReferredApplicantIdsByJob] = useState({})
   const [referralStatusByJob, setReferralStatusByJob] = useState({})
   const [hireReports, setHireReports] = useState([])
+  const referralJobsPagination = usePagination({ syncUrl: false })
+  const hireReportsPagination = usePagination({ syncUrl: false })
+  const panelApplicantsPg = usePagination({ syncUrl: false })
   const [loading, setLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState("")
@@ -170,7 +176,7 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
           {jobs.length === 0 ? (
             <p className="text-sm text-slate-400">No approved job postings available.</p>
           ) : (
-            orderedJobs.map((job) => {
+            referralJobsPagination.paginate(orderedJobs).map((job) => {
               const jobId = String(job._id || job.id)
               const referredApplicantIds = referredApplicantIdsByJob[jobId] || []
               const appliedApplicantEmails = new Set(
@@ -238,7 +244,7 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
                     </p>
                   ) : (
                     <div className="mt-3 space-y-2">
-                      {visibleApplicants.map((applicant) => {
+                      {panelApplicantsPg.paginate(visibleApplicants).map((applicant) => {
                         const applicantId = String(applicant.id || applicant._id)
                         const highlighted =
                           jobId === String(initialJobId) && initialApplicantIdSet.has(applicantId)
@@ -253,7 +259,7 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
                             <div>
                               <div className="flex items-center gap-2">
                                 <p className="font-medium text-white">
-                                  {applicant.profile?.name || applicant.email}
+                                  {formatFullName(applicant.profile) || applicant.email}
                                 </p>
                                 {highlighted && (
                                   <span className="rounded-full bg-amber-400 px-2 py-0.5 text-xs font-semibold text-slate-950">
@@ -271,7 +277,7 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
                             <button
                               type="button"
                               onClick={() => {
-                                const applicantName = applicant.profile?.name || applicant.email
+                                const applicantName = formatFullName(applicant.profile) || applicant.email
                                 if (!window.confirm(`Refer ${applicantName} to ${job.title}?`)) return
                                 handleCreateReferrals(jobId, [applicantId])
                               }}
@@ -287,11 +293,33 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
                       })}
                     </div>
                   )}
+                  {visibleApplicants.length > panelApplicantsPg.pageSize && (
+                    <Pagination
+                      page={panelApplicantsPg.page}
+                      pageSize={panelApplicantsPg.pageSize}
+                      totalItems={visibleApplicants.length}
+                      onPageChange={panelApplicantsPg.setPage}
+                      onPageSizeChange={panelApplicantsPg.setPageSize}
+                      itemLabel="applicants"
+                      ariaLabel="Applicants to refer pagination"
+                    />
+                  )}
                 </div>
               )
             })
           )}
         </div>
+        {orderedJobs.length > 0 && (
+          <Pagination
+            page={referralJobsPagination.page}
+            pageSize={referralJobsPagination.pageSize}
+            totalItems={orderedJobs.length}
+            onPageChange={referralJobsPagination.setPage}
+            onPageSizeChange={referralJobsPagination.setPageSize}
+            itemLabel="job postings"
+            ariaLabel="Referral job postings pagination"
+          />
+        )}
       </div>
 
       <div className="admin-hire-reports mt-6 rounded-2xl border border-slate-800 bg-slate-950/80 p-5">
@@ -311,7 +339,7 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
                 </tr>
               </thead>
               <tbody>
-                {hireReports.map((report) => (
+                {hireReportsPagination.paginate(hireReports).map((report) => (
                   <tr key={report._id} className="border-b border-slate-800">
                     <td className="px-2 py-2">{report.status}</td>
                     <td className="px-2 py-2">{String(report.applicantId || "")}</td>
@@ -323,6 +351,17 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
               </tbody>
             </table>
           </div>
+        )}
+        {hireReports.length > 0 && (
+          <Pagination
+            page={hireReportsPagination.page}
+            pageSize={hireReportsPagination.pageSize}
+            totalItems={hireReports.length}
+            onPageChange={hireReportsPagination.setPage}
+            onPageSizeChange={hireReportsPagination.setPageSize}
+            itemLabel="hire reports"
+            ariaLabel="Hire reports pagination"
+          />
         )}
       </div>
     </section>

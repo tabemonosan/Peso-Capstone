@@ -10,10 +10,70 @@ import fs from 'fs'
 import path from 'path'
 import { createReport } from 'docx-templates'
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
-import { Applicant, Employer, Admin, JobTitle, Notification, Referral, HireReport, Rating, findUserByEmail, emailTakenAcrossRoles, createUserInRole, updateUserProfileByEmail } from './models/collections.js'
-import { sendEmail, sendVerificationEmail } from './mailer.js'
+import { Applicant, Employer, Admin, JobTitle, Notification, Referral, HireReport, Rating, findUserByEmail, emailTakenAcrossRoles, createUserInRole, updateUserProfileByEmail, applicantFullName, applicantDisplayName } from './models/collections.js'
+import { sendVerificationEmail } from './mailer.js'
+import { notify, notifyAdmins } from './services/notify.js'
+import { startHireReportReminders } from './services/hireReminders.js'
+import { createNotificationsRouter } from './routes/notifications.js'
+import { createDashboardService } from './services/dashboard.js'
 import { normalizeEmail, generateVerifyToken, hashVerifyToken, VERIFY_TOKEN_TTL_MS, RESEND_COOLDOWN_MS } from './utils/emailVerification.js'
 import { passwordErrorMessage } from './utils/passwordPolicy.js'
+import { validateNameFields, sanitizeName } from '../shared/nameFields.js'
+import { registrationProgress } from './utils/registration.js'
+import { validateReviewTransition } from './utils/docReview.js'
+import { baseApprovedJobFilter, buildJobFilter, countJobFacets } from './utils/jobFilters.js'
+
+const LOCATION_TYPE_OPTIONS = ['On-site', 'Remote', 'Hybrid']
+const EMPLOYMENT_TYPE_OPTIONS = ['Full-time', 'Part-time', 'Contract', 'Temporary', 'Internship']
+import { parsePagination, paginateQuery, escapeRegex } from './utils/paginate.js'
+import { resolveSort } from './utils/sort.js'
+
+// --- Sort whitelists (never trust raw ?sortBy values) ---
+const STATUS_PRIORITY = ['pending', 'under_review', 'approved', 'declined']
+const APPLICANT_STATUS_PRIORITY = ['under_review', 'approved', 'restricted', 'declined']
+
+const APPLICANT_SORTS = {
+  name: { fields: (d) => ({ 'profile.lastName': d, 'profile.firstName': d }), collation: true, defaultOrder: 1 },
+  createdAt: { fields: (d) => ({ createdAt: d }), defaultOrder: -1 },
+  status: { fields: () => ({}), statusRank: { field: 'verificationStatus', values: APPLICANT_STATUS_PRIORITY }, defaultOrder: 1 },
+  docsApproved: {
+    fields: (d) => ({ __sortDocsApproved: d }),
+    computed: {
+      __sortDocsApproved: {
+        $size: {
+          $filter: {
+            input: { $objectToArray: { $ifNull: ['$verificationDocuments', {}] } },
+            as: 'slot',
+            cond: { $eq: [{ $getField: { field: 'status', input: { $last: { $ifNull: ['$$slot.v.versions', [{}]] } } } }, 'approved'] },
+          },
+        },
+      },
+    },
+    defaultOrder: -1,
+  },
+  location: { fields: (d) => ({ 'profile.location': d }), collation: true, nullsLast: ['profile.location'], defaultOrder: 1 },
+}
+
+const EMPLOYER_SORTS = {
+  companyName: { fields: (d) => ({ companyName: d }), collation: true, defaultOrder: 1 },
+  createdAt: { fields: (d) => ({ createdAt: d }), defaultOrder: -1 },
+  status: { fields: () => ({}), statusRank: { field: 'verificationStatus', values: ['pending_verification', ...STATUS_PRIORITY] }, defaultOrder: 1 },
+}
+
+const EMPLOYER_REQUEST_SORTS = {
+  createdAt: { fields: (d) => ({ createdAt: d }), defaultOrder: -1 },
+  companyName: { fields: (d) => ({ companyName: d }), collation: true, defaultOrder: 1 },
+  status: { fields: () => ({}), statusRank: { field: 'status', values: STATUS_PRIORITY }, defaultOrder: 1 },
+}
+
+const JOB_SORTS = {
+  createdAt: { fields: (d) => ({ createdAt: d }), defaultOrder: -1 },
+  title: { fields: (d) => ({ title: d }), collation: true, defaultOrder: 1 },
+  company: { fields: (d) => ({ company: d }), collation: true, defaultOrder: 1 },
+  salary: { fields: (d) => ({ salary: d }), numeric: ['salary'], defaultOrder: -1 },
+  deadline: { fields: (d) => ({ deadline: d }), nullsLast: ['deadline'], defaultOrder: 1 },
+  status: { fields: () => ({}), statusRank: { field: 'status', values: STATUS_PRIORITY }, defaultOrder: 1 },
+}
 
 const app = express()
 const PORT = process.env.PORT || 4000
@@ -57,7 +117,7 @@ const jobSchema = new Schema({
   slots: { type: Number, min: 1 },
   deadline: Date,
   locationType: { type: String, enum: ['', 'On-site', 'Hybrid', 'Remote'], default: '' },
-  employmentType: { type: String, enum: ['', 'Full-time', 'Part-time', 'Contract', 'Internship'], default: '' },
+  employmentType: { type: String, enum: ['', 'Full-time', 'Part-time', 'Contract', 'Temporary', 'Internship'], default: '' },
   skills: [String],
   status: { type: String, enum: ['pending', 'approved', 'declined'], default: 'pending' },
   reviewReason: String,
@@ -73,6 +133,13 @@ const jobSchema = new Schema({
   applicants: [{ email: String, appliedAt: Date }],
   createdAt: { type: Date, default: Date.now },
 })
+jobSchema.index({ status: 1, createdAt: -1, _id: 1 })
+jobSchema.index({ createdBy: 1, createdAt: -1, _id: 1 })
+jobSchema.index({ 'applicants.email': 1, createdAt: -1 })
+jobSchema.index({ status: 1, deadline: 1 })
+jobSchema.index({ status: 1, location: 1 })
+jobSchema.index({ status: 1, locationType: 1 })
+jobSchema.index({ status: 1, employmentType: 1 })
 const JobPosting = mongoose.model('JobPosting', jobSchema)
 
 const jobApplicationSchema = new Schema({
@@ -112,6 +179,7 @@ const employerRequestSchema = new Schema({
   approvedAt: Date,
   createdAt: { type: Date, default: Date.now },
 })
+employerRequestSchema.index({ status: 1, createdAt: -1, _id: 1 })
 const EmployerRequest = mongoose.model('EmployerRequest', employerRequestSchema)
 
 const requirementsDirectory = path.join(process.cwd(), 'server', 'uploads', 'employer-requirements')
@@ -335,6 +403,12 @@ function summarizeVerificationDocuments(applicant, { withUrls = false, includeHi
           }
         : null,
       history,
+      reviewLog: (slot?.history || []).map((entry) => ({
+        action: entry.action,
+        reason: entry.reason || undefined,
+        by: entry.by,
+        at: entry.at,
+      })),
     }
   }).filter(Boolean)
 }
@@ -398,47 +472,8 @@ async function requireVerifiedEmail(req, res, next) {
 }
 
 // --- Registration completeness (computed, never stored so it can't go stale) ---
-// Applicant complete = name/location/skills/summary + NSRP form, birth certificate, valid ID #1, resume
-// Employer complete = company name, contact name, phone, location + NSRP registration PDF on file
-function registrationChecklist(user, type, extras = {}) {
-  const hasText = (value) => typeof value === 'string' && value.trim().length > 0
-  if (type === 'Applicant') {
-    const docs = user.verificationDocuments || {}
-    const hasDoc = (key) => Boolean(latestVersion(docs[key]))
-    return [
-      { key: 'name', label: 'Full name', done: hasText(user.profile?.name), link: 'profile' },
-      { key: 'location', label: 'Location', done: hasText(user.profile?.location), link: 'profile' },
-      { key: 'skills', label: 'At least one skill', done: Array.isArray(user.profile?.skills) && user.profile.skills.some((skill) => typeof skill === 'string' && skill.trim()), link: 'profile' },
-      { key: 'summary', label: 'Short bio / about me', done: hasText(user.profile?.summary), link: 'profile' },
-      { key: 'nsrpForm', label: 'NSRP Registration Form', done: hasDoc('nsrpForm'), link: 'documents' },
-      { key: 'birthCertificate', label: 'Birth Certificate', done: hasDoc('birthCertificate'), link: 'documents' },
-      { key: 'validId1', label: 'Valid ID', done: hasDoc('validId1'), link: 'documents' },
-      { key: 'resume', label: 'Resume (PDF, DOCX, JPG, or PNG)', done: hasDoc('resume'), link: 'documents' },
-    ]
-  }
-  if (type === 'Employer') {
-    const requirementsFile = extras.requirementsFile
-    const hasRequirementsFile = Boolean(
-      requirementsFile?.data
-      || (requirementsFile?.path && fs.existsSync(requirementsFile.path)),
-    )
-    return [
-      { key: 'companyName', label: 'Company name', done: hasText(user.companyName), link: 'profile' },
-      { key: 'contactName', label: 'Contact person', done: hasText(user.contactName), link: 'profile' },
-      { key: 'phone', label: 'Contact number', done: /^\d{11}$/.test(String(user.phone || '')), link: 'profile' },
-      { key: 'location', label: 'Company location', done: hasText(user.profile?.location) || hasText(extras.requestLocation), link: 'profile' },
-      { key: 'requirements', label: 'NSRP registration PDF', done: hasRequirementsFile, link: 'dashboard' },
-    ]
-  }
-  return []
-}
-
-function registrationProgress(user, type, extras) {
-  const checklist = registrationChecklist(user, type, extras)
-  const done = checklist.filter((item) => item.done).length
-  return { complete: checklist.length > 0 && done === checklist.length, done, total: checklist.length, checklist }
-}
-
+// Lives in ./utils/registration.js so it can be unit-tested; the server is the
+// source of truth for both the UI checklist and the REGISTRATION_INCOMPLETE gate.
 // Block applicants/employers with incomplete registration from gated routes (admins pass)
 async function requireCompleteRegistration(req, res, next) {
   try {
@@ -496,16 +531,21 @@ app.post('/api/signup', applicantSignupUpload.fields([
   { name: 'resume', maxCount: 1 },
 ]), async (req, res) => {
   try {
-    const { email, password, name, location, skills, traits, summary, consent, id1Type, id2Type } = req.body || {}
+    const { email, password, firstName, middleName, lastName, suffix, noMiddleName, location, skills, traits, summary, consent, id1Type, id2Type } = req.body || {}
     if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) return res.status(400).json({ error: 'Enter a valid email address' })
     if (typeof password !== 'string' || !password) return res.status(400).json({ error: 'Missing password' })
     if (consent !== true && consent !== 'true') return res.status(400).json({ error: 'Data privacy consent is required (RA 10173)' })
-    if (!name || !String(name).trim()) return res.status(400).json({ error: 'Full name is required' })
+    const skipMiddleName = noMiddleName === true || noMiddleName === 'true'
+    const { values: nameValues, fieldErrors: nameErrors } = validateNameFields({ firstName, middleName, lastName, suffix }, { noMiddleName: skipMiddleName })
+    if (Object.keys(nameErrors).length > 0) {
+      return res.status(400).json({ error: Object.values(nameErrors)[0], fieldErrors: nameErrors })
+    }
+    const fullName = [nameValues.firstName, nameValues.middleName, nameValues.lastName, nameValues.suffix].filter(Boolean).join(' ')
     if (!location || !String(location).trim()) return res.status(400).json({ error: 'Location is required' })
     if (!summary || !String(summary).trim()) return res.status(400).json({ error: 'Profile summary is required' })
+    // Skills are optional at sign-up; applicants add them later on their profile
     const parsedSkills = Array.isArray(skills) ? skills : String(skills || '').split(',')
     const profileSkills = parsedSkills.map((skill) => String(skill).trim()).filter(Boolean)
-    if (profileSkills.length === 0) return res.status(400).json({ error: 'At least one skill is required' })
     const passwordError = passwordErrorMessage(password)
     if (passwordError) return res.status(400).json({ error: passwordError })
 
@@ -563,13 +603,39 @@ app.post('/api/signup', applicantSignupUpload.fields([
     const user = await createUserInRole('Applicant', {
       email: email.trim(),
       passwordHash,
-      profile: { name: String(name).trim(), location: String(location).trim(), skills: profileSkills, traits: String(traits || '').trim(), summary: String(summary).trim() },
+      profile: {
+        name: fullName,
+        firstName: nameValues.firstName,
+        middleName: nameValues.middleName,
+        lastName: nameValues.lastName,
+        suffix: nameValues.suffix,
+        location: String(location).trim(),
+        skills: profileSkills,
+        traits: String(traits || '').trim(),
+        summary: String(summary).trim(),
+      },
       verificationDocuments,
       consentGivenAt: new Date(),
     })
 
     // Email verification is best-effort: registration succeeds even if sending fails (user can Resend)
     issueEmailVerification(user).catch((err) => console.error('Verification email failed:', err.message))
+
+    notify({
+      recipient: { id: user._id, role: 'Applicant', email: user.email },
+      type: 'registration_submitted',
+      title: 'Registration submitted',
+      message: 'Your registration and documents were submitted and are awaiting PESO review.',
+      link: '/profile',
+      email: true,
+    })
+    notifyAdmins({
+      type: 'applicant_registration_pending',
+      title: 'New applicant registration',
+      message: `${fullName} registered and is awaiting document review.`,
+      link: '/applicants',
+      metadata: { applicantId: String(user._id) },
+    })
 
     const safe = { id: String(user._id), email: user.email, role: 'Applicant', emailVerified: false, registration: registrationProgress(user, 'Applicant'), profile: user.profile, verificationDocuments: summarizeVerificationDocuments(user), attentionCount: attentionCount(user), resumeFile: resumeMetadata(user) }
     const token = jwt.sign({ email: user.email, role: 'Applicant' }, jwtSecret, { expiresIn: '7d' })
@@ -597,6 +663,13 @@ app.post('/api/auth/verify-email', async (req, res) => {
     user.emailVerifyTokenHash = undefined
     user.emailVerifyExpires = undefined
     await user.save()
+    notify({
+      recipient: { id: user._id, role, email: user.email },
+      type: 'email_verified',
+      title: 'Email verified',
+      message: 'Your email address has been verified.',
+      link: '/profile',
+    })
     res.json({ ok: true, email: user.email, role })
   } catch (err) {
     console.error(err)
@@ -646,7 +719,7 @@ app.post('/api/login', async (req, res) => {
     if (user.verificationStatus === 'restricted') return res.status(403).json({ error: 'Your account has been restricted. Please contact PESO support.' })
 
     const registration = ['Applicant', 'Employer'].includes(type) ? registrationProgress(user, type, { requirementsFile: requirements?.requirementsFile, requestLocation: requirements?.location }) : undefined
-    const safe = { id: String(user._id), email: user.email, role: type, emailVerified: ['Applicant', 'Employer'].includes(type) ? Boolean(user.emailVerified) : undefined, registration, verificationDocuments: type === 'Applicant' ? summarizeVerificationDocuments(user) : undefined, attentionCount: type === 'Applicant' ? attentionCount(user) : undefined, companyName: type === 'Employer' ? (user.companyName || requirements?.companyName) : undefined, contactName: type === 'Employer' ? (user.contactName || requirements?.contactName) : undefined, phone: type === 'Employer' ? (user.phone || requirements?.phone) : undefined, profile: user.profile, verificationStatus: ['Employer', 'Applicant'].includes(type) ? (user.verificationStatus || 'approved') : undefined, verificationReason: ['Employer', 'Applicant'].includes(type) ? user.verificationReason : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size } : undefined, resumeFile: type === 'Applicant' ? resumeMetadata(user) : undefined, nsrpVerificationFile: type === 'Applicant' && user.nsrpVerificationFile?.originalName ? { originalName: user.nsrpVerificationFile.originalName, size: user.nsrpVerificationFile.size, uploadedAt: user.nsrpVerificationFile.uploadedAt } : undefined }
+    const safe = { id: String(user._id), email: user.email, role: type, emailVerified: ['Applicant', 'Employer'].includes(type) ? Boolean(user.emailVerified) : undefined, needsNameConfirmation: type === 'Applicant' ? Boolean(user.needsNameConfirmation) : undefined, registration, verificationDocuments: type === 'Applicant' ? summarizeVerificationDocuments(user) : undefined, attentionCount: type === 'Applicant' ? attentionCount(user) : undefined, companyName: type === 'Employer' ? (user.companyName || requirements?.companyName) : undefined, contactName: type === 'Employer' ? (user.contactName || requirements?.contactName) : undefined, phone: type === 'Employer' ? (user.phone || requirements?.phone) : undefined, profile: user.profile, verificationStatus: ['Employer', 'Applicant'].includes(type) ? (user.verificationStatus || 'approved') : undefined, verificationReason: ['Employer', 'Applicant'].includes(type) ? user.verificationReason : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size } : undefined, resumeFile: type === 'Applicant' ? resumeMetadata(user) : undefined, nsrpVerificationFile: type === 'Applicant' && user.nsrpVerificationFile?.originalName ? { originalName: user.nsrpVerificationFile.originalName, size: user.nsrpVerificationFile.size, uploadedAt: user.nsrpVerificationFile.uploadedAt } : undefined }
     const token = jwt.sign({ email: user.email, role: type }, jwtSecret, { expiresIn: '7d' })
     res.json({ user: safe, token })
   } catch (err) {
@@ -668,7 +741,7 @@ app.get('/api/profile', async (req, res) => {
     if (type === 'Applicant') user = await loadApplicantWithCurrentResume(user.email)
     const requirements = type === 'Employer' ? await EmployerRequest.findOne({ email: user.email }).select('+requirementsFile.data').lean() : null
     const registration = ['Applicant', 'Employer'].includes(type) ? registrationProgress(user, type, { requirementsFile: requirements?.requirementsFile, requestLocation: requirements?.location }) : undefined
-    res.json({ id: String(user._id), email: user.email, role: type, emailVerified: ['Applicant', 'Employer'].includes(type) ? Boolean(user.emailVerified) : undefined, registration, companyName: type === 'Employer' ? (user.companyName || requirements?.companyName) : undefined, contactName: type === 'Employer' ? (user.contactName || requirements?.contactName) : undefined, phone: type === 'Employer' ? (user.phone || requirements?.phone) : undefined, profile: user.profile, verificationStatus: ['Employer', 'Applicant'].includes(type) ? (user.verificationStatus || 'approved') : undefined, verificationReason: ['Employer', 'Applicant'].includes(type) ? user.verificationReason : undefined, verificationDocuments: type === 'Applicant' ? summarizeVerificationDocuments(user) : undefined, attentionCount: type === 'Applicant' ? attentionCount(user) : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size } : undefined, hasResume: type === 'Applicant' ? Boolean(resumeMetadata(user)) : undefined, resumeFile: type === 'Applicant' ? resumeMetadata(user) : undefined, nsrpVerificationFile: type === 'Applicant' && user.nsrpVerificationFile?.originalName ? { originalName: user.nsrpVerificationFile.originalName, size: user.nsrpVerificationFile.size, uploadedAt: user.nsrpVerificationFile.uploadedAt } : undefined })
+    res.json({ id: String(user._id), email: user.email, role: type, emailVerified: ['Applicant', 'Employer'].includes(type) ? Boolean(user.emailVerified) : undefined, needsNameConfirmation: type === 'Applicant' ? Boolean(user.needsNameConfirmation) : undefined, registration, companyName: type === 'Employer' ? (user.companyName || requirements?.companyName) : undefined, contactName: type === 'Employer' ? (user.contactName || requirements?.contactName) : undefined, phone: type === 'Employer' ? (user.phone || requirements?.phone) : undefined, profile: user.profile, verificationStatus: ['Employer', 'Applicant'].includes(type) ? (user.verificationStatus || 'approved') : undefined, verificationReason: ['Employer', 'Applicant'].includes(type) ? user.verificationReason : undefined, verificationDocuments: type === 'Applicant' ? summarizeVerificationDocuments(user) : undefined, attentionCount: type === 'Applicant' ? attentionCount(user) : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size } : undefined, hasResume: type === 'Applicant' ? Boolean(resumeMetadata(user)) : undefined, resumeFile: type === 'Applicant' ? resumeMetadata(user) : undefined, nsrpVerificationFile: type === 'Applicant' && user.nsrpVerificationFile?.originalName ? { originalName: user.nsrpVerificationFile.originalName, size: user.nsrpVerificationFile.size, uploadedAt: user.nsrpVerificationFile.uploadedAt } : undefined })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Server error' })
@@ -761,16 +834,13 @@ app.post('/api/profile/nsrp-verification', applicationUpload.single('nsrpVerific
     )
     if (!applicant) return res.status(404).json({ error: 'Applicant not found' })
 
-    const admins = await Admin.find().lean()
-    if (admins.length > 0) {
-      await Notification.insertMany(admins.map((admin) => ({
-        recipientEmail: admin.email,
-        title: 'Applicant NSRP verification submitted',
-        message: `${decoded.email} submitted an NSRP verification document for account approval.`,
-        kind: 'applicant-verification',
-        linkPath: '/applicants',
-      })))
-    }
+    await notifyAdmins({
+      type: 'applicant_registration_pending',
+      title: 'Applicant NSRP verification submitted',
+      message: `${decoded.email} submitted an NSRP verification document for account approval.`,
+      link: '/applicants',
+      metadata: { applicantId: String(applicant._id) },
+    })
 
     res.json({ ok: true, nsrpVerificationFile: { originalName: req.file.originalname, size: req.file.size, uploadedAt: new Date() } })
   } catch (err) {
@@ -828,6 +898,14 @@ app.post('/api/profile/verification-documents/:docKey', verificationUpload.singl
     if (docKey === 'resume') await migrateLegacyResume(applicant)
     const { slot, version } = appendVerificationVersion(applicant, docKey, req.file, idType)
     await applicant.save()
+
+    await notifyAdmins({
+      type: 'document_resubmitted',
+      title: 'Document awaiting review',
+      message: `${applicantFullName(applicant)} uploaded ${VERIFICATION_DOC_LABELS[docKey]} for review.`,
+      link: '/applicants',
+      metadata: { applicantId: String(applicant._id), docKey },
+    })
 
     res.json({ ok: true, docKey, version: version.version, status: 'pending', uploadsRemaining: MAX_UPLOADS_PER_DOC - slot.uploads, document: { originalName: version.originalName, size: version.size, uploadedAt: version.uploadedAt } })
   } catch (err) {
@@ -892,8 +970,9 @@ app.put('/api/applicants/:id/verification-documents/:docKey', async (req, res) =
     if (decoded.role !== 'Admin') return res.status(403).json({ error: 'Forbidden' })
     const { docKey } = req.params
     if (!VERIFICATION_DOC_KEYS.includes(docKey)) return res.status(400).json({ error: 'Unknown document type' })
-    const { status, reason } = req.body || {}
-    if (!['approved', 'rejected'].includes(status)) return res.status(400).json({ error: 'Invalid status' })
+    const { status, reason, action } = req.body || {}
+    const isRevert = action === 'revert'
+    if (!isRevert && !['approved', 'rejected'].includes(status)) return res.status(400).json({ error: 'Invalid status' })
 
     const applicant = await Applicant.findById(req.params.id)
     if (!applicant) return res.status(404).json({ error: 'Applicant not found' })
@@ -901,28 +980,66 @@ app.put('/api/applicants/:id/verification-documents/:docKey', async (req, res) =
     const slot = applicant.verificationDocuments?.[docKey]
     const current = latestVersion(slot)
     if (!current || current.status === 'missing') return res.status(404).json({ error: 'No document uploaded for this requirement' })
-    if (current.status === 'superseded') return res.status(409).json({ error: 'This version was replaced by a newer upload. Review the latest version.' })
+    if (current.status === 'superseded') return res.status(409).json({ code: 'SUPERSEDED', error: 'This version was replaced by a newer upload. Review the latest version.' })
+
+    // Guards: approve/reject only from pending; revert only from approved with a reason
+    const guard = validateReviewTransition({
+      action: isRevert ? 'revert' : status,
+      currentStatus: current.status,
+      reason,
+    })
+    if (guard) return res.status(guard.status).json({ code: guard.code, error: guard.message })
+
+    if (isRevert) {
+      current.status = 'pending'
+      current.reviewedAt = undefined
+      current.reviewedBy = undefined
+      current.reviewReason = undefined
+      slot.history = [...(slot.history || []), { action: 'revert', reason: String(reason).trim(), by: decoded.email, at: new Date() }]
+      recomputeVerificationStatus(applicant)
+      await applicant.save()
+      await notify({
+        recipient: { id: applicant._id, role: 'Applicant', email: applicant.email },
+        type: 'document_reverted',
+        title: 'Document needs review again',
+        message: `Your ${VERIFICATION_DOC_LABELS[docKey]} was moved back to pending: ${String(reason).trim()}. You do not need to re-upload it.`,
+        link: '/documents',
+        email: true,
+        metadata: { docKey, action: 'revert' },
+      })
+      return res.json({ id: String(applicant._id), verificationStatus: applicant.verificationStatus, verificationReason: applicant.verificationReason, documents: summarizeVerificationDocuments(applicant) })
+    }
 
     current.status = status
     current.reviewedAt = new Date()
     current.reviewedBy = decoded.email
     current.reviewReason = status === 'rejected' ? String(reason || '').trim() : undefined
+    slot.history = [...(slot.history || []), { action: status, reason: status === 'rejected' ? String(reason || '').trim() : undefined, by: decoded.email, at: new Date() }]
     recomputeVerificationStatus(applicant)
     await applicant.save()
 
     const message = status === 'approved'
       ? `Your ${VERIFICATION_DOC_LABELS[docKey]} was approved.`
       : `Your ${VERIFICATION_DOC_LABELS[docKey]} was rejected${reason ? `: ${reason}` : ''}. Please re-upload it from your My Documents page.`
-    await Notification.create({
-      recipientEmail: applicant.email,
+    await notify({
+      recipient: { id: applicant._id, role: 'Applicant', email: applicant.email },
+      type: status === 'approved' ? 'document_approved' : 'document_rejected',
       title: `Verification document ${status}`,
       message,
-      kind: 'applicant-verification',
-      linkPath: '/documents',
+      link: '/documents',
+      email: true,
+      metadata: { docKey, status, reason: status === 'rejected' ? String(reason || '').trim() : undefined },
     })
-    // Email notification on decision (hook logs until a mailer is configured)
-    sendEmail(applicant.email, `PESO Portal: ${VERIFICATION_DOC_LABELS[docKey]} ${status}`, message)
-
+    if (applicant.verificationStatus === 'approved') {
+      await notify({
+        recipient: { id: applicant._id, role: 'Applicant', email: applicant.email },
+        type: 'account_verified',
+        title: 'Account verified',
+        message: 'All your documents were approved. Your account is now verified.',
+        link: '/jobs',
+        email: true,
+      })
+    }
     res.json({ id: String(applicant._id), verificationStatus: applicant.verificationStatus, verificationReason: applicant.verificationReason, documents: summarizeVerificationDocuments(applicant) })
   } catch (err) {
     console.error(err)
@@ -966,6 +1083,21 @@ app.put('/api/profile', async (req, res) => {
     const decoded = jwt.verify(token, jwtSecret)
     const { profile, companyName, contactName, phone, website } = req.body
     if (!profile) return res.status(400).json({ error: 'Missing profile' })
+    // Applicants edit structured name parts; validate them server-side too
+    if (decoded.role === 'Applicant' && (profile.firstName !== undefined || profile.lastName !== undefined || profile.middleName !== undefined || profile.suffix !== undefined)) {
+      const { values: nameValues, fieldErrors: nameErrors } = validateNameFields(profile, { noMiddleName: profile.noMiddleName === true || !sanitizeName(profile.middleName) })
+      if (Object.keys(nameErrors).length > 0) {
+        return res.status(400).json({ error: Object.values(nameErrors)[0], fieldErrors: nameErrors })
+      }
+      profile.firstName = nameValues.firstName
+      profile.middleName = nameValues.middleName
+      profile.lastName = nameValues.lastName
+      profile.suffix = nameValues.suffix
+      profile.name = [nameValues.firstName, nameValues.middleName, nameValues.lastName, nameValues.suffix].filter(Boolean).join(' ')
+      delete profile.noMiddleName
+      // Editing (and thereby confirming) the name clears the migration flag
+      await Applicant.updateOne({ email: decoded.email }, { $set: { needsNameConfirmation: false } })
+    }
     for (const key of ['profileImage', 'bannerImage']) {
       if (typeof profile[key] === 'string' && profile[key].length > 3 * 1024 * 1024) {
         return res.status(413).json({ error: 'Image is too large. Please use an image under 2 MB.' })
@@ -1095,16 +1227,13 @@ app.post('/api/jobs', requireVerifiedEmail, async (req, res) => {
     const job = new JobPosting({ title: resolvedTitle, company: resolvedCompany, location: resolvedLocation, description, requirements, salary, slots: normalizedSlots, deadline: deadline ? new Date(`${deadline}T00:00:00.000Z`) : undefined, skills: normalizedSkills, locationType: locationType || '', employmentType: employmentType || '', createdBy: decoded.email })
     await job.save()
 
-    const admins = await Admin.find().lean()
-    if (admins.length > 0) {
-      await Promise.all(admins.map((admin) => Notification.create({
-        recipientEmail: admin.email,
-        title: 'New job posting pending review',
-        message: `${decoded.email} submitted “${job.title}” for approval.`,
-        kind: 'job-review',
-        linkPath: '/jobs',
-      })))
-    }
+    await notifyAdmins({
+      type: 'job_pending_review',
+      title: 'New job posting pending review',
+      message: `${decoded.email} submitted “${job.title}” for approval.`,
+      link: '/jobs',
+      metadata: { jobId: String(job._id), jobTitle: job.title },
+    })
 
     res.json(job)
   } catch (err) {
@@ -1210,6 +1339,110 @@ app.get('/api/jobs', requireVerifiedEmail, async (req, res) => {
         }
       })
     }
+    // Paginated mode: ?page=1&limit=10&status=approved&search=...&sortBy=...&order=... -> { items, total, page, limit, totalPages }
+    if (req.query.page !== undefined || req.query.limit !== undefined) {
+      const { page, limit } = parsePagination(req.query)
+      const status = String(req.query.status || 'approved')
+      const auth = req.headers.authorization
+      const decoded = auth?.startsWith('Bearer ') ? jwt.verify(auth.split(' ')[1], jwtSecret) : null
+      const filter = {}
+      if (status === 'pending' || status === 'declined') {
+        if (!decoded) return res.status(401).json({ error: 'Missing token' })
+        if (decoded.role !== 'Admin') return res.status(403).json({ error: 'Forbidden' })
+        filter.status = status
+      } else if (status === 'mine') {
+        if (!decoded) return res.status(401).json({ error: 'Missing token' })
+        if (!(await requireApprovedEmployer(decoded, res))) return
+        filter.createdBy = decoded.email
+      } else if (status === 'applied') {
+        if (!decoded) return res.status(401).json({ error: 'Missing token' })
+        if (decoded.role !== 'Applicant') return res.status(403).json({ error: 'Forbidden' })
+        filter.applicants = { $elemMatch: { email: decoded.email } }
+      } else {
+        filter.status = 'approved'
+      }
+      const search = String(req.query.search || '').trim()
+      if (search) {
+        const pattern = new RegExp(escapeRegex(search), 'i')
+        filter.$or = [{ title: pattern }, { company: pattern }, { description: pattern }, { location: pattern }]
+      }
+
+      // Applicant job board: filters + facets + relevance sort
+      if (status === 'approved') {
+        const base = baseApprovedJobFilter()
+        const facetDocs = await JobPosting.find(base).select('skills location locationType employmentType').lean()
+        const facets = countJobFacets(facetDocs)
+        const allowedTypes = {
+          skills: facets.skills.map((entry) => entry.value),
+          locations: facets.locations.map((entry) => entry.value),
+          locationTypes: [...new Set([...LOCATION_TYPE_OPTIONS, ...facets.locationTypes.map((entry) => entry.value)])],
+          employmentTypes: [...new Set([...EMPLOYMENT_TYPE_OPTIONS, ...facets.employmentTypes.map((entry) => entry.value)])],
+        }
+        const { groups, applied } = buildJobFilter({ ...req.query, search: search || undefined }, allowedTypes)
+        const finalFilter = { ...base, ...(groups.length ? { $and: groups } : {}) }
+
+        // "Most relevant" ranks by how many of the applicant's saved skills each job requires
+        const sortBy = String(req.query.sortBy || 'relevant')
+        let applicantSkills = []
+        if (decoded?.role === 'Applicant') {
+          const applicant = await Applicant.findOne({ email: decoded.email }).select('profile.skills').lean()
+          applicantSkills = (applicant?.profile?.skills || []).filter((skill) => typeof skill === 'string' && skill.trim())
+        }
+        if (sortBy === 'relevant' && applicantSkills.length > 0) {
+          const lowerSkills = applicantSkills.map((skill) => skill.trim().toLowerCase())
+          const result = await paginateQuery(JobPosting, finalFilter, {
+            page,
+            limit,
+            sortSpec: {
+              computed: {
+                __skillMatch: {
+                  $size: {
+                    $setIntersection: [
+                      { $map: { input: { $ifNull: ['$skills', []] }, as: 'skill', in: { $toLower: '$$skill' } } },
+                      { $literal: lowerSkills },
+                    ],
+                  },
+                },
+              },
+              fields: () => ({ __skillMatch: -1, createdAt: -1 }),
+            },
+            sortDir: 1,
+          })
+          result.items = result.items.map((doc) => {
+            const { __skillMatch, ...rest } = doc
+            return { ...rest, skillMatch: __skillMatch ?? 0, skillTotal: (rest.skills || []).length }
+          })
+          result.items = await attachEmployerBranding(result.items)
+          return res.json({ ...result, facets, applied })
+        }
+
+        const { order: approvedSortOrder, spec: approvedSortSpec } = resolveSort(req.query, JOB_SORTS, 'createdAt')
+        const result = await paginateQuery(JobPosting, finalFilter, {
+          page,
+          limit,
+          sort: approvedSortSpec.fields(approvedSortOrder),
+          sortSpec: approvedSortSpec,
+          sortDir: approvedSortOrder,
+        })
+        result.items = decoded?.role === 'Admin' ? await attachAdminReviewDetails(result.items) : await attachEmployerBranding(result.items)
+        return res.json({ ...result, facets, applied })
+      }
+
+      const { order: jobSortOrder, spec: jobSortSpec } = resolveSort(req.query, JOB_SORTS, 'createdAt')
+      const result = await paginateQuery(JobPosting, filter, {
+        page,
+        limit,
+        sort: jobSortSpec.fields(jobSortOrder),
+        sortSpec: jobSortSpec,
+        sortDir: jobSortOrder,
+      })
+      if (['pending', 'declined'].includes(status) || (status === 'approved' && decoded?.role === 'Admin')) {
+        result.items = await attachAdminReviewDetails(result.items)
+      } else if (status === 'approved') {
+        result.items = await attachEmployerBranding(result.items)
+      }
+      return res.json(result)
+    }
     const { status } = req.query
     if (status === 'pending') {
       const auth = req.headers.authorization
@@ -1292,24 +1525,15 @@ app.put('/api/jobs/:id/status', async (req, res) => {
       const reviewMessage = status === 'approved'
         ? `Your job posting “${job.title}” was approved by the admin.`
         : `Your job posting “${job.title}” was declined by the admin.${reviewReason ? ` Reason: ${reviewReason}` : ''}`
-      await Notification.create({
-        recipientEmail: job.createdBy,
+      await notify({
+        recipient: { role: 'Employer', email: job.createdBy },
+        type: status === 'approved' ? 'job_approved' : 'job_declined',
         title: reviewTitle,
         message: reviewMessage,
-        kind: 'job-review',
-        linkPath: '/jobs',
+        link: '/jobs',
+        email: true,
+        metadata: { jobId: String(job._id), jobTitle: job.title, reason: status === 'declined' ? reviewReason : undefined },
       })
-    }
-
-    const admins = await Admin.find().lean()
-    if (admins.length > 0) {
-      await Promise.all(admins.map((admin) => Notification.create({
-        recipientEmail: admin.email,
-        title: 'Job review updated',
-        message: `The posting “${job.title}” was ${status}.`,
-        kind: 'job-review',
-        linkPath: '/jobs',
-      })))
     }
 
     res.json(job)
@@ -1968,31 +2192,45 @@ app.post('/api/jobs/:id/apply', requireVerifiedEmail, applicationUpload.single('
     job.applicants.push({ email: decoded.email, appliedAt: new Date() })
     await job.save()
 
-    const admins = await Admin.find().lean()
-    if (admins.length > 0) {
-      const employer = await Employer.findOne({ email: job.createdBy }).lean()
-      const applicantName = applicant?.profile?.name || applicant.email
-      const employerName = employer?.companyName || job.company || job.createdBy || 'Unknown employer'
-
-      await Notification.insertMany(
-        admins.map((admin) => ({
-          recipientEmail: admin.email,
-          title: 'New applicant needs referral review',
-          message: `${applicantName} applied to "${job.title}" at ${employerName}. Review and decide whether to refer.`,
-          type: 'new_application',
-          kind: 'new_application',
-          read: false,
-          linkPath: '/peso-referrals',
-          actionable: true,
-          applicantId: applicant._id,
-          jobId: job._id,
-          employerId: employer?._id,
-          applicantName,
-          jobTitle: job.title,
-          employerName,
-        })),
-      )
+    const employer = await Employer.findOne({ email: job.createdBy }).lean()
+    const applicantName = applicantFullName(applicant) || applicant.email
+    const employerName = employer?.companyName || job.company || job.createdBy || 'Unknown employer'
+    const applicationMeta = {
+      applicantId: String(applicant._id),
+      jobId: String(job._id),
+      employerId: employer?._id ? String(employer._id) : undefined,
+      applicantName,
+      jobTitle: job.title,
+      employerName,
     }
+
+    await notify({
+      recipient: { id: applicant._id, role: 'Applicant', email: applicant.email },
+      type: 'application_submitted',
+      title: 'Application submitted',
+      message: `Your application for "${job.title}" at ${employerName} was submitted.`,
+      link: '/jobs',
+      email: true,
+      metadata: applicationMeta,
+    })
+    if (employer) {
+      await notify({
+        recipient: { id: employer._id, role: 'Employer', email: employer.email },
+        type: 'new_applicant',
+        title: 'New applicant',
+        message: `${applicantName} applied to "${job.title}".`,
+        link: '/jobs',
+        email: true,
+        metadata: applicationMeta,
+      })
+    }
+    await notifyAdmins({
+      type: 'new_application',
+      title: 'New applicant needs referral review',
+      message: `${applicantName} applied to "${job.title}" at ${employerName}. Review and decide whether to refer.`,
+      link: '/peso-referrals',
+      metadata: applicationMeta,
+    })
 
     res.json({ success: true, job })
   } catch (err) {
@@ -2059,6 +2297,25 @@ app.post('/api/referrals', async (req, res) => {
     }
 
     const created = await Referral.insertMany(referralsPayload)
+
+    await Promise.all(created.map((referral) => notify({
+      recipient: { id: referral.applicantId, role: 'Applicant' },
+      type: 'referral_received',
+      title: 'You were referred to a job',
+      message: `PESO referred you to "${job.title}" at ${employer.companyName || job.company || 'an employer'}.`,
+      link: '/jobs',
+      email: true,
+      metadata: { referralId: String(referral._id), jobId: String(job._id) },
+    })))
+    await notify({
+      recipient: { id: employer._id, role: 'Employer', email: employer.email },
+      type: 'referral_received',
+      title: 'New referral received',
+      message: `PESO referred ${created.length} applicant(s) to "${job.title}".`,
+      link: '/referrals',
+      email: true,
+      metadata: { jobId: String(job._id), count: created.length },
+    })
     res.json({ createdCount: created.length, referrals: created })
   } catch (err) {
     console.error(err)
@@ -2094,6 +2351,11 @@ app.get('/api/referrals/admin', async (req, res) => {
     const decoded = jwt.verify(token, jwtSecret)
     if (decoded.role !== 'Admin') return res.status(403).json({ error: 'Forbidden' })
 
+    if (req.query.page !== undefined || req.query.limit !== undefined) {
+      const { page, limit } = parsePagination(req.query)
+      const result = await paginateQuery(Referral, {}, { page, limit, sort: { createdAt: -1 } })
+      return res.json(result)
+    }
     const referrals = await Referral.find().select('jobId applicantId status').lean()
     res.json(referrals)
   } catch (err) {
@@ -2117,6 +2379,18 @@ app.get('/api/referrals/employer/:employerId', async (req, res) => {
       if (String(employer._id) !== String(req.params.employerId)) return res.status(403).json({ error: 'Forbidden' })
     }
 
+    if (req.query.page !== undefined || req.query.limit !== undefined) {
+      const { page, limit } = parsePagination(req.query)
+      const result = await paginateQuery(Referral, { employerId: req.params.employerId }, { page, limit, sort: { createdAt: -1 } })
+      await Referral.populate(result.items, [
+        { path: 'applicantId', select: 'email profile resumeFile.originalName resumeFile.size resumeFile.uploadedAt verificationDocuments.resume.versions.originalName verificationDocuments.resume.versions.mimetype verificationDocuments.resume.versions.size verificationDocuments.resume.versions.uploadedAt verificationDocuments.resume.versions.status' },
+        { path: 'jobId', model: JobPosting, select: 'title company location description requirements salary locationType employmentType status createdBy createdAt' },
+      ])
+      for (const referral of result.items) {
+        if (referral.applicantId) referral.applicantId.resumeFile = resumeMetadata(referral.applicantId)
+      }
+      return res.json(result)
+    }
     const referrals = await Referral.find({ employerId: req.params.employerId })
       .sort({ createdAt: -1 })
       .populate({ path: 'applicantId', select: 'email profile resumeFile.originalName resumeFile.size resumeFile.uploadedAt verificationDocuments.resume.versions.originalName verificationDocuments.resume.versions.mimetype verificationDocuments.resume.versions.size verificationDocuments.resume.versions.uploadedAt verificationDocuments.resume.versions.status' })
@@ -2157,6 +2431,25 @@ app.put('/api/referrals/:id/respond', async (req, res) => {
 
     referral.status = status
     await referral.save()
+
+    const respondedJob = await JobPosting.findById(referral.jobId).select('title').lean()
+    const respondedTitle = respondedJob?.title || 'a job'
+    await notify({
+      recipient: { id: referral.applicantId, role: 'Applicant' },
+      type: 'application_status_changed',
+      title: `Application ${status}`,
+      message: `${employer.companyName || 'The employer'} ${status} your referral for "${respondedTitle}".`,
+      link: '/jobs',
+      email: true,
+      metadata: { referralId: String(referral._id), jobId: String(referral.jobId), status },
+    })
+    await notifyAdmins({
+      type: 'referral_response',
+      title: 'Referral response received',
+      message: `${employer.companyName || 'An employer'} ${status} a referral for "${respondedTitle}".`,
+      link: '/peso-referrals',
+      metadata: { referralId: String(referral._id), jobId: String(referral.jobId), status },
+    })
 
     res.json(referral)
   } catch (err) {
@@ -2207,6 +2500,14 @@ app.post('/api/hire-reports', async (req, res) => {
       status,
     })
 
+    await notifyAdmins({
+      type: 'hire_report_submitted',
+      title: 'New hire report',
+      message: `${employer.companyName || decoded.email} reported an applicant as ${status} for "${job.title}".`,
+      link: '/records',
+      metadata: { hireReportId: String(hireReport._id), jobId: String(job._id), applicantId: String(applicantId), status },
+    })
+
     res.json(hireReport)
   } catch (err) {
     console.error(err)
@@ -2246,6 +2547,11 @@ app.get('/api/hire-reports', async (req, res) => {
       filter.reportedAt = reportedAt
     }
 
+    if (req.query.page !== undefined || req.query.limit !== undefined) {
+      const { page, limit } = parsePagination(req.query)
+      const result = await paginateQuery(HireReport, filter, { page, limit, sort: { reportedAt: -1 } })
+      return res.json(result)
+    }
     const hireReports = await HireReport.find(filter).sort({ reportedAt: -1 })
     res.json(hireReports)
   } catch (err) {
@@ -2331,133 +2637,38 @@ app.get('/api/ratings/:userId', async (req, res) => {
   }
 })
 
-app.get('/api/notifications', async (req, res) => {
+const dashboardService = createDashboardService({ Applicant, Employer, JobPosting, JobApplication, Referral, HireReport, Notification })
+
+// Read-only, role-scoped aggregates; the role always comes from the verified token
+app.get('/api/dashboard', async (req, res) => {
   try {
-    const auth = req.headers.authorization
-    if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
-    const token = auth.split(' ')[1]
-    const decoded = jwt.verify(token, jwtSecret)
-    if (!decoded.email) return res.status(401).json({ error: 'Invalid token payload' })
-
-    const storedNotifications = await Notification.find({ recipientEmail: decoded.email }).sort({ createdAt: -1 }).lean()
-    const filteredStoredNotifications = decoded.role === 'Admin'
-      ? storedNotifications.filter((item) => !(item.title === 'New job posting pending review' && item.kind === 'job-review'))
-      : storedNotifications
-
-    // Derive notifications from job records so historic approve/decline events still appear.
-    let derivedNotifications = []
-    if (decoded.role === 'Employer') {
-      const reviewedJobs = await JobPosting.find({
-        createdBy: decoded.email,
-        status: { $in: ['approved', 'declined'] },
-      }).sort({ approvedAt: -1, createdAt: -1 }).lean()
-
-      derivedNotifications = reviewedJobs.map((job) => ({
-        _id: `job-status-${job._id}`,
-        jobId: job._id,
-        status: job.status,
-        company: job.company,
-        location: job.location,
-        description: job.description,
-        requirements: job.requirements,
-        salary: job.salary,
-        requestedBy: job.createdBy,
-        actionable: false,
-        recipientEmail: decoded.email,
-        title: job.status === 'approved' ? 'Posting approved' : 'Posting declined',
-        message: job.status === 'approved'
-          ? `Your job posting "${job.title}" was approved by the admin.`
-          : `Your job posting "${job.title}" was declined by the admin.`,
-        kind: 'job-review',
-        linkPath: '/jobs',
-        createdAt: job.approvedAt || job.updatedAt || job.createdAt,
-        source: 'derived',
-      }))
-    }
-
-    if (decoded.role === 'Admin') {
-      const pendingJobs = await JobPosting.find({ status: 'pending' }).sort({ createdAt: -1 }).lean()
-      const reviewedJobs = await JobPosting.find({ status: { $in: ['approved', 'declined'] } }).sort({ approvedAt: -1, createdAt: -1 }).lean()
-
-      const pendingItems = pendingJobs.map((job) => ({
-        _id: `job-pending-${job._id}`,
-        jobId: job._id,
-        status: job.status,
-        company: job.company,
-        location: job.location,
-        description: job.description,
-        requirements: job.requirements,
-        salary: job.salary,
-        requestedBy: job.createdBy,
-        actionable: true,
-        recipientEmail: decoded.email,
-        title: 'New job posting pending review',
-        message: `${job.createdBy || 'An employer'} submitted "${job.title}" for approval.`,
-        kind: 'job-review',
-        linkPath: '/jobs',
-        createdAt: job.createdAt,
-        source: 'derived',
-      }))
-
-      const reviewedItems = reviewedJobs.map((job) => ({
-        _id: `job-reviewed-${job._id}`,
-        jobId: job._id,
-        status: job.status,
-        company: job.company,
-        location: job.location,
-        description: job.description,
-        requirements: job.requirements,
-        salary: job.salary,
-        requestedBy: job.createdBy,
-        actionable: false,
-        recipientEmail: decoded.email,
-        title: 'Job review updated',
-        message: `The posting "${job.title}" was ${job.status}.`,
-        kind: 'job-review',
-        linkPath: '/jobs',
-        createdAt: job.approvedAt || job.updatedAt || job.createdAt,
-        source: 'derived',
-      }))
-
-      derivedNotifications = [...pendingItems, ...reviewedItems]
-    }
-
-    const merged = [...filteredStoredNotifications, ...derivedNotifications]
-      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-
-    res.json(merged)
+    const decoded = authenticateRequest(req)
+    if (!decoded?.email) return res.status(401).json({ error: 'Missing token' })
+    const found = await findUserByEmail(decoded.email)
+    if (!found || found.type !== decoded.role) return res.status(401).json({ error: 'Unauthorized' })
+    const data = await dashboardService.getDashboard({
+      id: String(found.user._id),
+      objectId: found.user._id,
+      role: found.type,
+      email: String(found.user.email || decoded.email),
+      verificationStatus: found.user.verificationStatus,
+    })
+    res.json(data)
   } catch (err) {
-    console.error(err)
-    res.status(500).json({ error: 'Server error' })
+    console.error('Dashboard error:', err)
+    res.status(500).json({ error: 'Failed to load dashboard' })
   }
 })
 
-app.put('/api/notifications/:id/read', async (req, res) => {
-  try {
-    const auth = req.headers.authorization
-    if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
-    const token = auth.split(' ')[1]
-    const decoded = jwt.verify(token, jwtSecret)
-    if (!decoded.email) return res.status(401).json({ error: 'Invalid token payload' })
-
-    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({ error: 'Invalid notification id' })
-    }
-
-    const updated = await Notification.findOneAndUpdate(
-      { _id: req.params.id, recipientEmail: decoded.email },
-      { read: true },
-      { new: true },
-    ).lean()
-
-    if (!updated) return res.status(404).json({ error: 'Notification not found' })
-
-    res.json({ success: true, notification: updated })
-  } catch (err) {
-    console.error(err)
-    res.status(500).json({ error: 'Server error' })
-  }
-})
+app.use('/api/notifications', createNotificationsRouter({
+  NotificationModel: Notification,
+  authenticate: authenticateRequest,
+  resolveUser: async (decoded) => {
+    const found = await findUserByEmail(decoded?.email)
+    if (!found || found.type !== decoded.role) return null
+    return { id: String(found.user._id), role: found.type, email: String(found.user.email || decoded.email).toLowerCase() }
+  },
+}))
 
 app.post('/api/employer-requests', requirementsUpload.single('requirements'), async (req, res) => {
   const discardUpload = () => {
@@ -2546,6 +2757,22 @@ app.post('/api/employer-requests', requirementsUpload.single('requirements'), as
     await Employer.updateOne({ email: email.trim() }, { $set: { requirementsSubmittedAt: request.requirementsSubmittedAt } })
     // Email verification is best-effort; the employer can resend after logging in
     issueEmailVerification(createdEmployer).catch((err) => console.error('Verification email failed:', err.message))
+
+    await notify({
+      recipient: { id: createdEmployer._id, role: 'Employer', email: createdEmployer.email },
+      type: 'employer_registration_review',
+      title: 'Registration under review',
+      message: 'Your employer registration was submitted and is under PESO review.',
+      link: '/profile',
+      email: true,
+    })
+    await notifyAdmins({
+      type: 'employer_request',
+      title: 'New employer request',
+      message: `${request.companyName} (${request.email}) requested an employer account.`,
+      link: '/requests',
+      metadata: { requestId: String(request._id) },
+    })
     res.json({ success: true, request: { email: request.email, companyName: request.companyName, contactName: request.contactName, location: request.location, phone: request.phone, message: request.message, status: request.status } })
   } catch (err) {
     if (!requestSaved) {
@@ -2567,7 +2794,20 @@ app.get('/api/employer-requests', async (req, res) => {
 
     // Only employers who verified their email appear in the admin review queue
     const verifiedEmails = new Set((await Employer.find({ emailVerified: true }).select('email').lean()).map((employer) => employer.email))
-    const requests = await EmployerRequest.find({ status: { $in: ['pending', 'under_review'] }, email: { $in: [...verifiedEmails] } }).sort({ createdAt: -1 })
+    const filter = { status: { $in: ['pending', 'under_review'] }, email: { $in: [...verifiedEmails] } }
+    if (req.query.page !== undefined || req.query.limit !== undefined) {
+      const { page, limit } = parsePagination(req.query)
+      const { order: reqSortOrder, spec: reqSortSpec } = resolveSort(req.query, EMPLOYER_REQUEST_SORTS, 'createdAt')
+      return res.json(await paginateQuery(EmployerRequest, filter, {
+        page,
+        limit,
+        sort: reqSortSpec.fields(reqSortOrder),
+        sortSpec: reqSortSpec,
+        sortDir: reqSortOrder,
+        select: '-requirementsFile.data',
+      }))
+    }
+    const requests = await EmployerRequest.find(filter).sort({ createdAt: -1 })
     res.json(requests)
   } catch (err) {
     console.error(err)
@@ -2610,18 +2850,12 @@ app.post('/api/employer-requirements', requirementsUpload.single('requirements')
       $unset: { verificationReason: 1 },
     })
 
-    const admins = await Admin.find().select('email').lean()
-    if (admins.length > 0) {
-      await Notification.insertMany(admins.map((admin) => ({
-        recipientEmail: admin.email,
-        title: 'Employer requirements submitted',
-        message: `${decoded.email} submitted an NSRP registration form for review.`,
-        type: 'employer_requirements',
-        kind: 'employer-requirements',
-        actionable: true,
-        linkPath: '/requests',
-      })))
-    }
+    await notifyAdmins({
+      type: 'employer_requirements',
+      title: 'Employer requirements submitted',
+      message: `${decoded.email} submitted an NSRP registration form for review.`,
+      link: '/requests',
+    })
 
     res.json({ success: true, status: request.status, submittedAt: request.requirementsSubmittedAt })
   } catch (err) {
@@ -2762,6 +2996,21 @@ app.put('/api/employer-requests/:id/status', async (req, res) => {
       : { $set: { verificationStatus: status }, $unset: { verificationReason: 1 } }
     await Employer.updateOne({ email: request.email }, employerUpdate)
 
+    const employerAccount = await Employer.findOne({ email: request.email }).select('_id email').lean()
+    if (employerAccount) {
+      await notify({
+        recipient: { id: employerAccount._id, role: 'Employer', email: employerAccount.email },
+        type: status === 'approved' ? 'employer_approved' : 'employer_declined',
+        title: status === 'approved' ? 'Employer account approved' : 'Employer account declined',
+        message: status === 'approved'
+          ? 'Your employer account was approved. You can now post jobs.'
+          : `Your employer registration was declined.${reviewReason ? ` Reason: ${reviewReason}` : ''}`,
+        link: '/profile',
+        email: true,
+        metadata: { status, reason: reviewReason || undefined },
+      })
+    }
+
     res.json(request)
   } catch (err) {
     console.error(err)
@@ -2789,6 +3038,18 @@ app.put('/api/applicants/:id/verification', async (req, res) => {
     else applicant.verificationReason = undefined
     await applicant.save()
 
+    await notify({
+      recipient: { id: applicant._id, role: 'Applicant', email: applicant.email },
+      type: status === 'approved' ? 'account_verified' : 'account_verification_update',
+      title: status === 'approved' ? 'Account verified' : `Account ${status}`,
+      message: status === 'approved'
+        ? 'Your account has been verified by PESO.'
+        : `Your account verification was ${status}.${reviewReason ? ` Reason: ${reviewReason}` : ''}`,
+      link: '/profile',
+      email: true,
+      metadata: { status, reason: reviewReason || undefined },
+    })
+
     res.json({ id: String(applicant._id), email: applicant.email, verificationStatus: applicant.verificationStatus })
   } catch (err) {
     console.error(err)
@@ -2805,10 +3066,106 @@ app.get('/api/admin/users', async (req, res) => {
     const decoded = jwt.verify(token, jwtSecret)
     if (decoded.role !== 'Admin') return res.status(403).json({ error: 'Forbidden' })
 
+    // Paginated applicants mode: ?role=Applicant&page=1&limit=10&search=...
+    // Returns { items, total, page, limit, totalPages }; sorted by last name.
+    if (req.query.role === 'Applicant') {
+      const { page, limit } = parsePagination(req.query)
+      const search = String(req.query.search || '').trim()
+      const filter = {}
+      if (search) {
+        const pattern = new RegExp(escapeRegex(search), 'i')
+        filter.$or = [
+          { 'profile.firstName': pattern },
+          { 'profile.middleName': pattern },
+          { 'profile.lastName': pattern },
+          { 'profile.name': pattern },
+          { email: pattern },
+        ]
+      }
+      const { order: applicantSortOrder, spec: applicantSortSpec } = resolveSort(req.query, APPLICANT_SORTS, 'name')
+      const { items, total, totalPages } = await paginateQuery(Applicant, filter, {
+        page,
+        limit,
+        sort: applicantSortSpec.fields(applicantSortOrder),
+        sortSpec: applicantSortSpec,
+        sortDir: applicantSortOrder,
+        select: '-resumeFile.data -nsrpVerificationFile.data -verificationDocuments.nsrpForm.versions.data -verificationDocuments.birthCertificate.versions.data -verificationDocuments.validId1.versions.data -verificationDocuments.validId2.versions.data -verificationDocuments.resume.versions.data',
+      })
+      const mapped = items.map((u) => {
+        const docs = summarizeVerificationDocuments(u)
+        return {
+          id: u._id,
+          email: u.email,
+          role: 'Applicant',
+          emailVerified: Boolean(u.emailVerified),
+          profile: u.profile,
+          displayName: applicantDisplayName(u),
+          needsNameConfirmation: Boolean(u.needsNameConfirmation),
+          verificationStatus: u.verificationStatus || 'approved',
+          verificationReason: u.verificationReason,
+          verificationDocuments: docs,
+          pendingDocCount: docs.filter((d) => d.status === 'pending').length,
+          resubmittedDocCount: docs.filter((d) => d.resubmitted).length,
+          hasResume: Boolean(resumeMetadata(u)),
+          hasNsrpVerification: Boolean(u.nsrpVerificationFile?.originalName),
+          createdAt: u.createdAt,
+        }
+      })
+      return res.json({ items: mapped, total, page, limit, totalPages, sortBy: resolveSort(req.query, APPLICANT_SORTS, 'name').key, order: applicantSortOrder === 1 ? 'asc' : 'desc' })
+    }
+
+    // Paginated employers mode: ?role=Employer&page=1&limit=10&search=...&sortBy=...&order=...
+    if (req.query.role === 'Employer') {
+      const { page, limit } = parsePagination(req.query)
+      const search = String(req.query.search || '').trim()
+      const statusFilter = String(req.query.status || '').trim()
+      const filter = {}
+      if (search) {
+        const pattern = new RegExp(escapeRegex(search), 'i')
+        filter.$or = [{ companyName: pattern }, { email: pattern }, { contactName: pattern }, { phone: pattern }]
+      }
+      const { order: employerSortOrder, spec: employerSortSpec } = resolveSort(req.query, EMPLOYER_SORTS, 'companyName')
+      const { items, total, totalPages } = await paginateQuery(Employer, filter, {
+        page,
+        limit,
+        sort: employerSortSpec.fields(employerSortOrder),
+        sortSpec: employerSortSpec,
+        sortDir: employerSortOrder,
+      })
+      // Join each page's employer requests for phone/approval status
+      const pageEmails = items.map((u) => u.email.toLowerCase())
+      const pageRequests = await EmployerRequest.find({ email: { $in: pageEmails.map((email) => new RegExp(`^${escapeRegex(email)}$`, 'i')) } }).lean()
+      const pageRequestByEmail = new Map(pageRequests.map((request) => [request.email.toLowerCase(), request]))
+      let mapped = items.map((u) => {
+        const request = pageRequestByEmail.get(u.email.toLowerCase())
+        return {
+          id: u._id,
+          email: u.email,
+          role: 'Employer',
+          companyName: u.companyName,
+          contactName: u.contactName,
+          phone: u.phone || request?.phone,
+          website: u.website,
+          profile: u.profile,
+          approvalStatus: request?.status || 'approved',
+          requestId: request ? String(request._id) : undefined,
+          requirementsFile: request?.requirementsFile ? {
+            requestId: String(request._id),
+            originalName: request.requirementsFile.originalName,
+            size: request.requirementsFile.size,
+            submittedAt: request.requirementsSubmittedAt,
+          } : undefined,
+          createdAt: u.createdAt,
+        }
+      })
+      if (statusFilter && statusFilter !== 'all') mapped = mapped.filter((u) => u.approvalStatus === statusFilter)
+      return res.json({ items: mapped, total, page, limit, totalPages, sortBy: resolveSort(req.query, EMPLOYER_SORTS, 'companyName').key, order: employerSortOrder === 1 ? 'asc' : 'desc' })
+    }
+
     const admins = await Admin.find().lean()
     const employers = await Employer.find().lean()
-    // Admin queues only list accounts with a verified email
-    const applicants = await Applicant.find({ emailVerified: true }).select('+resumeFile.data')
+    // Admin queues list all applicants; unverified emails are badged in the UI
+    const applicants = await Applicant.find().select('+resumeFile.data')
     for (const applicant of applicants) {
       const previousStatus = applicant.verificationStatus
       const previousReason = applicant.verificationReason
@@ -2849,7 +3206,7 @@ app.get('/api/admin/users', async (req, res) => {
       id: request._id, email: request.email, role: 'Employer', companyName: request.companyName, contactName: request.contactName, phone: request.phone,
       profile: { location: request.location, summary: request.message }, approvalStatus: request.status, createdAt: request.createdAt,
     }))
-    const mapApplicant = applicants.map((u) => { const docs = summarizeVerificationDocuments(u); return { id: u._id, email: u.email, role: 'Applicant', phone: u.phone || u.profile?.phone, profile: u.profile, verificationStatus: u.verificationStatus || 'approved', verificationReason: u.verificationReason, verificationDocuments: docs, pendingDocCount: docs.filter((d) => d.status === 'pending').length, resubmittedDocCount: docs.filter((d) => d.resubmitted).length, hasResume: Boolean(resumeMetadata(u)), hasNsrpVerification: Boolean(u.nsrpVerificationFile?.data || u.nsrpVerificationFile?.originalName), createdAt: u.createdAt } })
+    const mapApplicant = applicants.map((u) => { const docs = summarizeVerificationDocuments(u); return { id: u._id, email: u.email, role: 'Applicant', emailVerified: Boolean(u.emailVerified), phone: u.phone || u.profile?.phone, profile: u.profile, displayName: applicantDisplayName(u), needsNameConfirmation: Boolean(u.needsNameConfirmation), verificationStatus: u.verificationStatus || 'approved', verificationReason: u.verificationReason, verificationDocuments: docs, pendingDocCount: docs.filter((d) => d.status === 'pending').length, resubmittedDocCount: docs.filter((d) => d.resubmitted).length, hasResume: Boolean(resumeMetadata(u)), hasNsrpVerification: Boolean(u.nsrpVerificationFile?.data || u.nsrpVerificationFile?.originalName), createdAt: u.createdAt } })
 
     const combined = [...mapAdmin, ...mapEmployer, ...mapEmployerRequests, ...mapApplicant]
     res.json(combined)
@@ -2900,4 +3257,7 @@ async function purgeExpiredVerificationDocuments() {
 setInterval(purgeExpiredVerificationDocuments, 24 * 60 * 60 * 1000).unref()
 purgeExpiredVerificationDocuments()
 
-app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`))
+app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`)
+  startHireReportReminders()
+})

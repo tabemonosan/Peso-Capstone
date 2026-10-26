@@ -2,12 +2,16 @@ import { useEffect, useMemo, useState } from "react"
 import { API_URL } from "../config"
 import HireReportForm from "./HireReportForm"
 import RatingForm from "./RatingForm"
+import Pagination from "./Pagination"
+import { usePagination } from "../hooks/usePagination"
+import { formatFullName } from "../../shared/nameFields.js"
 
 function ReferralList({ token, employerId }) {
   const [referrals, setReferrals] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [hireReportsByReferral, setHireReportsByReferral] = useState({})
+  const referralsPagination = usePagination({ syncUrl: false })
   const [ratedHireReports, setRatedHireReports] = useState({})
   const [selectedProfile, setSelectedProfile] = useState(null)
 
@@ -166,7 +170,7 @@ function ReferralList({ token, employerId }) {
 
       {!loading && referrals.length > 0 && (
         <div className="mt-6 space-y-4">
-          {referralGroups.map((group) => (
+          {referralsPagination.paginate(referralGroups).map((group) => (
             <div
               key={group.jobId}
               className="rounded-2xl border border-slate-300 bg-white p-4"
@@ -184,7 +188,7 @@ function ReferralList({ token, employerId }) {
               <div className="mt-4 space-y-4">
                 {group.referrals.map((referral) => {
             const applicantName =
-              referral.applicantId?.profile?.name ||
+              formatFullName(referral.applicantId?.profile) ||
               referral.applicantId?.email ||
               "Unknown applicant"
             const jobTitle = referral.jobId?.title || "Untitled job"
@@ -299,6 +303,18 @@ function ReferralList({ token, employerId }) {
         </div>
       )}
 
+      {!loading && referrals.length > 0 && (
+        <Pagination
+          page={referralsPagination.page}
+          pageSize={referralsPagination.pageSize}
+          totalItems={referralGroups.length}
+          onPageChange={referralsPagination.setPage}
+          onPageSizeChange={referralsPagination.setPageSize}
+          itemLabel="jobs with referrals"
+          ariaLabel="Referrals pagination"
+        />
+      )}
+
       {selectedProfile && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4"
@@ -319,10 +335,10 @@ function ReferralList({ token, employerId }) {
                 {selectedProfile.profile?.profileImage ? (
                   <img src={selectedProfile.profile.profileImage} alt="Applicant" className="h-full w-full object-cover" />
                 ) : (
-                  (selectedProfile.profile?.name || selectedProfile.email || 'A').trim().charAt(0).toUpperCase()
+                  (formatFullName(selectedProfile.profile) || selectedProfile.email || 'A').trim().charAt(0).toUpperCase()
                 )}
               </span>
-              <h3 className="pb-1 text-lg font-semibold text-black">{selectedProfile.profile?.name || 'Applicant Profile'}</h3>
+              <h3 className="pb-1 text-lg font-semibold text-black">{formatFullName(selectedProfile.profile) || 'Applicant Profile'}</h3>
             </div>
             <div className="flex items-start justify-end px-6 pt-3">
               <button
@@ -334,7 +350,7 @@ function ReferralList({ token, employerId }) {
               </button>
             </div>
             <div className="space-y-2 px-6 pb-6 pt-1 text-sm text-black">
-              <p><span className="font-semibold">Name:</span> {selectedProfile.profile?.name || 'N/A'}</p>
+              <p><span className="font-semibold">Name:</span> {formatFullName(selectedProfile.profile) || 'N/A'}</p>
               <p><span className="font-semibold">Email:</span> {selectedProfile.email || 'N/A'}</p>
               <p><span className="font-semibold">Location:</span> {selectedProfile.profile?.location || 'N/A'}</p>
               <p><span className="font-semibold">Skills:</span> {Array.isArray(selectedProfile.profile?.skills) && selectedProfile.profile.skills.length > 0 ? selectedProfile.profile.skills.join(', ') : 'N/A'}</p>

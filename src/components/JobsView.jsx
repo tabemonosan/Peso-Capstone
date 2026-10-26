@@ -1,5 +1,37 @@
-import { useEffect, useRef, useState } from "react"
+﻿import { useCallback, useEffect, useRef, useState } from "react"
 import { API_URL } from "../config"
+import Modal from "./Modal"
+import Pagination from "./Pagination"
+import SortControl from "./SortControl"
+import ConfirmDialog from "./ConfirmDialog"
+import JobFiltersBar from "./JobFiltersBar"
+import { usePagination, useDebouncedValue } from "../hooks/usePagination"
+import { useSort } from "../hooks/useSort"
+import { useJobFilters, JOB_SORT_OPTIONS } from "../hooks/useJobFilters"
+import { formatFullName, splitFullName } from "../../shared/nameFields.js"
+
+const ADMIN_JOB_SORT_OPTIONS = [
+  { id: 'createdAt:desc', sortBy: 'createdAt', order: 'desc', label: 'Newest submitted' },
+  { id: 'createdAt:asc', sortBy: 'createdAt', order: 'asc', label: 'Oldest submitted (longest waiting)' },
+  { id: 'title:asc', sortBy: 'title', order: 'asc', label: 'Job title (A to Z)' },
+  { id: 'title:desc', sortBy: 'title', order: 'desc', label: 'Job title (Z to A)' },
+  { id: 'company:asc', sortBy: 'company', order: 'asc', label: 'Company name (A to Z)' },
+  { id: 'company:desc', sortBy: 'company', order: 'desc', label: 'Company name (Z to A)' },
+  { id: 'salary:desc', sortBy: 'salary', order: 'desc', label: 'Salary (high to low)' },
+  { id: 'salary:asc', sortBy: 'salary', order: 'asc', label: 'Salary (low to high)' },
+  { id: 'deadline:asc', sortBy: 'deadline', order: 'asc', label: 'Application deadline (soonest first)' },
+  { id: 'status:asc', sortBy: 'status', order: 'asc', label: 'Status' },
+]
+
+// Merge server facet counts with the app's known option lists (known options
+// with no matches show with a count of 0 at the bottom).
+function mergeFacetOptions(facetEntries, knownValues) {
+  const map = new Map((Array.isArray(facetEntries) ? facetEntries : []).map((entry) => [entry.value.toLowerCase(), entry]))
+  for (const value of knownValues || []) {
+    if (!map.has(value.toLowerCase())) map.set(value.toLowerCase(), { value, count: 0 })
+  }
+  return [...map.values()].sort((a, b) => b.count - a.count || a.value.localeCompare(b.value))
+}
 
 const nsrpInputCls = 'mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-black'
 
@@ -66,19 +98,7 @@ const nsrpRowFields = {
 function JobsView({
   activeRole,
   jobLoading,
-  jobSearchTerm,
-  setJobSearchTerm,
-  jobSkillFilter,
-  setJobSkillFilter,
   availableSkills,
-  jobLocationFilter,
-  setJobLocationFilter,
-  jobLocationTypeFilter,
-  setJobLocationTypeFilter,
-  jobEmploymentTypeFilter,
-  setJobEmploymentTypeFilter,
-  locationFilterOptions,
-  filteredApplicantJobs,
   appliedJobs,
   appliedJobIds,
   currentUser,
@@ -103,13 +123,15 @@ function JobsView({
   handleBulkReferApplicants,
   token,
   handleEditPendingJob,
+  applicantSkills = [],
+  onGoToProfile,
 }) {
   const [selectedApprovedJob, setSelectedApprovedJob] = useState(null)
   const [reviewJob, setReviewJob] = useState(null)
   const [reviewSubmitting, setReviewSubmitting] = useState(false)
   const [reviewError, setReviewError] = useState('')
-  const [declineReasonDraft, setDeclineReasonDraft] = useState('')
-  const reviewDialogRef = useRef(null)
+  const [jobReviewConfirm, setJobReviewConfirm] = useState(null) // 'approved' | 'declined' | null
+  const reviewInFlightRef = useRef(false)
   const reviewOpenerRef = useRef(null)
   const [applicationJob, setApplicationJob] = useState(null)
   const [applicationFile, setApplicationFile] = useState(null)
@@ -119,6 +141,146 @@ function JobsView({
   const [nsrpAnswers, setNsrpAnswers] = useState({})
   const [nsrpFieldErrors, setNsrpFieldErrors] = useState({})
   const [nsrpSkillInput, setNsrpSkillInput] = useState('')
+  const skillsHintKey = `peso-skills-hint-dismissed-${currentUser?.id || currentUser?.email || 'applicant'}`
+  const [skillsHintDismissed, setSkillsHintDismissed] = useState(() => {
+    try { return typeof window !== 'undefined' && localStorage.getItem(skillsHintKey) === '1' } catch { return false }
+  })
+  const dismissSkillsHint = () => {
+    setSkillsHintDismissed(true)
+    try { localStorage.setItem(skillsHintKey, '1') } catch { /* storage unavailable */ }
+  }
+
+  // Pagination for the long lists in this view (applicant jobs, applications, admin queues)
+  const availableJobsPg = usePagination({ urlKey: 'jobPage' })
+  const appliedJobsPg = usePagination({ syncUrl: false })
+  const pendingJobsPg = usePagination({ resetDeps: [adminJobSearchTerm], syncUrl: false })
+  const approvedJobsPg = usePagination({ resetDeps: [adminJobSearchTerm], syncUrl: false })
+  const declinedJobsPg = usePagination({ resetDeps: [adminJobSearchTerm], syncUrl: false })
+  const referralApplicantsPg = usePagination({ syncUrl: false })
+
+  // Admin job postings: server-side pagination + sorting per status section
+  const debouncedAdminJobSearch = useDebouncedValue(adminJobSearchTerm, 300)
+  const resetJobPages = useCallback(() => {
+    pendingJobsPg.setPage(1)
+    approvedJobsPg.setPage(1)
+    declinedJobsPg.setPage(1)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  const jobSort = useSort({ options: ADMIN_JOB_SORT_OPTIONS, defaultId: 'createdAt:desc', urlSync: false, onChange: resetJobPages })
+  const emptyPage = { items: [], total: 0, totalPages: 1 }
+  const [adminJobsData, setAdminJobsData] = useState({ pending: emptyPage, approved: emptyPage, declined: emptyPage })
+  const [adminJobsServerLoading, setAdminJobsServerLoading] = useState(false)
+  const [adminJobsRefreshKey, setAdminJobsRefreshKey] = useState(0)
+
+  useEffect(() => {
+    if (activeRole !== 'Admin' || !token) return undefined
+    let cancelled = false
+    setAdminJobsServerLoading(true)
+    const fetchSection = async (status, pg) => {
+      const params = new URLSearchParams({
+        status,
+        page: String(pg.page),
+        limit: String(pg.pageSize),
+        search: debouncedAdminJobSearch,
+        sortBy: jobSort.sortBy,
+        order: jobSort.order,
+      })
+      try {
+        const response = await fetch(`${API_URL}/api/jobs?${params}`, { headers: { Authorization: `Bearer ${token}` } })
+        const data = await response.json().catch(() => null)
+        return Array.isArray(data?.items) ? data : emptyPage
+      } catch {
+        return null // keep previous rows on failure
+      }
+    }
+    Promise.all([
+      fetchSection('pending', pendingJobsPg),
+      fetchSection('approved', approvedJobsPg),
+      fetchSection('declined', declinedJobsPg),
+    ]).then(([pending, approved, declined]) => {
+      if (cancelled) return
+      setAdminJobsData((current) => ({
+        pending: pending || current.pending,
+        approved: approved || current.approved,
+        declined: declined || current.declined,
+      }))
+      setAdminJobsServerLoading(false)
+    })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRole, token, debouncedAdminJobSearch, jobSort.sortBy, jobSort.order, pendingJobsPg.page, pendingJobsPg.pageSize, approvedJobsPg.page, approvedJobsPg.pageSize, declinedJobsPg.page, declinedJobsPg.pageSize, adminJobsRefreshKey])
+
+  // Wrap admin actions so the server-paginated queues refetch after review
+  const handleAdminReviewJob = async (...args) => {
+    const result = await handleReviewJob?.(...args)
+    setAdminJobsRefreshKey((key) => key + 1)
+    return result
+  }
+  const handleAdminBulkReviewJobs = async (...args) => {
+    const result = await handleBulkReviewJobs?.(...args)
+    setAdminJobsRefreshKey((key) => key + 1)
+    return result
+  }
+
+  const isAdminJobs = activeRole === 'Admin'
+  const pendingList = isAdminJobs ? adminJobsData.pending.items : pendingJobsPg.paginate(filteredPendingJobs)
+  const pendingTotal = isAdminJobs ? adminJobsData.pending.total : filteredPendingJobs.length
+  const approvedList = isAdminJobs ? adminJobsData.approved.items : approvedJobsPg.paginate(filteredApprovedJobs)
+  const approvedTotal = isAdminJobs ? adminJobsData.approved.total : filteredApprovedJobs.length
+  const declinedList = isAdminJobs ? adminJobsData.declined.items : declinedJobsPg.paginate(filteredDeclinedJobs)
+  const declinedTotal = isAdminJobs ? adminJobsData.declined.total : filteredDeclinedJobs.length
+
+  // --- Applicant job board: pill filters + server-side filtering/sorting ---
+  const jobFilters = useJobFilters({ onResetPage: () => availableJobsPg.setPage(1) })
+  const debouncedKeyword = useDebouncedValue(jobFilters.filters.keyword, 300)
+  const EMPTY_FACETS = { skills: [], locations: [], locationTypes: [], employmentTypes: [] }
+  const [applicantJobsData, setApplicantJobsData] = useState({ items: [], total: 0, totalPages: 1, facets: EMPTY_FACETS })
+  const [applicantJobsLoading, setApplicantJobsLoading] = useState(false)
+  const [detailJob, setDetailJob] = useState(null)
+
+  useEffect(() => {
+    if (activeRole !== 'Applicant' || !token) return undefined
+    let cancelled = false
+    setApplicantJobsLoading(true)
+    const params = new URLSearchParams({ status: 'approved', page: String(availableJobsPg.page), limit: String(availableJobsPg.pageSize) })
+    const query = { ...jobFilters.queryParams, search: debouncedKeyword }
+    for (const [key, value] of Object.entries(query)) {
+      if (value) params.set(key, value)
+    }
+    fetch(`${API_URL}/api/jobs?${params}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json().catch(() => null))
+      .then((data) => {
+        if (cancelled) return
+        if (Array.isArray(data?.items)) {
+          setApplicantJobsData({ ...data, facets: data.facets || EMPTY_FACETS })
+          if (data.items.length === 0 && data.total > 0 && availableJobsPg.page > 1) availableJobsPg.setPage(availableJobsPg.page - 1)
+        }
+        setApplicantJobsLoading(false)
+      })
+      .catch(() => { if (!cancelled) setApplicantJobsLoading(false) }) // keep previous results on failure
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRole, token, availableJobsPg.page, availableJobsPg.pageSize, jobFilters.queryParams, debouncedKeyword])
+
+  // Facet options: data values merged with the app's known lists
+  const applicantFacets = {
+    skills: mergeFacetOptions(applicantJobsData.facets.skills, availableSkills),
+    locations: applicantJobsData.facets.locations,
+    locationTypes: mergeFacetOptions(applicantJobsData.facets.locationTypes, ['On-site', 'Remote', 'Hybrid']),
+    employmentTypes: mergeFacetOptions(applicantJobsData.facets.employmentTypes, ['Full-time', 'Part-time', 'Contract', 'Temporary', 'Internship']),
+  }
+  const applicantMySkills = Array.isArray(currentUser?.profile?.skills) ? currentUser.profile.skills : []
+  // SortControl matches options by `${sortBy}:${order}` as the option id
+  const applicantJobSortOptions = JOB_SORT_OPTIONS.map((option) => ({ id: `${option.params.sortBy}:${option.params.order}`, sortBy: option.params.sortBy, order: option.params.order, label: option.label }))
+  const currentJobSortOption = JOB_SORT_OPTIONS.find((option) => option.id === jobFilters.sortId) || JOB_SORT_OPTIONS[0]
+  const jobSortControlValue = { sortBy: currentJobSortOption.params.sortBy, order: currentJobSortOption.params.order }
+  const handleJobSortChange = (option) => {
+    const match = JOB_SORT_OPTIONS.find((item) => item.params.sortBy === option.sortBy && item.params.order === option.order)
+    jobFilters.setSort(match?.id || 'relevant')
+  }
+  const applicantJobs = activeRole === 'Applicant' ? applicantJobsData.items : []
+  const applicantJobsTotal = applicantJobsData.total
+  const applicantHasActiveFilters = jobFilters.activeCount > 0
   const [nsrpError, setNsrpError] = useState('')
   const [nsrpPreviewUrl, setNsrpPreviewUrl] = useState('')
   const [nsrpPreviewLoading, setNsrpPreviewLoading] = useState(false)
@@ -223,7 +385,6 @@ function JobsView({
     reviewOpenerRef.current = document.activeElement
     setReviewJob(job)
     setReviewError('')
-    setDeclineReasonDraft('')
   }
 
   const closeReviewJob = () => {
@@ -240,21 +401,17 @@ function JobsView({
     })
   }
 
-  useEffect(() => {
-    if (reviewJob) reviewDialogRef.current?.focus()
-  }, [reviewJob])
-
   const renderAdminJobRow = (job) => (
     <button
       key={job._id}
       type="button"
       onClick={() => openReviewJob(job)}
-      className="grid w-full min-w-0 gap-1 rounded-xl border border-slate-700 bg-slate-900 p-3 text-left transition hover:border-cyan-500 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto] sm:items-center sm:gap-4"
+      className="grid w-full min-w-0 gap-1 rounded-xl border border-slate-300 bg-white p-3 text-left transition hover:border-cyan-500 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto] sm:items-center sm:gap-4"
       aria-label={`View ${job.title} details`}
     >
-      <span className="truncate font-semibold text-white">{job.title}</span>
-      <span className="truncate text-sm text-slate-300">{job.company}</span>
-      <span className="text-xs text-slate-400">{job.createdAt ? new Date(job.createdAt).toLocaleDateString() : 'Date unavailable'}</span>
+      <span className="truncate font-semibold text-slate-900">{job.title}</span>
+      <span className="truncate text-sm text-slate-700">{job.company}</span>
+      <span className="text-xs text-slate-600">{job.createdAt ? new Date(job.createdAt).toLocaleDateString() : 'Date unavailable'}</span>
       <span className={`w-fit rounded-full px-2.5 py-1 text-xs font-semibold uppercase ${job.status === 'approved' ? 'bg-emerald-100 text-emerald-800' : job.status === 'declined' ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-900'}`}>{job.status || 'pending'}</span>
     </button>
   )
@@ -274,6 +431,41 @@ function JobsView({
         {initial}
       </span>
     )
+  }
+
+  // Opens the NSRP application wizard for a job (prefilled from the profile)
+  const openApplication = (job, alreadyApplied) => {
+    setSelectedJob(job)
+    setDetailJob(null)
+    if (alreadyApplied) return
+    const storageKey = `peso-nsrp-${currentUser?.id || currentUser?.email || 'applicant'}`
+    let savedAnswers = {}
+    try {
+      savedAnswers = JSON.parse(localStorage.getItem(storageKey) || '{}')
+    } catch (error) {
+      console.error('Could not load saved NSRP draft:', error)
+    }
+    const applicantProfile = currentUser?.profile || {}
+    // Prefill from structured name parts; fall back to splitting the legacy name
+    const legacyParts = (!applicantProfile.firstName && !applicantProfile.lastName) ? splitFullName(applicantProfile.name) : {}
+    setNsrpAnswers({
+      surname: applicantProfile.lastName || legacyParts.lastName || '',
+      firstName: applicantProfile.firstName || legacyParts.firstName || '',
+      middleName: applicantProfile.middleName ?? legacyParts.middleName ?? '',
+      suffix: applicantProfile.suffix || legacyParts.suffix || '',
+      email: currentUser?.email || '',
+      education: currentUser?.profile?.education || [],
+      technicalTraining: currentUser?.profile?.technicalTraining || [],
+      workExperience: currentUser?.profile?.workExperience || [],
+      skills: currentUser?.profile?.skills || [],
+      ...savedAnswers,
+    })
+    setNsrpFieldErrors({})
+    setNsrpError('')
+    setNsrpPreviewUrl('')
+    setNsrpStep(0)
+    setApplicationJob(job)
+    setApplicationTab('online')
   }
 
   const handleViewApplicantNsrp = async (jobId, applicantEmail) => {
@@ -307,78 +499,84 @@ function JobsView({
   return (
     <section className={`${activeRole === 'Admin' ? 'admin-jobs-card portal-card' : activeRole === 'Applicant' ? 'applicant-jobs-card portal-card' : 'employer-jobs-card'} rounded-2xl border ${activeRole === 'Employer' ? 'border-slate-300 bg-white text-black' : 'border-slate-800 bg-slate-900/70'} p-6`}>
       <h2 className={`text-xl font-semibold ${activeRole === 'Employer' ? 'text-black' : 'text-white'}`}>Job Offers</h2>
-      <p className={`mt-3 ${activeRole === 'Employer' ? 'text-black' : 'text-slate-400'}`}>View postings and manage approvals.</p>
+      <p className={`mt-3 ${activeRole === 'Employer' ? 'text-black' : 'text-slate-400'}`}>{activeRole === 'Applicant' ? 'Find jobs that fit you.' : 'View postings and manage approvals.'}</p>
 
       {jobLoading && <p className="mt-4 text-slate-300">Loading jobs…</p>}
 
       {activeRole === "Applicant" && (
         <div className="mt-6 space-y-6">
-          <div className="applicant-job-search rounded-2xl border border-slate-800 bg-slate-950/80 p-4">
-            <h3 className="text-lg font-semibold text-white">Search Job Offers</h3>
-            <p className="mt-1 text-sm text-slate-400">Filter approved jobs by keyword, skill, and location.</p>
-            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-              <input
-                type="text"
-                value={jobSearchTerm}
-                onChange={(event) => setJobSearchTerm(event.target.value)}
-                placeholder="Search title, company, description"
-                className="w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-              />
-              <select
-                value={jobSkillFilter}
-                onChange={(event) => setJobSkillFilter(event.target.value)}
-                className="w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-              >
-                <option value="all">All skills</option>
-                {availableSkills.map((skill) => (
-                  <option key={skill} value={skill}>{skill}</option>
-                ))}
-              </select>
-              <select
-                value={jobLocationFilter}
-                onChange={(event) => setJobLocationFilter(event.target.value)}
-                className="w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-              >
-                <option value="all">All locations</option>
-                {locationFilterOptions.map((location) => (
-                  <option key={location} value={location}>{location}</option>
-                ))}
-              </select>
-              <select
-                value={jobLocationTypeFilter}
-                onChange={(event) => setJobLocationTypeFilter(event.target.value)}
-                className="w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-              >
-                <option value="all">All location types</option>
-                <option value="On-site">On-site</option>
-                <option value="Hybrid">Hybrid</option>
-                <option value="Remote">Remote</option>
-              </select>
-              <select
-                value={jobEmploymentTypeFilter}
-                onChange={(event) => setJobEmploymentTypeFilter(event.target.value)}
-                className="w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-              >
-                <option value="all">All employment types</option>
-                <option value="Full-time">Full-time</option>
-                <option value="Part-time">Part-time</option>
-                <option value="Contract">Contract</option>
-                <option value="Internship">Internship</option>
-              </select>
+          {(!Array.isArray(applicantSkills) || applicantSkills.length === 0) && !skillsHintDismissed && (
+            <div className="flex items-center justify-between gap-3 rounded-2xl border border-cyan-300 bg-cyan-50 p-4 text-sm font-medium text-slate-800" role="status">
+              <span>Add your skills to see jobs that match you.</span>
+              <span className="flex shrink-0 items-center gap-2">
+                {onGoToProfile && (
+                  <button type="button" onClick={onGoToProfile} className="rounded-xl bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-slate-950">
+                    Add skills
+                  </button>
+                )}
+                <button type="button" onClick={dismissSkillsHint} aria-label="Dismiss skills hint" className="rounded-lg px-2 py-1 text-slate-500 hover:text-slate-900">
+                  ×
+                </button>
+              </span>
             </div>
+          )}
+          <div className="applicant-job-search rounded-2xl border border-slate-800 bg-slate-950/80 p-4">
+            <JobFiltersBar
+              filters={jobFilters.filters}
+              facets={applicantFacets}
+              resultCount={applicantJobsTotal}
+              mySkills={applicantMySkills}
+              onToggle={jobFilters.toggleValue}
+              onDatePosted={jobFilters.setDatePosted}
+              onKeyword={jobFilters.setKeyword}
+              onClearGroup={jobFilters.clearGroup}
+              onClearAll={jobFilters.clearAll}
+            />
           </div>
 
           <div className="applicant-available-jobs rounded-2xl border border-slate-800 bg-slate-950/80 p-4">
-            <h3 className="text-lg font-semibold text-white">Available Job Offers</h3>
-            {filteredApplicantJobs.length === 0 ? (
-              <p className="mt-4 text-slate-400">No approved jobs are available yet.</p>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h3 className="text-lg font-semibold text-white">
+                {applicantJobsLoading && applicantJobsTotal === 0 ? 'Loading jobs…' : `${applicantJobsTotal} job${applicantJobsTotal === 1 ? '' : 's'} found`}
+              </h3>
+              <SortControl
+                options={applicantJobSortOptions}
+                value={jobSortControlValue}
+                onChange={handleJobSortChange}
+                onReset={() => jobFilters.setSort('relevant')}
+                ariaLabel="Sort jobs"
+              />
+            </div>
+            {applicantJobsTotal === 0 && !applicantJobsLoading ? (
+              applicantHasActiveFilters ? (
+                <div className="mt-4 rounded-xl border border-slate-700 bg-slate-900 p-6 text-center">
+                  <p className="text-slate-300">No jobs match these filters.</p>
+                  <button type="button" onClick={jobFilters.clearAll} className="mt-3 rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950">
+                    Clear all filters
+                  </button>
+                </div>
+              ) : (
+                <p className="mt-4 text-slate-400">No approved jobs are available yet. Check back soon.</p>
+              )
             ) : (
-              <div className="mt-4 space-y-4">
-                {filteredApplicantJobs.map((job) => {
+              <div className={`mt-4 space-y-4${applicantJobsLoading ? ' opacity-60 transition-opacity' : ''}`} aria-busy={applicantJobsLoading}>
+                {applicantJobs.map((job) => {
                   const alreadyApplied = appliedJobIds.has(String(job._id)) || job.applicants?.some((applicant) => applicant.email === currentUser?.email)
-                  const isSelected = selectedJob && String(selectedJob._id) === String(job._id)
                   return (
-                    <div key={job._id} className="applicant-job-item overflow-hidden rounded-2xl border border-slate-700 bg-slate-900">
+                    <div
+                      key={job._id}
+                      className="applicant-job-item cursor-pointer overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 transition hover:border-cyan-500/60"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setDetailJob(job)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault()
+                          setDetailJob(job)
+                        }
+                      }}
+                      aria-label={`View ${job.title} details`}
+                    >
                       {job.employerBranding?.bannerImage && (
                         <div
                           className="employer-banner h-24 w-full bg-slate-800 bg-cover bg-center"
@@ -394,64 +592,29 @@ function JobsView({
                             <p className="text-sm text-slate-400">{job.company}</p>
                           </div>
                         </div>
-                        <span className="flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium uppercase tracking-[0.15em] text-green-400">
-                          <span className="h-1.5 w-1.5 rounded-full bg-green-400" />
-                          Active
-                        </span>
+                        {typeof job.skillMatch === 'number' && job.skillTotal > 0 && (
+                          <span className={`rounded-full px-3 py-1 text-xs font-semibold ${job.skillMatch > 0 ? 'bg-cyan-500/15 text-cyan-200' : 'bg-slate-800 text-slate-400'}`}>
+                            {job.skillMatch} of {job.skillTotal} skills match
+                          </span>
+                        )}
                       </div>
 
-                      <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-sm text-slate-300">
+                      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-300">
                         <span>📍 {job.location || 'Remote'}</span>
                         <span>💰 {job.salary || 'Not specified'}</span>
-                        {job.locationType && <span>🏢 {job.locationType}</span>}
-                        {job.employmentType && <span>🕒 {job.employmentType}</span>}
+                        {job.employmentType && <span className="rounded-full border border-slate-600 px-2.5 py-0.5 text-xs text-slate-300">{job.employmentType}</span>}
+                        {job.locationType && <span className="rounded-full border border-slate-600 px-2.5 py-0.5 text-xs text-slate-300">{job.locationType}</span>}
                       </div>
 
-                      <p className="mt-3 text-xs font-semibold uppercase tracking-[0.15em] text-slate-400">About this job</p>
-                      <p className="mt-1 text-sm text-slate-300 line-clamp-2">{job.description}</p>
-
-                      {Array.isArray(job.skills) && job.skills.length > 0 && (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {job.skills.map((skill) => (
-                            <span key={skill} className="rounded-full border border-cyan-500/40 bg-cyan-500/10 px-3 py-1 text-xs font-medium text-cyan-200">
-                              {skill}
-                            </span>
-                          ))}
-                        </div>
-                      )}
+                      <p className="mt-3 text-sm text-slate-300 line-clamp-2">{job.description}</p>
 
                       <div className="mt-4 flex items-center justify-between gap-4">
                         <p className="text-xs text-slate-500">Posted {job.createdAt ? new Date(job.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'recently'}</p>
                         <button
                           type="button"
-                          onClick={() => {
-                            setSelectedJob(job)
-                            if (!alreadyApplied) {
-                              const storageKey = `peso-nsrp-${currentUser?.id || currentUser?.email || 'applicant'}`
-                              let savedAnswers = {}
-                              try {
-                                savedAnswers = JSON.parse(localStorage.getItem(storageKey) || '{}')
-                              } catch (error) {
-                                console.error('Could not load saved NSRP draft:', error)
-                              }
-                              const profileName = currentUser?.profile?.name?.trim().split(/\s+/) || []
-                              setNsrpAnswers({
-                                surname: profileName.length > 1 ? profileName.pop() : '',
-                                firstName: profileName[0] || '',
-                                email: currentUser?.email || '',
-                                education: currentUser?.profile?.education || [],
-                                technicalTraining: currentUser?.profile?.technicalTraining || [],
-                                workExperience: currentUser?.profile?.workExperience || [],
-                                skills: currentUser?.profile?.skills || [],
-                                ...savedAnswers,
-                              })
-                              setNsrpFieldErrors({})
-                              setNsrpError('')
-                              setNsrpPreviewUrl('')
-                              setNsrpStep(0)
-                              setApplicationJob(job)
-                              setApplicationTab('online')
-                            }
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            openApplication(job, alreadyApplied)
                           }}
                           disabled={alreadyApplied}
                           className={`rounded-2xl px-4 py-2 text-sm font-semibold ${alreadyApplied ? 'bg-slate-700 text-slate-400' : 'bg-cyan-500 text-slate-950'}`}
@@ -459,33 +622,32 @@ function JobsView({
                           {alreadyApplied ? 'Already applied' : 'Apply Now →'}
                         </button>
                       </div>
-
-                      {isSelected && selectedJob && alreadyApplied && (
-                        <div className="mt-4 rounded-2xl border border-cyan-500/40 bg-slate-950/80 p-4">
-                          <h4 className="text-sm font-semibold uppercase tracking-[0.25em] text-cyan-300">Job details</h4>
-                          <p className="mt-3 text-sm text-slate-300">{selectedJob.description}</p>
-                          <p className="mt-3 text-sm text-slate-400">Company: {selectedJob.company}</p>
-                          <p className="mt-1 text-sm text-slate-400">Location: {selectedJob.location || 'Remote'}</p>
-                          <p className="mt-1 text-sm text-slate-400">Requirements: {selectedJob.requirements}</p>
-                          <p className="mt-1 text-sm text-slate-400">Skills: {Array.isArray(selectedJob.skills) ? selectedJob.skills.join(', ') : selectedJob.skills || 'None specified'}</p>
-                          <p className="mt-1 text-sm text-slate-400">Salary: {selectedJob.salary || 'Not specified'}</p>
-                        </div>
-                      )}
                       </div>
                     </div>
                   )
                 })}
               </div>
             )}
+            {applicantJobsTotal > 0 && (
+              <Pagination
+                page={availableJobsPg.page}
+                pageSize={availableJobsPg.pageSize}
+                totalItems={applicantJobsTotal}
+                onPageChange={availableJobsPg.setPage}
+                onPageSizeChange={availableJobsPg.setPageSize}
+                loading={applicantJobsLoading}
+                itemLabel="jobs"
+                ariaLabel="Available jobs pagination"
+              />
+            )}
           </div>
-
           <div className="applicant-applied-jobs rounded-2xl border border-slate-800 bg-slate-950/80 p-4">
             <h3 className="text-lg font-semibold text-white">Applied</h3>
             {(Array.isArray(appliedJobs) ? appliedJobs : []).length === 0 ? (
               <p className="mt-4 text-slate-400">You have not applied to any job offers yet.</p>
             ) : (
               <div className="mt-4 space-y-3">
-                {appliedJobs.map((job) => {
+                {appliedJobsPg.paginate(appliedJobs).map((job) => {
                   const myApplication = (job.applicants || []).find((applicant) => applicant.email === currentUser?.email)
                   return (
                     <div key={`applied-${job._id}`} className="applicant-application-item rounded-2xl border border-slate-700 bg-slate-900 p-4">
@@ -506,8 +668,64 @@ function JobsView({
                 })}
               </div>
             )}
+            {(Array.isArray(appliedJobs) ? appliedJobs : []).length > 0 && (
+              <Pagination
+                page={appliedJobsPg.page}
+                pageSize={appliedJobsPg.pageSize}
+                totalItems={(Array.isArray(appliedJobs) ? appliedJobs : []).length}
+                onPageChange={appliedJobsPg.setPage}
+                onPageSizeChange={appliedJobsPg.setPageSize}
+                itemLabel="applications"
+                ariaLabel="Applications pagination"
+              />
+            )}
           </div>
         </div>
+      )}
+
+      {detailJob && (
+        <Modal onClose={() => setDetailJob(null)} labelledBy="job-detail-title" describedBy="job-detail-description">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 id="job-detail-title" className="text-xl font-bold">{detailJob.title}</h2>
+              <p id="job-detail-description" className="mt-1 text-sm text-slate-600">{detailJob.company} · {detailJob.location || 'Remote'}</p>
+            </div>
+            <button type="button" onClick={() => setDetailJob(null)} aria-label="Close job details" className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold">Close</button>
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
+            {detailJob.employmentType && <span className="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs">{detailJob.employmentType}</span>}
+            {detailJob.locationType && <span className="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs">{detailJob.locationType}</span>}
+            <span className="text-slate-700">💰 {detailJob.salary || 'Not specified'}</span>
+            <span className="text-slate-500">Posted {detailJob.createdAt ? new Date(detailJob.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'recently'}</span>
+          </div>
+          {typeof detailJob.skillMatch === 'number' && detailJob.skillTotal > 0 && (
+            <p className="mt-3 text-sm font-medium text-cyan-700">{detailJob.skillMatch} of {detailJob.skillTotal} skills match yours</p>
+          )}
+          <p className="mt-4 whitespace-pre-wrap text-sm text-slate-700">{detailJob.description || 'No description provided.'}</p>
+          {detailJob.requirements && <p className="mt-3 whitespace-pre-wrap text-sm text-slate-700"><span className="font-semibold">Requirements: </span>{detailJob.requirements}</p>}
+          {Array.isArray(detailJob.skills) && detailJob.skills.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {detailJob.skills.map((skill) => (
+                <span key={skill} className="rounded-full border border-cyan-500/40 bg-cyan-50 px-3 py-1 text-xs font-medium text-cyan-800">{skill}</span>
+              ))}
+            </div>
+          )}
+          <div className="mt-5 flex justify-end">
+            {(() => {
+              const alreadyApplied = appliedJobIds.has(String(detailJob._id)) || detailJob.applicants?.some((applicant) => applicant.email === currentUser?.email)
+              return (
+                <button
+                  type="button"
+                  onClick={() => openApplication(detailJob, alreadyApplied)}
+                  disabled={alreadyApplied}
+                  className={`rounded-2xl px-5 py-2 text-sm font-semibold ${alreadyApplied ? 'bg-slate-300 text-slate-500' : 'bg-cyan-500 text-slate-950'}`}
+                >
+                  {alreadyApplied ? 'Already applied' : 'Apply Now →'}
+                </button>
+              )
+            })()}
+          </div>
+        </Modal>
       )}
 
       {applicationJob && (
@@ -732,7 +950,7 @@ function JobsView({
                             {(nsrpAnswers.workExperience || []).length === 0 && <p className="text-xs text-slate-500">No entries added.</p>}
                           </section>
                           <section className="space-y-3">
-                            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-600">Skills</h3>
+                            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-600">Skills <span className="font-normal normal-case text-slate-400">(optional)</span></h3>
                             <div className="flex gap-2">
                               <input
                                 type="text"
@@ -988,17 +1206,26 @@ function JobsView({
                   <option value="declined">Declined</option>
                 </select>
               </div>
+              <div className="mt-3">
+                <SortControl
+                  options={ADMIN_JOB_SORT_OPTIONS}
+                  value={jobSort}
+                  onChange={jobSort.setSortOption}
+                  onReset={jobSort.resetSort}
+                  ariaLabel="Sort job postings"
+                />
+              </div>
             </div>
           )}
 
           {(activeRole !== 'Admin' || showPendingAdminSection) && (
             <>
               <h3 className={`text-lg font-semibold ${activeRole === 'Employer' ? 'text-black' : 'text-white'}`}>{activeRole === 'Employer' ? 'Pending Job Requests' : 'Pending Job Postings'}</h3>
-              {filteredPendingJobs.length === 0 ? (
+              {pendingTotal === 0 ? (
                 <p className={`mt-3 ${activeRole === 'Employer' ? 'text-black' : 'text-slate-400'}`}>{activeRole === 'Employer' ? 'You have no pending job requests.' : 'No pending job postings matched your search.'}</p>
               ) : (
-                <div className="mt-4 space-y-4">
-                  {filteredPendingJobs.map((job) => activeRole === 'Admin' ? renderAdminJobRow(job) : (
+                <div className={`mt-4 space-y-4${isAdminJobs && adminJobsServerLoading ? ' opacity-60 transition-opacity' : ''}`} aria-busy={isAdminJobs && adminJobsServerLoading}>
+                  {pendingList.map((job) => activeRole === 'Admin' ? renderAdminJobRow(job) : (
                     <div
                       key={job._id}
                       className="cursor-pointer overflow-hidden rounded-2xl border border-slate-700 bg-slate-900"
@@ -1023,6 +1250,18 @@ function JobsView({
                   ))}
                 </div>
               )}
+              {pendingTotal > 0 && (
+                <Pagination
+                  page={pendingJobsPg.page}
+                  pageSize={pendingJobsPg.pageSize}
+                  totalItems={pendingTotal}
+                  onPageChange={pendingJobsPg.setPage}
+                  onPageSizeChange={pendingJobsPg.setPageSize}
+                  loading={isAdminJobs && adminJobsServerLoading}
+                  itemLabel="job postings"
+                  ariaLabel="Pending job postings pagination"
+                />
+              )}
             </>
           )}
 
@@ -1031,11 +1270,11 @@ function JobsView({
           {activeRole === 'Admin' && showApprovedAdminSection && (
             <>
               <h3 className="mt-6 text-lg font-semibold text-white">Current Approved Job Offers</h3>
-              {filteredApprovedJobs.length === 0 ? (
+              {approvedTotal === 0 ? (
                 <p className="mt-3 text-slate-400">No approved job offers matched your search.</p>
               ) : (
-                <div className="mt-4 space-y-4">
-                  {filteredApprovedJobs.map((job) => {
+                <div className={`mt-4 space-y-4${adminJobsServerLoading ? ' opacity-60 transition-opacity' : ''}`} aria-busy={adminJobsServerLoading}>
+                  {approvedList.map((job) => {
                     const isExpanded = selectedApprovedJob && String(selectedApprovedJob._id) === String(job._id)
                     return (
                       <div key={job._id} className="space-y-2">
@@ -1050,28 +1289,22 @@ function JobsView({
                         </button>
 
                         {isExpanded && (
-                          <div className="border-t border-slate-700 bg-[#f5f7fb] p-4">
-                            <div className="flex items-start justify-between gap-4">
-                              <h4 className="text-base font-semibold text-slate-900">Job Offer Details</h4>
-                              <button
-                                type="button"
-                                onClick={() => setSelectedApprovedJob(null)}
-                                className="rounded-full border border-slate-300 bg-[#1f2d3d] px-3 py-1 text-sm text-white"
-                              >
-                                Close
-                              </button>
+                          <div className="mt-3 border-t border-slate-200 pt-4" role="region" aria-labelledby="admin-approved-job-title">
+                            <div>
+                              <h3 id="admin-approved-job-title" className="text-lg font-semibold text-slate-900">Job Offer Details</h3>
+                              <p className="mt-1 text-sm text-slate-900">{job.title} · {job.company}</p>
                             </div>
 
-                            <div className="mt-3 space-y-1 text-sm text-slate-700">
+                            <div className="mt-4 grid gap-x-6 gap-y-2 text-sm text-slate-700 sm:grid-cols-2">
                               <p>Company: {job.company}</p>
                               <p>Location: {job.location || 'Remote'}</p>
                               <p>Salary: {job.salary || 'Not specified'}</p>
                               <p>Posted by: {job.createdBy || 'N/A'}</p>
-                              <p>Requirements: {job.requirements || 'N/A'}</p>
-                              <p className="pt-2">Description: {job.description || 'N/A'}</p>
+                              <p className="sm:col-span-2">Requirements: {job.requirements || 'N/A'}</p>
+                              <p className="whitespace-pre-wrap sm:col-span-2">Description: {job.description || 'N/A'}</p>
                             </div>
 
-                            <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
+                            <div className="mt-5 border-t border-slate-200 pt-4">
                               {(() => {
                                 const jobKey = String(job._id)
                                 const applicantsWithId = (job.applicants || []).map((applicant) => {
@@ -1102,7 +1335,7 @@ function JobsView({
                                 return (
                                   <>
                                     <div className="flex flex-wrap items-center justify-between gap-3">
-                                      <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-700">Applicants</p>
+                                      <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-700">Applicants</h3>
                                       {selectable.length > 0 && (
                                         <button
                                           type="button"
@@ -1139,7 +1372,7 @@ function JobsView({
                                             </tr>
                                           </thead>
                                           <tbody>
-                                            {applicantsWithId.map(({ applicant, applicantAccount, applicantId }) => {
+                                            {referralApplicantsPg.paginate(applicantsWithId).map(({ applicant, applicantAccount, applicantId }) => {
                                               const isReferred = referredIds.includes(applicantId)
                                               const isChecked = selectedIds.includes(applicantId)
                                               return (
@@ -1150,14 +1383,14 @@ function JobsView({
                                                   <td className="px-3 py-3">
                                                     <input
                                                       type="checkbox"
-                                                      aria-label={`Select ${applicantAccount?.profile?.name || applicant.email}`}
+                                                      aria-label={`Select ${formatFullName(applicantAccount?.profile) || applicant.email}`}
                                                       checked={isChecked}
                                                       disabled={!applicantId || isReferred}
                                                       onChange={(event) => toggleSelect(applicantId, event.target.checked)}
                                                     />
                                                   </td>
                                                   <td className={`px-3 py-3 font-medium ${isReferred ? 'text-slate-600' : 'text-slate-900'}`}>
-                                                    {applicantAccount?.profile?.name || applicant.email}
+                                                    {formatFullName(applicantAccount?.profile) || applicant.email}
                                                   </td>
                                                   <td className="px-3 py-3">{applicant.email}</td>
                                                   <td className="px-3 py-3 text-xs text-slate-500">
@@ -1191,6 +1424,15 @@ function JobsView({
                                             })}
                                           </tbody>
                                         </table>
+                                        <Pagination
+                                          page={referralApplicantsPg.page}
+                                          pageSize={referralApplicantsPg.pageSize}
+                                          totalItems={applicantsWithId.length}
+                                          onPageChange={referralApplicantsPg.setPage}
+                                          onPageSizeChange={referralApplicantsPg.setPageSize}
+                                          itemLabel="applicants"
+                                          ariaLabel="Job applicants pagination"
+                                        />
                                       </div>
                                     )}
                                   </>
@@ -1204,6 +1446,18 @@ function JobsView({
                   })}
                 </div>
               )}
+              {approvedTotal > 0 && (
+                <Pagination
+                  page={approvedJobsPg.page}
+                  pageSize={approvedJobsPg.pageSize}
+                  totalItems={approvedTotal}
+                  onPageChange={approvedJobsPg.setPage}
+                  onPageSizeChange={approvedJobsPg.setPageSize}
+                  loading={adminJobsServerLoading}
+                  itemLabel="job offers"
+                  ariaLabel="Approved job offers pagination"
+                />
+              )}
             </>
           )}
 
@@ -1212,11 +1466,11 @@ function JobsView({
           {showDeclinedAdminSection && (
             <>
               <h3 className="mt-6 text-lg font-semibold text-white">Declined Job Offers</h3>
-              {filteredDeclinedJobs.length === 0 ? (
+              {declinedTotal === 0 ? (
                 <p className="mt-3 text-slate-400">No declined job offers matched your search.</p>
               ) : (
-                <div className="mt-4 space-y-4">
-                  {filteredDeclinedJobs.map((job) => activeRole === 'Admin' ? renderAdminJobRow(job) : (
+                <div className={`mt-4 space-y-4${adminJobsServerLoading ? ' opacity-60 transition-opacity' : ''}`} aria-busy={adminJobsServerLoading}>
+                  {declinedList.map((job) => activeRole === 'Admin' ? renderAdminJobRow(job) : (
                     <div key={job._id} className="overflow-hidden rounded-2xl border border-slate-700 bg-slate-900">
                       {job.employerBranding?.bannerImage && (
                         <div
@@ -1244,53 +1498,28 @@ function JobsView({
                   ))}
                 </div>
               )}
+              {declinedTotal > 0 && (
+                <Pagination
+                  page={declinedJobsPg.page}
+                  pageSize={declinedJobsPg.pageSize}
+                  totalItems={declinedTotal}
+                  onPageChange={declinedJobsPg.setPage}
+                  onPageSizeChange={declinedJobsPg.setPageSize}
+                  loading={adminJobsServerLoading}
+                  itemLabel="job offers"
+                  ariaLabel="Declined job offers pagination"
+                />
+              )}
             </>
           )}
         </div>
       )}
       {activeRole === 'Admin' && reviewJob && (
-        <div
-          className="fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/75 p-0 sm:items-center sm:p-4"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) closeReviewJob()
-          }}
-        >
-          <div
-            ref={reviewDialogRef}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="admin-job-review-title"
-            aria-describedby="admin-job-review-description"
-            tabIndex={-1}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') {
-                event.preventDefault()
-                closeReviewJob()
-                return
-              }
-              if (event.key !== 'Tab') return
-              const focusable = reviewDialogRef.current?.querySelectorAll('button:not([disabled]), textarea:not([disabled]), input:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])') || []
-              if (!focusable.length) {
-                event.preventDefault()
-                reviewDialogRef.current?.focus()
-                return
-              }
-              const first = focusable[0]
-              const last = focusable[focusable.length - 1]
-              if (event.shiftKey && (document.activeElement === first || !reviewDialogRef.current.contains(document.activeElement))) {
-                event.preventDefault()
-                last.focus()
-              } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === reviewDialogRef.current)) {
-                event.preventDefault()
-                first.focus()
-              }
-            }}
-            className="max-h-[92dvh] w-full max-w-3xl overflow-y-auto rounded-t-2xl border border-slate-600 bg-white p-5 text-slate-900 shadow-2xl sm:rounded-2xl sm:p-6"
-          >
+        <Modal onClose={closeReviewJob} labelledBy="admin-job-review-title" describedBy="admin-job-review-description">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 id="admin-job-review-title" className="text-xl font-bold">{reviewJob.title}</h2>
-                <p id="admin-job-review-description" className="mt-1 text-sm text-slate-600">{reviewJob.company} · Submitted {reviewJob.createdAt ? new Date(reviewJob.createdAt).toLocaleString() : 'date unavailable'}</p>
+                <p id="admin-job-review-description" className="mt-1 text-sm text-slate-900">{reviewJob.company} · Submitted {reviewJob.createdAt ? new Date(reviewJob.createdAt).toLocaleString() : 'date unavailable'}</p>
               </div>
               <button type="button" onClick={closeReviewJob} disabled={reviewSubmitting} aria-label="Close job details" className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold disabled:opacity-50">Close</button>
             </div>
@@ -1351,23 +1580,6 @@ function JobsView({
                 </ol>
               </div>
             </div>
-            {reviewJob.status === 'pending' && (
-              <div className="mt-5 border-t border-slate-200 pt-4">
-                <label htmlFor="admin-job-decline-reason" className="block text-sm font-semibold">Decline reason (required to decline)</label>
-                <textarea
-                  id="admin-job-decline-reason"
-                  rows="3"
-                  maxLength={500}
-                  value={declineReasonDraft}
-                  onChange={(event) => setDeclineReasonDraft(event.target.value)}
-                  disabled={reviewSubmitting}
-                  aria-invalid={Boolean(reviewError)}
-                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                  placeholder="Explain what the employer needs to correct. This will be sent to them."
-                />
-                <p className="mt-1 text-right text-xs text-slate-500">{declineReasonDraft.length}/500</p>
-              </div>
-            )}
             {reviewError && <p role="alert" className="mt-3 rounded-lg border border-rose-300 bg-rose-50 p-3 text-sm text-rose-800">{reviewError}</p>}
             <div className="mt-5 flex flex-wrap justify-end gap-2">
               <button type="button" onClick={closeReviewJob} disabled={reviewSubmitting} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold disabled:opacity-50">Close</button>
@@ -1375,48 +1587,64 @@ function JobsView({
                 <>
                   <button
                     type="button"
-                    disabled={reviewSubmitting || !declineReasonDraft.trim()}
-                    onClick={async () => {
-                      setReviewSubmitting(true)
-                      setReviewError('')
-                      const result = await handleReviewJob(reviewJob._id, 'declined', { reason: declineReasonDraft, confirm: false, silent: true })
-                      setReviewSubmitting(false)
-                      if (result?.error) setReviewError(result.error)
-                      else if (result?.ok) {
-                        setReviewJob(null)
-                        restoreReviewFocus()
-                      }
-                    }}
+                    disabled={reviewSubmitting}
+                    onClick={() => { setReviewError(''); setJobReviewConfirm('declined') }}
                     className="rounded-xl bg-rose-700 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {reviewSubmitting ? 'Saving…' : 'Decline'}
+                    Decline
                   </button>
                   <button
                     type="button"
                     disabled={reviewSubmitting}
-                    onClick={async () => {
-                      setReviewSubmitting(true)
-                      setReviewError('')
-                      const result = await handleReviewJob(reviewJob._id, 'approved', { confirm: false, silent: true })
-                      setReviewSubmitting(false)
-                      if (result?.error) setReviewError(result.error)
-                      else if (result?.ok) {
-                        setReviewJob(null)
-                        restoreReviewFocus()
-                      }
-                    }}
+                    onClick={() => { setReviewError(''); setJobReviewConfirm('approved') }}
                     className="rounded-xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {reviewSubmitting ? 'Saving…' : 'Approve'}
+                    Approve
                   </button>
                 </>
               )}
             </div>
-          </div>
-        </div>
+            {jobReviewConfirm && (
+              <ConfirmDialog
+                title={jobReviewConfirm === 'approved' ? `Approve "${reviewJob.title}"?` : `Decline "${reviewJob.title}"?`}
+                note={jobReviewConfirm === 'approved'
+                  ? 'The posting will become visible to applicants and the employer will be notified.'
+                  : 'The employer will be notified with your reason.'}
+                confirmLabel={jobReviewConfirm === 'approved' ? 'Yes, approve' : 'Confirm reject'}
+                confirmTone={jobReviewConfirm === 'approved' ? 'primary' : 'danger'}
+                busyLabel={jobReviewConfirm === 'approved' ? 'Approving...' : 'Declining...'}
+                busy={reviewSubmitting}
+                requireReason={jobReviewConfirm === 'declined'}
+                quickReasons={jobReviewConfirm === 'declined' ? ['Incomplete details', 'Policy violation', 'Duplicate posting', 'Misleading information'] : []}
+                error={reviewError}
+                onCancel={() => setJobReviewConfirm(null)}
+                onConfirm={async (reason) => {
+                  if (reviewInFlightRef.current) return
+                  reviewInFlightRef.current = true
+                  setReviewSubmitting(true)
+                  setReviewError('')
+                  const result = jobReviewConfirm === 'approved'
+                    ? await handleAdminReviewJob(reviewJob._id, 'approved', { confirm: false, silent: true })
+                    : await handleAdminReviewJob(reviewJob._id, 'declined', { reason, confirm: false, silent: true })
+                  reviewInFlightRef.current = false
+                  setReviewSubmitting(false)
+                  if (result?.error) {
+                    setReviewError(result.error)
+                    return
+                  }
+                  if (result?.ok) {
+                    setJobReviewConfirm(null)
+                    setReviewJob(null)
+                    restoreReviewFocus()
+                  }
+                }}
+              />
+            )}
+        </Modal>
       )}
     </section>
   )
 }
 
 export default JobsView
+

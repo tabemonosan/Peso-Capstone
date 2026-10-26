@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useState } from "react"
 import { API_URL } from "../config"
+import Pagination from "./Pagination"
+import { usePagination } from "../hooks/usePagination"
 
 export default function AdminJobTitlesPage({ token, onChanged }) {
   const [categories, setCategories] = useState([])
+  const titlesPagination = usePagination({ syncUrl: false })
   const [name, setName] = useState("")
   const [category, setCategory] = useState("")
   const [busy, setBusy] = useState(false)
@@ -98,7 +101,7 @@ export default function AdminJobTitlesPage({ token, onChanged }) {
       </form>
 
       <div className="mt-6 space-y-5">
-        {categories.map((group) => (
+        {titlesPagination.paginate(categories).map((group) => (
           <section key={group.category} aria-label={group.category}>
             <h3 className="font-semibold">{group.category}</h3>
             <ul className="mt-2 divide-y divide-slate-200 rounded-xl border border-slate-200">
@@ -115,6 +118,17 @@ export default function AdminJobTitlesPage({ token, onChanged }) {
         ))}
         {categories.length === 0 && !error && <p className="text-sm text-slate-600">No job titles have been added yet.</p>}
       </div>
+      {categories.length > 0 && (
+        <Pagination
+          page={titlesPagination.page}
+          pageSize={titlesPagination.pageSize}
+          totalItems={categories.length}
+          onPageChange={titlesPagination.setPage}
+          onPageSizeChange={titlesPagination.setPageSize}
+          itemLabel="categories"
+          ariaLabel="Job titles pagination"
+        />
+      )}
     </section>
   )
 }
