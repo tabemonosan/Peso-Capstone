@@ -23,6 +23,14 @@ const verificationDocVersionSchema = new Schema({
   size: Number,
   uploadedAt: Date,
   data: { type: Buffer, select: false }, // private: only streamed via signed, expiring URLs
+  back: {
+    originalName: String,
+    storedName: String,
+    mimetype: String,
+    size: Number,
+    uploadedAt: Date,
+    data: { type: Buffer, select: false },
+  },
   version: { type: Number, required: true },
   status: { type: String, enum: ['pending', 'approved', 'rejected', 'superseded'], default: 'pending' },
   reviewReason: String,
@@ -92,6 +100,7 @@ const applicantSchema = new Schema({
     education: { type: [nsrpEducationSchema], default: [] },
     technicalTraining: { type: [nsrpTrainingSchema], default: [] },
     workExperience: { type: [nsrpWorkExperienceSchema], default: [] },
+    nsrp: { type: Schema.Types.Mixed, default: undefined },
     traits: String,
     summary: String,
     profileImage: String,
@@ -109,6 +118,15 @@ const applicantSchema = new Schema({
     mimetype: String,
     size: Number,
     uploadedAt: Date,
+    data: { type: Buffer, select: false },
+  },
+  // Applicant's drawn/uploaded NSRP signature. Private: `data` is never selected
+  // by default and list queries must not include it.
+  nsrpSignature: {
+    mimetype: String,
+    size: Number,
+    uploadedAt: Date,
+    certifiedAt: Date,
     data: { type: Buffer, select: false },
   },
 }, { collection: 'applicants', timestamps: true })
@@ -216,6 +234,22 @@ const hireReportSchema = new Schema({
 hireReportSchema.index({ reportedAt: -1, _id: 1 })
 hireReportSchema.index({ employerId: 1, reportedAt: -1 })
 
+// Binary content of applicant verification documents lives here, NOT inside the
+// Applicant document: a full set of 5 MB files would exceed MongoDB's 16 MB
+// BSON document limit. The Applicant document keeps only version metadata;
+// `data` is select:false so queries must opt in explicitly.
+const documentFileSchema = new Schema({
+  applicant: { type: Schema.Types.ObjectId, ref: 'Applicant', required: true, index: true },
+  slot: { type: String, enum: ['nsrpForm', 'birthCertificate', 'validId1', 'validId2', 'resume'], required: true },
+  version: { type: Number, required: true },
+  side: { type: String, enum: ['front', 'back'], default: 'front' },
+  mimetype: String,
+  size: Number,
+  uploadedAt: Date,
+  data: { type: Buffer, select: false },
+}, { collection: 'document_files', timestamps: true })
+documentFileSchema.index({ applicant: 1, slot: 1, version: 1, side: 1 }, { unique: true })
+
 const ratingSchema = new Schema({
   fromUserId: { type: Schema.Types.ObjectId, required: true },
   fromRole: { type: String, enum: ['employer', 'applicant'], required: true },
@@ -235,6 +269,7 @@ const Notification = mongoose.models.Notification || mongoose.model('Notificatio
 const Referral = mongoose.models.Referral || mongoose.model('Referral', referralSchema)
 const HireReport = mongoose.models.HireReport || mongoose.model('HireReport', hireReportSchema)
 const Rating = mongoose.models.Rating || mongoose.model('Rating', ratingSchema)
+const DocumentFile = mongoose.models.DocumentFile || mongoose.model('DocumentFile', documentFileSchema)
 
 async function findUserByEmail(email) {
   if (!email) return null
@@ -289,6 +324,7 @@ export {
   Referral,
   HireReport,
   Rating,
+  DocumentFile,
   findUserByEmail,
   emailTakenAcrossRoles,
   createUserInRole,

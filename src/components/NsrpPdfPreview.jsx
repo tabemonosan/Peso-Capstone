@@ -21,7 +21,7 @@ function useIsSmallScreen() {
  * Desktop: native PDF viewer in an <iframe> (blob URL).
  * Mobile (where iframes often can't render PDFs): pdf.js via react-pdf.
  */
-export default function NsrpPdfPreview({ blob, blobUrl, loading, error, onRetry, downloadName = "NSRP-Form-1.pdf" }) {
+export default function NsrpPdfPreview({ blob, blobUrl, loading, error, onRetry, downloadName = "NSRP-Form-1.pdf", viewerClassName = "min-h-[70vh]" }) {
   const isSmallScreen = useIsSmallScreen()
   const [pageCount, setPageCount] = useState(0)
   const [renderError, setRenderError] = useState("")
@@ -33,7 +33,7 @@ export default function NsrpPdfPreview({ blob, blobUrl, loading, error, onRetry,
 
   if (loading) {
     return (
-      <div className="flex min-h-[70vh] w-full flex-col items-center justify-center gap-3 rounded-xl border border-slate-300 bg-slate-50" role="status">
+      <div className={`flex ${viewerClassName} w-full flex-col items-center justify-center gap-3 rounded-xl border border-slate-300 bg-slate-50`} role="status">
         <span className="h-8 w-8 animate-spin rounded-full border-4 border-slate-300 border-t-cyan-600" aria-hidden="true" />
         <p className="text-sm font-medium text-slate-600">Generating your NSRP preview…</p>
       </div>
@@ -42,7 +42,7 @@ export default function NsrpPdfPreview({ blob, blobUrl, loading, error, onRetry,
 
   if (error) {
     return (
-      <div className="flex min-h-[70vh] w-full flex-col items-center justify-center gap-3 rounded-xl border border-rose-300 bg-rose-50 p-6 text-center" role="alert">
+      <div className={`flex ${viewerClassName} w-full flex-col items-center justify-center gap-3 rounded-xl border border-rose-300 bg-rose-50 p-6 text-center`} role="alert">
         <p className="text-sm font-medium text-rose-700">{error}</p>
         <button
           type="button"
@@ -57,7 +57,7 @@ export default function NsrpPdfPreview({ blob, blobUrl, loading, error, onRetry,
 
   if (!blobUrl) {
     return (
-      <p className="flex min-h-[70vh] w-full items-center justify-center rounded-xl border border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-600">
+      <p className={`flex ${viewerClassName} w-full items-center justify-center rounded-xl border border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-600`}>
         Preview not generated. Return to the form and generate the PDF again.
       </p>
     )
@@ -96,7 +96,7 @@ export default function NsrpPdfPreview({ blob, blobUrl, loading, error, onRetry,
         <iframe
           src={blobUrl}
           title="Generated NSRP PDF preview"
-          className="min-h-[70vh] w-full rounded-xl border border-slate-300 bg-white"
+          className={`${viewerClassName} w-full rounded-xl border border-slate-300 bg-white`}
         />
       )}
 

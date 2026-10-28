@@ -1,5 +1,6 @@
 import { Employer, HireReport, Notification, Referral } from '../models/collections.js'
 import { notify } from './notify.js'
+import { redactString } from '../utils/redact.js'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 export const REMINDER_AFTER_DAYS = 7
@@ -40,7 +41,7 @@ export async function sendHireReportReminders({ now = new Date(), notifyFn = not
 }
 
 export function startHireReportReminders(intervalMs = DAY_MS) {
-  const run = () => sendHireReportReminders().catch((err) => console.error('Hire report reminders failed:', err?.message || err))
+  const run = () => sendHireReportReminders().catch((err) => console.error('Hire report reminders failed:', redactString(err?.message || String(err))))
   setTimeout(run, 30 * 1000).unref?.()
   return setInterval(run, intervalMs).unref?.()
 }

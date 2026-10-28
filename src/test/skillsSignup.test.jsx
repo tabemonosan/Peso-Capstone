@@ -3,31 +3,40 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App, { sortJobsByMatch } from '../App'
 
 const mockFetch = vi.fn()
-
 const pdfFile = (name) => new File(['%PDF-1.4 test'], name, { type: 'application/pdf' })
 
 beforeEach(() => {
   mockFetch.mockReset()
   vi.stubGlobal('fetch', mockFetch)
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    value: vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
+  })
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+    clearRect: vi.fn(),
+    beginPath: vi.fn(),
+    moveTo: vi.fn(),
+    lineTo: vi.fn(),
+    stroke: vi.fn(),
+  })
   localStorage.clear()
-  // jsdom lacks URL.createObjectURL, used for document previews
   if (!URL.createObjectURL) URL.createObjectURL = vi.fn(() => 'blob:mock')
   if (!URL.revokeObjectURL) URL.revokeObjectURL = vi.fn()
   mockFetch.mockImplementation((url) => {
+    if (url === 'http://localhost:4000/api/nsrp/validate-signup') {
+      return Promise.resolve({ ok: true, json: async () => ({ ok: true, fieldErrors: {} }) })
+    }
+    if (url === 'http://localhost:4000/api/nsrp/preview-signup') {
+      return Promise.resolve({
+        ok: true,
+        headers: { get: () => '[]' },
+        blob: async () => new Blob(['%PDF-1.4 preview'], { type: 'application/pdf' }),
+      })
+    }
     if (url === 'http://localhost:4000/api/signup') {
       return Promise.resolve({
         ok: true,
-        json: async () => ({
-          token: 'token-new-applicant',
-          user: {
-            email: 'noskills@peso.gov',
-            role: 'Applicant',
-            emailVerified: false,
-            verificationStatus: 'under_review',
-            registration: { done: 0, total: 8, complete: false, checklist: [] },
-            profile: { firstName: 'No', lastName: 'Skills', name: 'No Skills', skills: [] },
-          },
-        }),
+        json: async () => ({ token: 'token-new-applicant', user: { email: 'new@peso.gov', role: 'Applicant' } }),
       })
     }
     return Promise.resolve({ ok: true, json: async () => [] })
@@ -39,53 +48,177 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('Applicant sign-up without skills', () => {
-  it('does not render a Skills input on the sign-up form', () => {
-    render(<App />)
-    fireEvent.click(screen.getByRole('button', { name: /Create an account \(Applicant\)/i }))
-    expect(screen.queryByLabelText(/^Skills$/i)).not.toBeInTheDocument()
-    expect(screen.getByLabelText(/First name/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/Last name/i)).toBeInTheDocument()
+function openSignup() {
+  render(<App />)
+  fireEvent.click(screen.getByRole('button', { name: /Create an account \(Applicant\)/i }))
+}
+
+// Walks the wizard from the account step to the Documents step with valid input.
+async function advanceToDocumentsStep() {
+  openSignup()
+  fireEvent.change(screen.getByLabelText(/^Email$/i), { target: { value: 'new@peso.gov' } })
+  fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'Password123!' } })
+  fireEvent.change(screen.getByLabelText(/Confirm password/i), { target: { value: 'Password123!' } })
+  fireEvent.click(screen.getByRole('checkbox', { name: /collection and processing/i }))
+  fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
+
+  await screen.findByLabelText(/^Surname/i)
+  fireEvent.change(screen.getByLabelText(/^Surname/i), { target: { value: 'Cruz' } })
+  fireEvent.change(screen.getByLabelText(/^First name/i), { target: { value: 'Juan' } })
+  fireEvent.change(screen.getByLabelText(/^Date of birth/i), { target: { value: '1990-01-01' } })
+  fireEvent.change(screen.getByLabelText(/^Place of birth/i), { target: { value: 'Legazpi City' } })
+  fireEvent.change(screen.getByLabelText(/^Sex/i), { target: { value: 'Male' } })
+  fireEvent.change(screen.getByLabelText(/^Civil status/i), { target: { value: 'Single' } })
+  fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
+
+  await screen.findByLabelText(/House no\. \/ street/i)
+  fireEvent.change(screen.getByLabelText(/House no\. \/ street/i), { target: { value: '1 Main Street' } })
+  fireEvent.change(screen.getByLabelText(/^Barangay/i), { target: { value: 'Centro' } })
+  fireEvent.change(screen.getByLabelText(/Municipality \/ city/i), { target: { value: 'Legazpi' } })
+  fireEvent.change(screen.getByLabelText(/^Province/i), { target: { value: 'Albay' } })
+  fireEvent.change(screen.getByLabelText(/Cellphone number/i), { target: { value: '09171234567' } })
+  fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
+  await screen.findByText('Education & training')
+  fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
+  await screen.findByText('Work & skills')
+  fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
+
+  await screen.findByLabelText(/^Employment status/i)
+  fireEvent.change(screen.getByLabelText(/^Employment status/i), { target: { value: 'Unemployed' } })
+  fireEvent.change(screen.getByLabelText(/Actively looking for work/i), { target: { value: 'Yes' } })
+  fireEvent.change(screen.getByLabelText(/Willing to work immediately/i), { target: { value: 'Yes' } })
+  fireEvent.change(screen.getByLabelText(/4Ps beneficiary/i), { target: { value: 'No' } })
+  fireEvent.change(screen.getByLabelText(/Preferred occupation 1/i), { target: { value: 'Clerk' } })
+  fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
+
+  await screen.findByText('Certification')
+  fireEvent.click(screen.getByRole('checkbox', { name: /I certify that this information/i }))
+  fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
+
+  await screen.findByText('Documents')
+  fireEvent.change(screen.getByLabelText(/Resume \(PDF/i), { target: { files: [pdfFile('resume.pdf')] } })
+  const docsFieldset = screen.getByText('Verification documents').closest('fieldset')
+  const files = docsFieldset.querySelectorAll('input[type="file"]')
+  fireEvent.change(files[0], { target: { files: [pdfFile('birth.pdf')] } })
+  fireEvent.change(files[1], { target: { files: [pdfFile('id-front.pdf')] } })
+  fireEvent.change(within(docsFieldset).getAllByRole('combobox')[0], { target: { value: 'SSS' } })
+  await screen.findByText('birth.pdf')
+  await screen.findByText('id-front.pdf')
+}
+
+describe('Applicant sign-up wizard', () => {
+  it('starts with account credentials and privacy consent, without duplicate profile fields', () => {
+    openSignup()
+    expect(screen.getByLabelText(/^Email$/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/^Password$/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/Confirm password/i)).toBeInTheDocument()
+    expect(screen.getByText(/collection and processing/i)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/^Location$/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/^About me$/i)).not.toBeInTheDocument()
+    expect(screen.getByRole('navigation', { name: /Sign-up progress/i })).toHaveTextContent('9. Preview & submit')
   })
 
-  it('submits successfully without any skills and sends no skills field', async () => {
-    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {})
-    render(<App />)
-    fireEvent.click(screen.getByRole('button', { name: /Create an account \(Applicant\)/i }))
-
-    fireEvent.change(screen.getByLabelText(/First name/i), { target: { value: 'No' } })
-    fireEvent.change(screen.getByLabelText(/Last name/i), { target: { value: 'Skills' } })
-    fireEvent.change(screen.getByLabelText(/Location/i), { target: { value: 'Legazpi City' } })
-    fireEvent.change(screen.getByLabelText(/About me/i), { target: { value: 'Hardworking applicant.' } })
-    fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: 'noskills@peso.gov' } })
+  it('does not persist the password or confirmation while saving browser progress', async () => {
+    openSignup()
+    fireEvent.change(screen.getByLabelText(/^Email$/i), { target: { value: 'draft@peso.gov' } })
     fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'Password123!' } })
     fireEvent.change(screen.getByLabelText(/Confirm password/i), { target: { value: 'Password123!' } })
+    await waitFor(() => expect(localStorage.getItem('peso-applicant-signup-draft')).toContain('draft@peso.gov'))
+    const savedDraft = localStorage.getItem('peso-applicant-signup-draft')
+    expect(savedDraft).not.toContain('Password123!')
+    expect(savedDraft).not.toContain('password')
+  })
 
-    // Resume + required verification documents (hidden file inputs inside the signup form)
-    fireEvent.change(document.getElementById('signup-resume'), { target: { files: [pdfFile('resume.pdf')] } })
+  it('sends NSRP answers and all signup documents in one multipart request', async () => {
+    openSignup()
+    fireEvent.change(screen.getByLabelText(/^Email$/i), { target: { value: 'new@peso.gov' } })
+    fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'Password123!' } })
+    fireEvent.change(screen.getByLabelText(/Confirm password/i), { target: { value: 'Password123!' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: /collection and processing/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
+
+    await screen.findByLabelText(/^Surname/i)
+    fireEvent.change(screen.getByLabelText(/^Surname/i), { target: { value: 'Cruz' } })
+    fireEvent.change(screen.getByLabelText(/^First name/i), { target: { value: 'Juan' } })
+    fireEvent.change(screen.getByLabelText(/^Date of birth/i), { target: { value: '1990-01-01' } })
+    fireEvent.change(screen.getByLabelText(/^Place of birth/i), { target: { value: 'Legazpi City' } })
+    fireEvent.change(screen.getByLabelText(/^Sex/i), { target: { value: 'Male' } })
+    fireEvent.change(screen.getByLabelText(/^Civil status/i), { target: { value: 'Single' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
+
+    await screen.findByLabelText(/House no\. \/ street/i)
+    fireEvent.change(screen.getByLabelText(/House no\. \/ street/i), { target: { value: '1 Main Street' } })
+    fireEvent.change(screen.getByLabelText(/^Barangay/i), { target: { value: 'Centro' } })
+    fireEvent.change(screen.getByLabelText(/Municipality \/ city/i), { target: { value: 'Legazpi' } })
+    fireEvent.change(screen.getByLabelText(/^Province/i), { target: { value: 'Albay' } })
+    fireEvent.change(screen.getByLabelText(/Cellphone number/i), { target: { value: '09171234567' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
+    await screen.findByText('Education & training')
+    fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
+    await screen.findByText('Work & skills')
+    fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
+
+    await screen.findByLabelText(/^Employment status/i)
+    fireEvent.change(screen.getByLabelText(/^Employment status/i), { target: { value: 'Unemployed' } })
+    fireEvent.change(screen.getByLabelText(/Actively looking for work/i), { target: { value: 'Yes' } })
+    fireEvent.change(screen.getByLabelText(/Willing to work immediately/i), { target: { value: 'Yes' } })
+    fireEvent.change(screen.getByLabelText(/4Ps beneficiary/i), { target: { value: 'No' } })
+    fireEvent.change(screen.getByLabelText(/Preferred occupation 1/i), { target: { value: 'Clerk' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
+
+    await screen.findByText('Certification')
+    fireEvent.click(screen.getByRole('checkbox', { name: /I certify that this information/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
+
+    await screen.findByText('Documents')
+    fireEvent.change(screen.getByLabelText(/Resume \(PDF/i), { target: { files: [pdfFile('resume.pdf')] } })
     const docsFieldset = screen.getByText('Verification documents').closest('fieldset')
-    const hiddenFileInputs = docsFieldset.querySelectorAll('input[type="file"]')
-    // Order: NSRP form, birth certificate, ID1 front, ID1 back, ID2 front, ID2 back
-    fireEvent.change(hiddenFileInputs[0], { target: { files: [pdfFile('nsrp.pdf')] } })
-    fireEvent.change(hiddenFileInputs[1], { target: { files: [pdfFile('birth.pdf')] } })
-    fireEvent.change(hiddenFileInputs[2], { target: { files: [pdfFile('id1-front.pdf')] } })
+    const files = docsFieldset.querySelectorAll('input[type="file"]')
+    fireEvent.change(files[0], { target: { files: [pdfFile('birth.pdf')] } })
+    fireEvent.change(files[1], { target: { files: [pdfFile('id-front.pdf')] } })
     fireEvent.change(within(docsFieldset).getAllByRole('combobox')[0], { target: { value: 'SSS' } })
-    fireEvent.click(screen.getByRole('checkbox', { name: /I agree to the collection/i }))
+    await screen.findByText('birth.pdf')
+    await screen.findByText('id-front.pdf')
+    const savedDraft = localStorage.getItem('peso-applicant-signup-draft')
+    expect(savedDraft).not.toContain('resume.pdf')
+    expect(savedDraft).not.toContain('birth.pdf')
+    expect(savedDraft).not.toContain('id-front.pdf')
+    fireEvent.click(screen.getByRole('button', { name: /Generate preview/i }))
 
-    const submitButton = screen.getByRole('button', { name: /Create account/i })
-    await waitFor(() => expect(submitButton).not.toBeDisabled())
-    fireEvent.submit(submitButton.closest('form'))
+    await screen.findByTitle('Generated NSRP PDF preview')
+    fireEvent.click(screen.getByRole('button', { name: /Create account/i }))
+    await waitFor(() => expect(mockFetch.mock.calls.filter(([url]) => url === 'http://localhost:4000/api/signup')).toHaveLength(1))
+    const request = mockFetch.mock.calls.find(([url]) => url === 'http://localhost:4000/api/signup')[1]
+    expect(request.body).toBeInstanceOf(FormData)
+    expect(request.body.has('nsrpAnswers')).toBe(true)
+    expect(JSON.parse(request.body.get('nsrpAnswers')).surname).toBe('Cruz')
+    expect(request.body.has('birthCertificate')).toBe(true)
+    expect(request.body.has('validId1Front')).toBe(true)
+    expect(request.body.has('resume')).toBe(true)
+    expect(request.body.has('nsrpForm')).toBe(false)
+    await screen.findByText('Check your email')
+  })
 
-    await waitFor(() => {
-      const signupCall = mockFetch.mock.calls.find(([url]) => url === 'http://localhost:4000/api/signup')
-      expect(signupCall).toBeTruthy()
-      const payload = signupCall[1].body
-      expect(payload).toBeInstanceOf(FormData)
-      expect(payload.has('skills')).toBe(false)
-      expect(payload.get('firstName')).toBe('No')
-      expect(payload.get('lastName')).toBe('Skills')
+  it('shows the server rate-limit message when the preview is throttled', async () => {
+    mockFetch.mockImplementation((url) => {
+      if (url === 'http://localhost:4000/api/nsrp/validate-signup') {
+        return Promise.resolve({ ok: true, json: async () => ({ ok: true, fieldErrors: {} }) })
+      }
+      if (url === 'http://localhost:4000/api/nsrp/preview-signup') {
+        return Promise.resolve({
+          ok: false,
+          status: 429,
+          json: async () => ({ code: 'PREVIEW_RATE_LIMITED', error: 'Too many previews. Please wait a few minutes.' }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: async () => [] })
     })
-    await waitFor(() => expect(alertSpy).toHaveBeenCalledWith(expect.stringMatching(/Account created/i)))
+
+    await advanceToDocumentsStep()
+    fireEvent.click(screen.getByRole('button', { name: /Generate preview/i }))
+    await screen.findByText('Too many previews. Please wait a few minutes.')
+    // No account is created while the preview is throttled
+    expect(mockFetch.mock.calls.some(([url]) => url === 'http://localhost:4000/api/signup')).toBe(false)
   })
 })
 
@@ -98,18 +231,13 @@ describe('sortJobsByMatch with empty or missing skills', () => {
   it('returns all jobs without crashing when skills are undefined', () => {
     expect(sortJobsByMatch(jobs, undefined)).toHaveLength(2)
   })
-
   it('returns all jobs with no score applied when skills are empty (newest first)', () => {
-    const sorted = sortJobsByMatch(jobs, [])
-    expect(sorted.map((job) => job._id)).toEqual(['b', 'a'])
+    expect(sortJobsByMatch(jobs, []).map((job) => job._id)).toEqual(['b', 'a'])
   })
-
   it('handles jobs with missing skills arrays', () => {
     expect(sortJobsByMatch([{ _id: 'c', title: 'No skills job', createdAt: '2026-03-01' }], undefined)).toHaveLength(1)
   })
-
   it('still sorts by match count when skills exist', () => {
-    const sorted = sortJobsByMatch(jobs, ['Data entry'])
-    expect(sorted[0]._id).toBe('b')
+    expect(sortJobsByMatch(jobs, ['Data entry'])[0]._id).toBe('b')
   })
 })

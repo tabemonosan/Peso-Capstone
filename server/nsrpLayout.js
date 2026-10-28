@@ -78,6 +78,21 @@ export const NSRP_TEXT_FIELDS = {
   // VIII. Skills "OTHERS:" write-on line (page 1). Underline at y=518.5pt
   // spanning 433.5-537.5pt; baseline 2pt above the line, shrink to its width.
   skillOthersText: { page: 1, x: 436, top: 516.5, maxWidth: 99, size: 7, caps: true },
+  // CERTIFICATION/AUTHORIZATION (page 1): "Date" line spans 380-498.5pt with the
+  // line at y=605pt; baseline sits just above it like the other write-on lines.
+  certificationDate: { page: 1, x: 383, top: 600, maxWidth: 112, size: 9, date: true },
+}
+
+// CERTIFICATION/AUTHORIZATION (page 1): "Signature of Applicant" line spans
+// 47.5-200pt at y=605pt (measured from the template render at scale 2).
+// The signature image sits just above the line, aspect ratio kept.
+export const NSRP_SIGNATURE = {
+  page: 1,
+  x: 47.5,        // left edge of the signature line
+  lineTop: 605,   // distance from the top of the page to the signature line
+  maxWidth: 152,  // full line width (200 - 47.5)
+  maxHeight: 28,  // stay clear of the certification paragraph above
+  lineGap: 2,     // gap between the image bottom and the line
 }
 
 // Checkboxes as measured boxes (x, y = top-left of the box, w/h in pt).

@@ -2,8 +2,14 @@
 import { API_URL } from "../config"
 import { NSRP_SKILL_LABELS } from "../../shared/nsrpSkills.js"
 import { NSRP_ROW_LIMITS } from "../../shared/nsrpTableLimits.js"
+import {
+  NSRP_SECTION_WIZARD_STEP, getNsrpWarningSection, summarizeNsrpWarnings,
+} from "../../shared/nsrpFieldLabels.js"
 import Modal from "./Modal"
+import OverlayModal from "./OverlayModal"
 import NsrpPdfPreview from "./NsrpPdfPreview"
+import NsrpWarningPanel from "./NsrpWarningPanel"
+import NsrpSignatureInput from "./NsrpSignatureInput"
 import Pagination from "./Pagination"
 import SortControl from "./SortControl"
 import ConfirmDialog from "./ConfirmDialog"
@@ -44,6 +50,7 @@ function NsrpField({ label, fieldKey, type = 'text', placeholder, values, onChan
       {label}
       <input
         type={type}
+        data-nsrp-field={fieldKey}
         value={values[fieldKey] || ''}
         onChange={(event) => onChange(fieldKey, event.target.value)}
         placeholder={placeholder}
@@ -61,6 +68,7 @@ function NsrpSelect({ label, fieldKey, options, values, onChange, error }) {
     <label className="block text-sm font-medium text-black">
       {label}
       <select
+        data-nsrp-field={fieldKey}
         value={values[fieldKey] || ''}
         onChange={(event) => onChange(fieldKey, event.target.value)}
         aria-invalid={Boolean(error)}
@@ -139,6 +147,7 @@ function JobsView({
   handleEditPendingJob,
   applicantSkills = [],
   onGoToProfile,
+  onEditNsrp,
 }) {
   const [selectedApprovedJob, setSelectedApprovedJob] = useState(null)
   const [reviewJob, setReviewJob] = useState(null)
@@ -153,8 +162,11 @@ function JobsView({
   const [applicationTab, setApplicationTab] = useState('online')
   const [nsrpStep, setNsrpStep] = useState(0)
   const [nsrpAnswers, setNsrpAnswers] = useState({})
+  const savedNsrpPreviewStarted = useRef(false)
+  const generateNsrpPreviewRef = useRef(null)
   const [nsrpFieldErrors, setNsrpFieldErrors] = useState({})
   const [nsrpSkillInput, setNsrpSkillInput] = useState('')
+  const hasSavedNsrpFile = Boolean(currentUser?.verificationDocuments?.find((doc) => doc.docKey === 'nsrpForm')?.latest)
   const skillsHintKey = `peso-skills-hint-dismissed-${currentUser?.id || currentUser?.email || 'applicant'}`
   const [skillsHintDismissed, setSkillsHintDismissed] = useState(() => {
     try { return typeof window !== 'undefined' && localStorage.getItem(skillsHintKey) === '1' } catch { return false }
@@ -360,14 +372,43 @@ function JobsView({
     }))
     clearNsrpPreview()
   }
+  // Jump from a print-fit warning to the wizard step containing that field and focus it
+  const fixNsrpWarning = (path) => {
+    const step = NSRP_SECTION_WIZARD_STEP[getNsrpWarningSection(path)] ?? 0
+    setNsrpStep(step)
+    const focusKey = String(path).split('/')[0] // "fromDate/toDate" focuses the fromDate input
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const target = document.querySelector(`[data-nsrp-field="${focusKey}"]`)
+        if (target) {
+          target.scrollIntoView({ block: 'center', behavior: 'smooth' })
+          target.focus()
+        }
+      })
+    })
+  }
+  // "Fix all cut-off entries" walks through the red warnings one at a time
+  const [nsrpFixQueue, setNsrpFixQueue] = useState([])
+  const [nsrpReviewOpen, setNsrpReviewOpen] = useState(false)
+  const nsrpFixRemaining = nsrpFixQueue.filter((field) =>
+    nsrpLayoutWarnings.some((warning) => warning.field === field && warning.reason === 'truncated'))
+  const fixAllCutOffWarnings = () => {
+    const cutOffFields = nsrpLayoutWarnings
+      .filter((warning) => warning.reason === 'truncated')
+      .map((warning) => warning.field)
+    const queue = nsrpFixRemaining.length ? nsrpFixRemaining : cutOffFields
+    setNsrpFixQueue(queue)
+    if (queue.length) fixNsrpWarning(queue[0])
+  }
   const nsrpStorageKey = `peso-nsrp-${currentUser?.id || currentUser?.email || 'applicant'}`
-  const nsrpSteps = ['Personal information', 'Address & contact', 'Education & training', 'Work & skills', 'Employment & preferences', 'Preview']
+  const nsrpSteps = ['Personal information', 'Address & contact', 'Education & training', 'Work & skills', 'Employment & preferences', 'Certification', 'Preview']
   const nsrpStepFields = [
     ['surname', 'firstName', 'middleName', 'suffix', 'dob', 'placeOfBirth', 'sex', 'religion', 'civilStatus', 'height'],
     ['addressStreet', 'addressBarangay', 'addressCity', 'addressProvince', 'tin', 'gsisSss', 'pagibig', 'philhealth', 'email', 'cellphone', 'landline', 'disability', 'disabilityOthers'],
     ['education', 'technicalTraining', 'eligibility'],
     ['workExperience', 'skills', 'othersText', 'languages'],
     ['employmentStatus', 'employmentTypeDetail', 'activelyLooking', 'lookingDuration', 'willingImmediately', 'willingWhen', 'fourPs', 'fourPsId', 'occupation1', 'occupation2', 'occupation3', 'occupation4', 'localPref1', 'localPref2', 'localPref3', 'overseasPref1', 'overseasPref2', 'overseasPref3', 'expectedSalary', 'passportNo', 'passportExpiry'],
+    ['certified'],
   ]
   useEffect(() => {
     if (!applicationJob) return undefined
@@ -378,7 +419,9 @@ function JobsView({
   useEffect(() => {
     if (!applicationJob || Object.keys(nsrpAnswers).length === 0) return
     try {
-      localStorage.setItem(nsrpStorageKey, JSON.stringify(nsrpAnswers))
+      const savedAnswers = { ...nsrpAnswers }
+      delete savedAnswers.signatureDataUrl
+      localStorage.setItem(nsrpStorageKey, JSON.stringify(savedAnswers))
     } catch (error) {
       console.error('Could not save NSRP draft:', error)
     }
@@ -413,6 +456,11 @@ function JobsView({
     if (Object.keys(phoneErrors).length) {
       showNsrpFieldErrors(phoneErrors)
       setNsrpError('Check the highlighted phone fields.')
+      return false
+    }
+    if (!nsrpAnswers.certified) {
+      showNsrpFieldErrors({ certified: 'Please certify that your information is true and correct before continuing.' })
+      setNsrpError('Read and accept the certification on the Certification step.')
       return false
     }
     setNsrpPreviewLoading(true)
@@ -451,7 +499,7 @@ function JobsView({
         return URL.createObjectURL(blob)
       })
       setNsrpPreviewBlob(blob)
-      setNsrpStep(5)
+      setNsrpStep(6)
       return true
     } catch (error) {
       console.error(error)
@@ -461,6 +509,12 @@ function JobsView({
       setNsrpPreviewLoading(false)
     }
   }
+  generateNsrpPreviewRef.current = generateNsrpPreview
+  useEffect(() => {
+    if (!applicationJob || !currentUser?.profile?.nsrp || savedNsrpPreviewStarted.current) return
+    savedNsrpPreviewStarted.current = true
+    generateNsrpPreviewRef.current()
+  }, [applicationJob, currentUser?.profile?.nsrp])
   const [selectedApplicantsByJob, setSelectedApplicantsByJob] = useState({})
   const openReviewJob = (job) => {
     reviewOpenerRef.current = document.activeElement
@@ -523,13 +577,20 @@ function JobsView({
     let savedAnswers = {}
     try {
       savedAnswers = JSON.parse(localStorage.getItem(storageKey) || '{}')
+      if (savedAnswers.signatureDataUrl) {
+        delete savedAnswers.signatureDataUrl
+        localStorage.setItem(storageKey, JSON.stringify(savedAnswers))
+      }
     } catch (error) {
       console.error('Could not load saved NSRP draft:', error)
     }
     const applicantProfile = currentUser?.profile || {}
     // Prefill from structured name parts; fall back to splitting the legacy name
     const legacyParts = (!applicantProfile.firstName && !applicantProfile.lastName) ? splitFullName(applicantProfile.name) : {}
-    setNsrpAnswers({
+    setNsrpAnswers(applicantProfile.nsrp ? {
+      ...applicantProfile.nsrp,
+      email: currentUser?.email || '',
+    } : {
       surname: applicantProfile.lastName || legacyParts.lastName || '',
       firstName: applicantProfile.firstName || legacyParts.firstName || '',
       middleName: applicantProfile.middleName ?? legacyParts.middleName ?? '',
@@ -545,6 +606,7 @@ function JobsView({
     setNsrpError('')
     clearNsrpPreview()
     setNsrpStep(0)
+    savedNsrpPreviewStarted.current = false
     setApplicationJob(job)
     setApplicationTab('online')
   }
@@ -810,47 +872,139 @@ function JobsView({
       )}
 
       {applicationJob && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="job-application-title"
-          onClick={() => !applicationSubmitting && setApplicationJob(null)}
-        >
-          <div
-            className="w-full max-w-3xl rounded-2xl border border-slate-300 bg-white p-6 text-black shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 id="job-application-title" className="text-lg font-semibold text-black">Apply for {applicationJob.title}</h2>
-                <p className="mt-2 text-sm text-slate-600">Fill in the NSRP details, preview the generated PDF, then confirm your application.</p>
+        <OverlayModal
+          onClose={() => !applicationSubmitting && setApplicationJob(null)}
+          labelledBy="job-application-title"
+          closeDisabled={applicationSubmitting}
+          header={(
+            <>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 id="job-application-title" className="text-lg font-semibold text-black">Apply for {applicationJob.title}</h2>
+                  <p className="mt-1 text-sm text-slate-600">{currentUser?.profile?.nsrp ? 'Review your saved NSRP PDF, then apply.' : 'Fill out your NSRP online, preview the generated PDF, then apply.'}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setApplicationJob(null)}
+                  disabled={applicationSubmitting}
+                  className="rounded-full border border-slate-300 bg-white px-3 py-1 text-sm font-semibold text-black"
+                >
+                  Close
+                </button>
               </div>
+
+              {!currentUser?.profile?.nsrp && <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {nsrpSteps.map((step, index) => (
+                  <button
+                    key={step}
+                    type="button"
+                    onClick={() => (index === 6 && !nsrpPreviewUrl ? generateNsrpPreview() : setNsrpStep(index))}
+                    disabled={nsrpPreviewLoading}
+                    className={`rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
+                      nsrpStep === index ? 'bg-cyan-500 text-slate-950' : 'bg-slate-100 text-slate-600 hover:text-black'
+                    }`}
+                  >
+                    {index + 1}. {step}
+                  </button>
+                ))}
+              </div>}
+            </>
+          )}
+          footer={applicationTab === 'online' && !currentUser?.profile?.nsrp && hasSavedNsrpFile ? (
+            <div className="flex flex-wrap justify-between gap-2">
+              <button type="button" onClick={() => { setApplicationJob(null); onEditNsrp?.() }} className="rounded-xl border border-cyan-700 px-4 py-2 text-sm font-semibold text-cyan-800">
+                Fill out your NSRP online
+              </button>
               <button
                 type="button"
-                onClick={() => setApplicationJob(null)}
                 disabled={applicationSubmitting}
-                className="rounded-full border border-slate-300 bg-white px-3 py-1 text-sm font-semibold text-black"
+                onClick={async () => {
+                  setApplicationSubmitting(true)
+                  const result = await handleApplyJob(applicationJob._id)
+                  setApplicationSubmitting(false)
+                  if (result === true || result?.ok) setApplicationJob(null)
+                  else if (result?.error) setNsrpError(result.error)
+                }}
+                className="rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
               >
-                Close
+                {applicationSubmitting ? 'Applying…' : 'Apply with existing NSRP'}
               </button>
             </div>
-
-            <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {nsrpSteps.map((step, index) => (
-                <button
-                  key={step}
-                  type="button"
-                  onClick={() => index < 5 && setNsrpStep(index)}
-                  disabled={index === 5 && !nsrpPreviewUrl}
-                  className={`rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
-                    nsrpStep === index ? 'bg-cyan-500 text-slate-950' : 'bg-slate-100 text-slate-600 hover:text-black'
-                  }`}
-                >
-                  {index + 1}. {step}
-                </button>
-              ))}
+          ) : applicationTab === 'online' && currentUser?.profile?.nsrp ? (
+            <div className="flex flex-wrap justify-between gap-2">
+              <button type="button" onClick={() => setApplicationJob(null)} disabled={applicationSubmitting} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Back</button>
+              <button type="button" onClick={() => { setApplicationJob(null); onEditNsrp?.() }} className="rounded-xl border border-cyan-700 px-4 py-2 text-sm font-semibold text-cyan-800">Edit my NSRP</button>
+              <button
+                type="button"
+                disabled={!nsrpPreviewUrl || applicationSubmitting || nsrpPreviewLoading}
+                onClick={async () => {
+                  setApplicationSubmitting(true)
+                  const result = await handleApplyJob(applicationJob._id)
+                  setApplicationSubmitting(false)
+                  if (result === true || result?.ok) setApplicationJob(null)
+                  else if (result?.fieldErrors) {
+                    showNsrpFieldErrors(result.fieldErrors)
+                    setNsrpError(result.error || 'Check the highlighted NSRP fields.')
+                  } else if (result?.error) setNsrpError(result.error)
+                }}
+                className="rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {applicationSubmitting ? 'Applying…' : 'Looks good, apply'}
+              </button>
             </div>
+          ) : applicationTab === 'online' ? (
+            <div className="flex flex-wrap justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => nsrpStep > 0 ? setNsrpStep(nsrpStep - 1) : setApplicationJob(null)}
+                disabled={applicationSubmitting || nsrpPreviewLoading}
+                className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50"
+              >
+                {nsrpStep === 0 ? 'Cancel' : 'Back'}
+              </button>
+              {nsrpStep < 5 && (
+                <button type="button" onClick={() => setNsrpStep(nsrpStep + 1)} className="rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950">
+                  Next
+                </button>
+              )}
+              {nsrpStep === 5 && (
+                <button type="button" onClick={generateNsrpPreview} disabled={nsrpPreviewLoading} className="rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-50">
+                  {nsrpPreviewLoading ? 'Generating preview…' : 'Preview NSRP PDF'}
+                </button>
+              )}
+              {nsrpStep === 6 && (
+                <div className="flex gap-2">
+                  <button type="button" onClick={generateNsrpPreview} disabled={nsrpPreviewLoading || applicationSubmitting} className="rounded-xl border border-cyan-600 px-4 py-2 text-sm font-semibold text-cyan-800 disabled:opacity-50">
+                    {nsrpPreviewLoading ? 'Updating…' : 'Regenerate preview'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!nsrpPreviewUrl || applicationSubmitting || nsrpPreviewLoading}
+                    onClick={async () => {
+                      setApplicationSubmitting(true)
+                      const result = await handleApplyJob(applicationJob._id, nsrpAnswers)
+                      setApplicationSubmitting(false)
+                      if (result?.fieldErrors) {
+                        showNsrpFieldErrors(result.fieldErrors)
+                        setNsrpError(result.error || 'Check the highlighted NSRP fields.')
+                      } else if (result === true || result?.ok) {
+                        try { localStorage.removeItem(nsrpStorageKey) } catch (error) { console.error('Could not clear NSRP draft:', error) }
+                        setApplicationJob(null)
+                        setNsrpAnswers({})
+                        clearNsrpPreview()
+                      } else if (result?.error) {
+                        setNsrpError(result.error)
+                      }
+                    }}
+                    className="rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {applicationSubmitting ? 'Submitting…' : 'Confirm and submit'}
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : null}
+        >
 
             {applicationTab === 'form' && (
               <div className="mt-4">
@@ -894,7 +1048,7 @@ function JobsView({
             )}
 
             {applicationTab === 'online' && (
-              <div className={`mt-4 space-y-4 ${nsrpStep === 5 ? '' : 'max-h-[55vh] overflow-y-auto pr-1'}`}>
+              <div className="space-y-4">
                 <p className="rounded-xl border border-cyan-200 bg-cyan-50 p-3 text-sm text-cyan-900">
                   Your answers are saved on this device as you move between steps. The server validates every field before generating the preview.
                 </p>
@@ -974,6 +1128,7 @@ function JobsView({
                                             {label}
                                             <input
                                               type="text"
+                                              data-nsrp-field={fieldKey}
                                               value={value}
                                               maxLength={limit}
                                               onChange={(event) => update(field, event.target.value)}
@@ -1042,6 +1197,7 @@ function JobsView({
                                           ) : (
                                             <input
                                               type={type === 'date' ? 'date' : 'text'}
+                                              data-nsrp-field={fieldKey}
                                               value={value}
                                               maxLength={limit}
                                               onChange={(event) => updateNsrpRow(section, rowIndex, field, event.target.value)}
@@ -1166,6 +1322,7 @@ function JobsView({
                                         {label}
                                         {type === 'select' ? (
                                           <select
+                                            data-nsrp-field={fieldKey}
                                             value={row[field] || ''}
                                             onChange={(event) => updateNsrpRow('workExperience', rowIndex, field, event.target.value)}
                                             className={`mt-1 w-full rounded-xl border bg-white px-3 py-2 text-sm text-black ${nsrpFieldErrors[fieldKey] ? 'border-rose-500' : 'border-slate-300'}`}
@@ -1176,6 +1333,7 @@ function JobsView({
                                         ) : (
                                           <input
                                             type={type === 'date' ? 'date' : 'text'}
+                                            data-nsrp-field={fieldKey}
                                             value={row[field] || ''}
                                             onChange={(event) => updateNsrpRow('workExperience', rowIndex, field, event.target.value)}
                                             aria-invalid={Boolean(nsrpFieldErrors[fieldKey])}
@@ -1222,6 +1380,46 @@ function JobsView({
                             )}
                             {nsrpFieldErrors.skills && <p role="alert" className="text-xs text-rose-600">{nsrpFieldErrors.skills}</p>}
                           </section>
+                        </div>
+                      )}
+                      {nsrpStep === 5 && (
+                        <div className="space-y-4">
+                          <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Certification / Authorization</p>
+                          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+                            <p>
+                              This is to certify that all data/information that I have provided in this form are true to the best of my knowledge.
+                              This is also to authorize the DOLE to include my profile in the PESO Employment Information System, which is a subsystem of the PhilJobNet.
+                              It is understood that my name shall be made available to employers who have access to the Registry. I am also aware
+                              that DOLE is not obliged to seek employment on my behalf.
+                            </p>
+                          </div>
+                          <label className="flex items-start gap-2 text-sm font-medium text-black">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(nsrpAnswers.certified)}
+                              onChange={(event) => setNsrp('certified', event.target.checked)}
+                              aria-invalid={Boolean(nsrpFieldErrors.certified)}
+                              aria-describedby={nsrpFieldErrors.certified ? 'nsrp-error-certified' : undefined}
+                              className="mt-1 h-4 w-4 accent-cyan-600"
+                            />
+                            <span>
+                              I certify that the information I provided is true and correct, and I authorize DOLE to include my profile in the PESO Employment Information System.
+                            </span>
+                          </label>
+                          {nsrpFieldErrors.certified && <p id="nsrp-error-certified" role="alert" className="text-xs text-rose-600">{nsrpFieldErrors.certified}</p>}
+                          <div>
+                            <p className="mb-1 text-xs font-medium text-slate-700">Signature of Applicant (optional — you can also sign the printed copy by hand)</p>
+                            <NsrpSignatureInput
+                              value={nsrpAnswers.signatureDataUrl || null}
+                              onChange={(dataUrl) => setNsrp('signatureDataUrl', dataUrl || '')}
+                              error={nsrpFieldErrors.signatureDataUrl}
+                            />
+                          </div>
+                          <div className="text-sm">
+                            <span className="font-medium text-slate-700">Date: </span>
+                            <span className="font-semibold text-black">{new Date().toLocaleDateString('en-US')}</span>
+                            <span className="ml-2 text-xs text-slate-500">(filled automatically when you confirm; not editable)</span>
+                          </div>
                         </div>
                       )}
                       {nsrpStep === 4 && (
@@ -1314,94 +1512,61 @@ function JobsView({
               </div>
             )}
 
-            {applicationTab === 'online' && nsrpStep === 5 && (
-              <div className="mt-4">
-                <p className="mb-3 text-sm text-slate-600">Review the generated PDF below. Use Edit to return to a step. Any change clears this preview and requires a new one before submission.</p>
+            {applicationTab === 'online' && nsrpStep === 6 && (
+              <div className="mt-1">
+                <p className="mb-3 text-sm text-slate-600">{currentUser?.profile?.nsrp ? 'Review your saved NSRP PDF before applying.' : 'Review the generated PDF below. Use Fix or Edit to return to a step. Any change clears this preview and requires a new one before submission.'}</p>
+                {!nsrpAnswers.signatureDataUrl && (
+                  <p className="mb-3 rounded-xl border border-slate-300 bg-slate-50 p-3 text-xs text-slate-700" role="note">
+                    No signature added. You can sign the printed copy by hand.
+                  </p>
+                )}
                 {nsrpLayoutWarnings.length > 0 && (
-                  <div role="status" className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
-                    <p className="font-semibold">Some fields need a print-fit review:</p>
-                    <ul className="mt-1 list-inside list-disc">
-                      {nsrpLayoutWarnings.map(({ field, reason }) => (
-                        <li key={`${field}-${reason}`}>
-                          {field}: {reason === 'truncated' ? 'shortened on the printed form' : 'printed at the minimum font size'}
-                        </li>
-                      ))}
-                    </ul>
-                    <p className="mt-1">Edit these entries to improve readability before confirming.</p>
-                  </div>
-                )}
-                <div className="mb-3 flex flex-wrap gap-2">
-                  {nsrpSteps.slice(0, 5).map((step, index) => (
-                    <button key={step} type="button" onClick={() => setNsrpStep(index)} className="rounded-xl border border-slate-300 px-3 py-1.5 text-sm font-semibold text-cyan-800">
-                      Edit {step.toLowerCase()}
-                    </button>
-                  ))}
-                </div>
-                <NsrpPdfPreview
-                  blob={nsrpPreviewBlob}
-                  blobUrl={nsrpPreviewUrl}
-                  loading={nsrpPreviewLoading}
-                  error={!nsrpPreviewLoading && nsrpError && !nsrpPreviewUrl ? nsrpError : ''}
-                  onRetry={generateNsrpPreview}
-                  downloadName={`NSRP-${(nsrpAnswers.surname || 'form').replace(/\s+/g, '_')}.pdf`}
-                />
-              </div>
-            )}
-
-            {nsrpError && !(applicationTab === 'online' && nsrpStep === 5 && !nsrpPreviewUrl) && <p role="alert" className="mt-4 rounded-xl border border-rose-300 bg-rose-50 p-3 text-sm text-rose-700">{nsrpError}</p>}
-
-            {applicationTab === 'online' && (
-              <div className="mt-5 flex flex-wrap justify-between gap-2 border-t border-slate-200 pt-4">
-                <button
-                  type="button"
-                  onClick={() => nsrpStep > 0 ? setNsrpStep(nsrpStep - 1) : setApplicationJob(null)}
-                  disabled={applicationSubmitting || nsrpPreviewLoading}
-                  className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50"
-                >
-                  {nsrpStep === 0 ? 'Cancel' : 'Back'}
-                </button>
-                {nsrpStep < 4 && (
-                  <button type="button" onClick={() => setNsrpStep(nsrpStep + 1)} className="rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950">
-                    Next
-                  </button>
-                )}
-                {nsrpStep === 4 && (
-                  <button type="button" onClick={generateNsrpPreview} disabled={nsrpPreviewLoading} className="rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-50">
-                    {nsrpPreviewLoading ? 'Generating preview…' : 'Preview NSRP PDF'}
-                  </button>
-                )}
-                {nsrpStep === 5 && (
-                  <div className="flex gap-2">
-                    <button type="button" onClick={generateNsrpPreview} disabled={nsrpPreviewLoading || applicationSubmitting} className="rounded-xl border border-cyan-600 px-4 py-2 text-sm font-semibold text-cyan-800 disabled:opacity-50">
-                      {nsrpPreviewLoading ? 'Updating…' : 'Regenerate preview'}
-                    </button>
+                  <div className="mb-3 flex items-center justify-between gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-950 min-[900px]:hidden">
+                    <span className="font-medium">{summarizeNsrpWarnings(nsrpLayoutWarnings)}</span>
                     <button
                       type="button"
-                      disabled={!nsrpPreviewUrl || applicationSubmitting || nsrpPreviewLoading}
-                      onClick={async () => {
-                        setApplicationSubmitting(true)
-                        const result = await handleApplyJob(applicationJob._id, nsrpAnswers)
-                        setApplicationSubmitting(false)
-                        if (result?.fieldErrors) {
-                          showNsrpFieldErrors(result.fieldErrors)
-                          setNsrpError(result.error || 'Check the highlighted NSRP fields.')
-                        } else if (result === true || result?.ok) {
-                          try { localStorage.removeItem(nsrpStorageKey) } catch (error) { console.error('Could not clear NSRP draft:', error) }
-                          setApplicationJob(null)
-                          setNsrpAnswers({})
-                          clearNsrpPreview()
-                        } else if (result?.error) {
-                          setNsrpError(result.error)
-                        }
-                      }}
-                      className="rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={() => setNsrpReviewOpen((current) => !current)}
+                      aria-expanded={nsrpReviewOpen}
+                      className="shrink-0 rounded-lg border border-amber-400 bg-white px-2.5 py-1 text-[11px] font-semibold text-amber-900"
                     >
-                      {applicationSubmitting ? 'Submitting…' : 'Confirm and submit'}
+                      {nsrpReviewOpen ? 'Hide' : 'Review'}
                     </button>
                   </div>
                 )}
+                <div className="min-[900px]:grid min-[900px]:grid-cols-[minmax(0,1fr)_330px] min-[900px]:items-start min-[900px]:gap-4">
+                  <div>
+                    <NsrpPdfPreview
+                      blob={nsrpPreviewBlob}
+                      blobUrl={nsrpPreviewUrl}
+                      loading={nsrpPreviewLoading}
+                      error={!nsrpPreviewLoading && nsrpError && !nsrpPreviewUrl ? nsrpError : ''}
+                      onRetry={generateNsrpPreview}
+                      downloadName={`NSRP-${(nsrpAnswers.surname || 'form').replace(/\s+/g, '_')}.pdf`}
+                      viewerClassName="h-[65vh] min-h-[420px]"
+                    />
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {!currentUser?.profile?.nsrp && nsrpSteps.slice(0, 6).map((step, index) => (
+                        <button key={step} type="button" onClick={() => setNsrpStep(index)} className="rounded-xl border border-slate-300 px-3 py-1.5 text-sm font-semibold text-cyan-800">
+                          Edit {step.toLowerCase()}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {nsrpLayoutWarnings.length > 0 && (
+                    <div className={`mt-3 min-[900px]:mt-0 min-[900px]:max-h-[65vh] min-[900px]:overflow-y-auto ${nsrpReviewOpen ? '' : 'hidden min-[900px]:block'}`}>
+                      <NsrpWarningPanel
+                        warnings={nsrpLayoutWarnings}
+                        onFix={fixNsrpWarning}
+                        onFixAllCutOff={fixAllCutOffWarnings}
+                        cutOffRemaining={nsrpFixQueue.length ? nsrpFixRemaining.length : 0}
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
             )}
+
+            {nsrpError && !(applicationTab === 'online' && nsrpStep === 6 && !nsrpPreviewUrl) && <p role="alert" className="mt-4 rounded-xl border border-rose-300 bg-rose-50 p-3 text-sm text-rose-700">{nsrpError}</p>}
 
             {applicationTab === 'upload' && (
               <div className="mt-4">
@@ -1435,8 +1600,7 @@ function JobsView({
                 </div>
               </div>
             )}
-          </div>
-        </div>
+        </OverlayModal>
       )}
 
       {(activeRole === "Admin" || activeRole === "Employer") && (

@@ -114,9 +114,8 @@ function validateFile(file) {
 }
 
 // Required: nsrpForm, birthCertificate, id1.type + id1.front. Optional: id1.back, id2 (type+front required if used).
-export function validateVerificationDocs(docs, consent) {
-  if (!consent) return false
-  if (!docs.nsrpForm || !docs.birthCertificate) return false
+export function validateVerificationDocs(docs) {
+  if (!docs.birthCertificate) return false
   if (!docs.id1.type || !docs.id1.front) return false
   const id2Used = docs.id2.type || docs.id2.front || docs.id2.back
   if (id2Used && (!docs.id2.type || !docs.id2.front)) return false
@@ -125,13 +124,12 @@ export function validateVerificationDocs(docs, consent) {
 }
 
 export const emptyVerificationDocs = {
-  nsrpForm: null,
   birthCertificate: null,
   id1: { type: "", front: null, back: null },
   id2: { type: "", front: null, back: null },
 }
 
-export default function VerificationDocumentsForm({ docs, setDocs, consent, setConsent, disabled }) {
+export default function VerificationDocumentsForm({ docs, setDocs, disabled, fieldErrors = {} }) {
   const [errors, setErrors] = useState({})
 
   const setFile = async (path, file) => {
@@ -165,22 +163,13 @@ export default function VerificationDocumentsForm({ docs, setDocs, consent, setC
     <fieldset className="space-y-4 rounded-[10px] border border-[#c4d4e5] bg-[#f8fbfe] p-4">
       <legend className="px-2 text-sm font-semibold text-[#071c35]">Verification documents</legend>
       <p className={helperCls}>{helperText}</p>
-
-      <FileField
-        label="NSRP Registration Form"
-        required
-        file={docs.nsrpForm}
-        error={errors["nsrpForm"]}
-        disabled={disabled}
-        onSelect={(file) => setFile(["nsrpForm"], file)}
-        onRemove={() => setFile(["nsrpForm"], null)}
-      />
+      {fieldErrors.verificationDocuments && <p role="alert" className="text-xs font-medium text-rose-600">{fieldErrors.verificationDocuments}</p>}
 
       <FileField
         label="Birth Certificate"
         required
         file={docs.birthCertificate}
-        error={errors["birthCertificate"]}
+        error={errors["birthCertificate"] || fieldErrors.birthCertificate}
         disabled={disabled}
         onSelect={(file) => setFile(["birthCertificate"], file)}
         onRemove={() => setFile(["birthCertificate"], null)}
@@ -188,6 +177,7 @@ export default function VerificationDocumentsForm({ docs, setDocs, consent, setC
 
       <div className="space-y-3 rounded-[10px] border border-[#c4d4e5] bg-white p-3">
         <p className={labelCls}>Valid ID #1 <span className="text-rose-600">*</span></p>
+        {fieldErrors.validId1 && <p role="alert" className="text-xs text-rose-600">{fieldErrors.validId1}</p>}
         <select
           value={docs.id1.type}
           disabled={disabled}
@@ -203,7 +193,7 @@ export default function VerificationDocumentsForm({ docs, setDocs, consent, setC
           label="Front of ID"
           required
           file={docs.id1.front}
-          error={errors["id1.front"]}
+          error={errors["id1.front"] || fieldErrors.validId1}
           disabled={disabled}
           onSelect={(file) => setFile(["id1", "front"], file)}
           onRemove={() => setFile(["id1", "front"], null)}
@@ -220,6 +210,7 @@ export default function VerificationDocumentsForm({ docs, setDocs, consent, setC
 
       <div className="space-y-3 rounded-[10px] border border-[#c4d4e5] bg-white p-3">
         <p className={labelCls}>Valid ID #2 <span className="text-xs font-normal text-[#5c7490]">(optional)</span></p>
+        {fieldErrors.validId2 && <p role="alert" className="text-xs text-rose-600">{fieldErrors.validId2}</p>}
         <select
           value={docs.id2.type}
           disabled={disabled}
@@ -257,19 +248,7 @@ export default function VerificationDocumentsForm({ docs, setDocs, consent, setC
         )}
       </div>
 
-      <label className="flex items-start gap-2 text-sm text-[#071c35]">
-        <input
-          type="checkbox"
-          checked={consent}
-          disabled={disabled}
-          onChange={(e) => setConsent(e.target.checked)}
-          className="mt-1 accent-[#07833f]"
-          required
-        />
-        <span>
-          I agree to the collection and processing of my personal information and documents for account verification, in accordance with the Data Privacy Act of 2012 (RA 10173). <span className="text-rose-600">*</span>
-        </span>
-      </label>
+      {fieldErrors.validId2 && <p role="alert" className="text-xs font-medium text-rose-600">{fieldErrors.validId2}</p>}
     </fieldset>
   )
 }

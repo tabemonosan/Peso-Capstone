@@ -2,6 +2,7 @@ import { useState } from "react"
 import { API_URL } from "../config"
 import Modal from "./Modal"
 import { ID_TYPE_OPTIONS } from "./VerificationDocumentsForm"
+import ApplicantSignupWizard from "./ApplicantSignupWizard"
 
 // Applicant-facing documents modal: one card per requirement with a status
 // badge, file details, View (signed expiring URL), and Replace/Upload for
@@ -11,6 +12,13 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
   const [pendingIdType, setPendingIdType] = useState({})
   const [uploading, setUploading] = useState(null)
   const [error, setError] = useState("")
+  const [editingNsrp, setEditingNsrp] = useState(() => new URLSearchParams(window.location.search).get("editNsrp") === "1")
+  const closeEditor = () => {
+    setEditingNsrp(false)
+    const url = new URL(window.location.href)
+    url.searchParams.delete("editNsrp")
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`)
+  }
 
   const viewVersion = (url) => {
     if (!url) return alert("Document link unavailable")
@@ -64,7 +72,28 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
   }
 
   return (
-    <Modal onClose={onClose} labelledBy="my-documents-title" describedBy="my-documents-description">
+    <Modal onClose={() => { closeEditor(); onClose() }} labelledBy="my-documents-title" describedBy="my-documents-description">
+      {editingNsrp ? (
+        <div>
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <h2 id="my-documents-title" className="text-xl font-bold">{info.nsrpData ? "Update NSRP" : "Fill out your NSRP online"}</h2>
+            <button type="button" onClick={closeEditor} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold">Close</button>
+          </div>
+          <ApplicantSignupWizard
+            mode="update"
+            initialAnswers={info.nsrpData || { email: "" }}
+            token={token}
+            onCancel={() => {
+              closeEditor()
+            }}
+            onSaved={async () => {
+              await onUpdated?.()
+              closeEditor()
+            }}
+          />
+        </div>
+      ) : (
+      <>
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 id="my-documents-title" className="text-xl font-bold">Verification documents</h2>
@@ -104,6 +133,11 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
                     View
                   </button>
                 )}
+                {doc.latest?.back?.url && (
+                  <button type="button" onClick={() => viewVersion(doc.latest.back.url)} className="rounded-xl border border-cyan-700 px-2 py-1 text-xs font-semibold text-cyan-800">
+                    View back
+                  </button>
+                )}
               </div>
 
               {doc.latest ? (
@@ -124,6 +158,18 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
 
               {canReplace && (
                 <div className="mt-3 flex flex-wrap items-center gap-2">
+                  {doc.docKey === "nsrpForm" ? (
+                    info.nsrpData ? (
+                      <button type="button" onClick={() => setEditingNsrp(true)} className="rounded-xl bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-white">
+                        Update NSRP
+                      </button>
+                    ) : (
+                      <button type="button" onClick={() => setEditingNsrp(true)} className="rounded-xl bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-white">
+                        Fill out your NSRP online
+                      </button>
+                    )
+                  ) : (
+                    <>
                   {doc.docKey.startsWith("validId") && (
                     <select
                       value={pendingIdType[doc.docKey] || ""}
@@ -151,6 +197,8 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
                     {uploading === doc.docKey ? "Uploading…" : doc.latest ? "Replace" : "Upload"}
                   </button>
                   <span className="text-xs text-slate-500">{doc.uploadsRemaining} of 5 uploads left</span>
+                    </>
+                  )}
                 </div>
               )}
             </li>
@@ -160,6 +208,8 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
 
       {info.documentsPurgedAt && (
         <p className="mt-4 text-xs text-slate-500">Older document versions were deleted after verification, in line with our retention policy.</p>
+      )}
+      </>
       )}
     </Modal>
   )

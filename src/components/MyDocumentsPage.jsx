@@ -7,7 +7,7 @@ import MyDocumentsModal from "./MyDocumentsModal"
 // the document cards themselves open in a modal via the button below.
 export default function MyDocumentsPage({ applicantId, token, onUpdated }) {
   const [info, setInfo] = useState(null)
-  const [showDocsModal, setShowDocsModal] = useState(false)
+  const [showDocsModal, setShowDocsModal] = useState(() => new URLSearchParams(window.location.search).get("editNsrp") === "1")
 
   const load = useCallback(async () => {
     try {

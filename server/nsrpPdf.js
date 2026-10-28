@@ -5,9 +5,10 @@ import { PDFDocument, rgb } from 'pdf-lib'
 import {
   NSRP_PAGE, NSRP_TEXT_FIELDS, NSRP_CHECKBOXES, NSRP_LANGUAGES,
   NSRP_EDUCATION, NSRP_TRAINING, NSRP_ELIGIBILITY, NSRP_WORK_EXPERIENCE,
-  NSRP_MAX_ROWS_PER_SECTION,
+  NSRP_MAX_ROWS_PER_SECTION, NSRP_SIGNATURE,
 } from './nsrpLayout.js'
 import { NSRP_SKILL_LAYOUT_KEY, normalizeSkillLabel } from '../shared/nsrpSkills.js'
+import { NSRP_ROW_LIMITS } from '../shared/nsrpTableLimits.js'
 
 const TEMPLATE_PATH = path.join(process.cwd(), 'public', 'NSRP-Form-1-Jobseeker-Reg-Form.pdf')
 const FONT_CANDIDATES = [
@@ -65,6 +66,14 @@ const formatDate = (value) => {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value).trim())
   if (!match) return String(value)
   return `${match[2]}/${match[3]}/${match[1]}` // mm/dd/yyyy
+}
+
+// Two-digit year for narrow range cells (training duration, work dates).
+export const formatDateShort = (value) => {
+  if (!value) return ''
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value).trim())
+  if (!match) return String(value)
+  return `${match[2]}/${match[3]}/${match[1].slice(2)}` // mm/dd/yy
 }
 
 const toCaps = (value) => String(value ?? '').toUpperCase()
@@ -140,7 +149,7 @@ function truncateLine(font, line, size, maxWidth) {
 
 export function drawFittedText({
   page, font, rawValue, x, cellCenterTop, pageHeight, maxWidth, innerHeight,
-  maxLines = 1, size = 8, field, color, wrap = true, onLayoutWarning, onLayout,
+  maxLines = 1, size = 8, field, color, wrap = true, onLayoutWarning, onLayout, charLimit,
 }) {
   const value = String(rawValue ?? '').trim()
   if (!value) return { lines: [], size, lineWidths: [], blockHeight: 0, truncated: false, shrunkToMinimum: false }
@@ -196,7 +205,13 @@ export function drawFittedText({
 
   const shrunkToMinimum = fittedSize === 6 && size > 6
   const warning = truncated || shrunkToMinimum
-    ? { field, reason: truncated ? 'truncated' : 'minimum-font-size', size: fittedSize }
+    ? {
+      field,
+      reason: truncated ? 'truncated' : 'minimum-font-size',
+      size: fittedSize,
+      length: value.length,
+      ...(charLimit ? { limit: charLimit } : {}),
+    }
     : null
   if (truncated) console.warn(`[NSRP PDF] Truncated text for field: ${field}`)
   if (warning) onLayoutWarning?.(warning)
@@ -205,7 +220,19 @@ export function drawFittedText({
   return { lines, size: fittedSize, lineWidths, blockHeight, truncated, shrunkToMinimum, warning }
 }
 
-export async function generateNsrpPdf(answers, { debug = false, onLayoutWarning, onLayout } = {}) {
+// Scale a signature image into the signature line area, keeping its aspect
+// ratio. Exported for tests: the result always stays inside the cell.
+export const nsrpSignaturePlacement = (spec, imageWidth, imageHeight) => {
+  if (!imageWidth || !imageHeight) return null
+  const scale = Math.min(spec.maxWidth / imageWidth, spec.maxHeight / imageHeight)
+  const width = imageWidth * scale
+  const height = imageHeight * scale
+  const x = spec.x + (spec.maxWidth - width) / 2
+  const top = spec.lineTop - spec.lineGap - height // image bottom sits just above the line
+  return { x, top, width, height }
+}
+
+export async function generateNsrpPdf(answers, { debug = false, onLayoutWarning, onLayout, signatureImage, certificationDate } = {}) {
   const pdfDoc = await PDFDocument.load(fs.readFileSync(TEMPLATE_PATH))
   pdfDoc.registerFontkit(fontkit)
   // Font with ñ / accent support (pdf-lib standard fonts are WinAnsi-limited).
@@ -216,7 +243,7 @@ export async function generateNsrpPdf(answers, { debug = false, onLayoutWarning,
   const ink = rgb(0, 0, 0)
   const pages = pdfDoc.getPages()
   const H = NSRP_PAGE.height
-  const drawTableCell = ({ rawValue, spec, col, rowTop, field, x }) => drawFittedText({
+  const drawTableCell = ({ rawValue, spec, col, rowTop, field, x, charLimit }) => drawFittedText({
     page: pages[spec.page],
     font,
     rawValue: toCaps(rawValue),
@@ -232,6 +259,7 @@ export async function generateNsrpPdf(answers, { debug = false, onLayoutWarning,
     wrap: !spec.singleLine?.includes(col),
     onLayoutWarning,
     onLayout,
+    charLimit,
   })
 
   const write = (key, rawValue, override = {}) => {
@@ -373,6 +401,7 @@ export async function generateNsrpPdf(answers, { debug = false, onLayoutWarning,
         col,
         rowTop: top,
         field: `education[${level}].${col}`,
+        charLimit: NSRP_ROW_LIMITS.education[col],
       })
     }
   }
@@ -385,7 +414,7 @@ export async function generateNsrpPdf(answers, { debug = false, onLayoutWarning,
     section: 'technicalTraining',
     transform: (row) => ({
       ...row,
-      duration: [row.fromDate, row.toDate].filter(Boolean).map(formatDate).join(' to '),
+      duration: [row.fromDate, row.toDate].filter(Boolean).map(formatDateShort).join(' to '),
     }),
   })
   // VI. Eligibility / professional license — left = civil service rows, right = PRC rows
@@ -404,6 +433,7 @@ export async function generateNsrpPdf(answers, { debug = false, onLayoutWarning,
         rowTop: top,
         field: `eligibility[${index}].${col}`,
         x: NSRP_ELIGIBILITY.left[col],
+        charLimit: NSRP_ROW_LIMITS.eligibility[col],
       })
     }
   })
@@ -419,6 +449,7 @@ export async function generateNsrpPdf(answers, { debug = false, onLayoutWarning,
         rowTop: top,
         field: `eligibility[${index}].${col}`,
         x: NSRP_ELIGIBILITY.right[col],
+        charLimit: NSRP_ROW_LIMITS.eligibility[col],
       })
     }
   })
@@ -431,7 +462,7 @@ export async function generateNsrpPdf(answers, { debug = false, onLayoutWarning,
     section: 'workExperience',
     transform: (row) => ({
       ...row,
-      dates: [row.fromDate, row.toDate].filter(Boolean).map(formatDate).join(' to '),
+      dates: [row.fromDate, row.toDate].filter(Boolean).map(formatDateShort).join(' to '),
     }),
   })
 
@@ -439,6 +470,25 @@ export async function generateNsrpPdf(answers, { debug = false, onLayoutWarning,
   const { marks: skillMarks, othersLine } = nsrpSkillMarks(answers.skills, answers.othersText)
   for (const key of skillMarks) mark(key, true)
   if (othersLine) write('skillOthersText', othersLine)
+
+  // CERTIFICATION/AUTHORIZATION — signature above the line, date on the Date line.
+  // No signature: the line stays blank so the printed copy can be signed by hand.
+  // The "For use of PESO only" block below is intentionally left untouched.
+  if (signatureImage?.bytes?.length) {
+    const image = signatureImage.mimetype === 'image/png'
+      ? await pdfDoc.embedPng(signatureImage.bytes)
+      : await pdfDoc.embedJpg(signatureImage.bytes)
+    const placement = nsrpSignaturePlacement(NSRP_SIGNATURE, image.width, image.height)
+    if (placement) {
+      pages[NSRP_SIGNATURE.page].drawImage(image, {
+        x: placement.x,
+        y: H - placement.top - placement.height,
+        width: placement.width,
+        height: placement.height,
+      })
+    }
+  }
+  if (certificationDate) write('certificationDate', certificationDate)
 
   // Overflow note: fixed-row sections cap their rows
   const overflowNotes = []
@@ -485,12 +535,17 @@ export async function generateNsrpPdf(answers, { debug = false, onLayoutWarning,
       for (const [col, sourceKey] of Object.entries(keys)) {
         const raw = row?.[sourceKey] ?? row?.[col] ?? ''
         if (!raw) continue
+        const sectionLimits = NSRP_ROW_LIMITS[section] || {}
+        const charLimit = sourceKey === 'dates' || col === 'duration'
+          ? (sectionLimits.fromDate || 10) + (sectionLimits.toDate || 10) + ' to '.length
+          : sectionLimits[sourceKey] ?? sectionLimits[col]
         drawTableCell({
           rawValue: raw,
           spec,
           col,
           rowTop: top,
           field: `${section}[${index}].${sourceKey === 'dates' ? 'fromDate/toDate' : sourceKey}`,
+          charLimit,
         })
       }
     })

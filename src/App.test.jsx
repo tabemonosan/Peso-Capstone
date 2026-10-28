@@ -69,31 +69,18 @@ describe('PESO Portal prototype', () => {
     expect(screen.getByLabelText(/Email/i)).toBeInTheDocument()
   })
 
-  it('keeps the Create account button disabled until consent and required documents are provided', async () => {
-    mockFetch.mockImplementation((url, options) => {
-      if (url === 'http://localhost:4000/api/signup') {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({
-            token: 'token-new-applicant',
-            user: { email: 'newapplicant@peso.gov', role: 'Applicant', emailVerified: false, profile: { name: 'New Applicant' } },
-          }),
-        })
-      }
-      return Promise.resolve({ ok: true, json: async () => [] })
-    })
-
+  it('starts applicant sign-up with account credentials and consent before the NSRP steps', () => {
     render(<App />)
 
     fireEvent.click(screen.getByRole('button', { name: /Create an account \(Applicant\)/i }))
-    fireEvent.change(screen.getByLabelText(/First name/i), { target: { value: 'New' } })
-    fireEvent.change(screen.getByLabelText(/Last name/i), { target: { value: 'Applicant' } })
-    fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: 'newapplicant@peso.gov' } })
-    fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'password123' } })
-    fireEvent.change(screen.getByLabelText(/Confirm password/i), { target: { value: 'password123' } })
 
-    // Without consent and required documents, submission stays disabled
-    expect(screen.getByRole('button', { name: /Create account/i })).toBeDisabled()
+    expect(screen.getByLabelText(/^Email$/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/^Password$/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/Confirm password/i)).toBeInTheDocument()
+    expect(screen.getByText(/collection and processing/i)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/First name/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Create account$/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Next$/i })).toBeInTheDocument()
   })
 
   it('renders the portal after a successful admin login without admin role switching controls', async () => {

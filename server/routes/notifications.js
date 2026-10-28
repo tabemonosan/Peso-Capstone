@@ -1,5 +1,6 @@
 import express from 'express'
 import mongoose from 'mongoose'
+import { redactString } from '../utils/redact.js'
 
 const MAX_LIMIT = 50
 
@@ -43,7 +44,7 @@ export function createNotificationsRouter({ NotificationModel, authenticate, res
       ])
       res.json({ items, unreadCount, page, limit, total })
     } catch (err) {
-      console.error('List notifications error:', err)
+      console.error('List notifications error:', redactString(err?.message || String(err)))
       res.status(500).json({ error: 'Failed to load notifications' })
     }
   })
@@ -58,7 +59,7 @@ export function createNotificationsRouter({ NotificationModel, authenticate, res
       )
       res.json({ updated: result.modifiedCount ?? 0, unreadCount: 0 })
     } catch (err) {
-      console.error('Read-all notifications error:', err)
+      console.error('Read-all notifications error:', redactString(err?.message || String(err)))
       res.status(500).json({ error: 'Failed to update notifications' })
     }
   })
@@ -77,7 +78,7 @@ export function createNotificationsRouter({ NotificationModel, authenticate, res
       if (!updated) return res.status(404).json({ error: 'Notification not found' })
       res.json(updated)
     } catch (err) {
-      console.error('Mark notification read error:', err)
+      console.error('Mark notification read error:', redactString(err?.message || String(err)))
       res.status(500).json({ error: 'Failed to update notification' })
     }
   }

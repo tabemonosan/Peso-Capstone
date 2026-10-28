@@ -10,6 +10,7 @@ import CompleteRegistrationPage from "./components/CompleteRegistrationPage"
 import JobTitlePicker from "./components/JobTitlePicker"
 import AdminJobTitlesPage from "./components/AdminJobTitlesPage"
 import PasswordChecklist from "./components/PasswordChecklist"
+import ApplicantSignupWizard from "./components/ApplicantSignupWizard"
 import { validatePassword } from "./utils/passwordPolicy"
 import { SUFFIX_OPTIONS, capitalizeName, validateNameField, formatFullName, formatDisplayName } from "../shared/nameFields.js"
 import ReferralList from "./components/ReferralList"
@@ -2237,7 +2238,7 @@ const [authView, setAuthView] = useState("login")
           return
         }
         const norm = normalizeProfile({ profile: data.profile, companyName: data.companyName, contactName: data.contactName, phone: data.phone }, data.role)
-        setCurrentUser({ id: data.id, email: data.email, role: data.role, companyName: data.companyName, contactName: data.contactName, phone: data.phone, profile: data.profile, verificationStatus: data.verificationStatus, verificationReason: data.verificationReason, token })
+        setCurrentUser({ id: data.id, email: data.email, role: data.role, companyName: data.companyName, contactName: data.contactName, phone: data.phone, profile: data.profile, verificationDocuments: data.verificationDocuments, verificationStatus: data.verificationStatus, verificationReason: data.verificationReason, token })
         setActiveRole(data.role)
         setIsLoggedIn(true)
         setProfileData(norm)
@@ -2525,7 +2526,9 @@ const [authView, setAuthView] = useState("login")
             <h1>{authView === "signup" ? "Sign Up" : "Welcome back"}</h1>
             <p>Enter your PESO account credentials to continue.</p>
           </div>
-          {authView === "login" ? (
+          {authView === "signup" ? (
+            <ApplicantSignupWizard onCancel={() => setAuthView("login")} />
+          ) : authView === "login" ? (
             <form className="auth-form" onSubmit={handleLogin}>
               <div>
                 <label htmlFor="email">Email</label>
@@ -4521,6 +4524,12 @@ const [authView, setAuthView] = useState("login")
               handleEditPendingJob={openEditJob}
               applicantSkills={profileData.skills}
               onGoToProfile={() => { setIsEditingProfile(true); setActiveView('profile') }}
+              onEditNsrp={() => {
+                const url = new URL(window.location.href)
+                url.searchParams.set('editNsrp', '1')
+                window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
+                setActiveView('documents')
+              }}
             />
           )}
           {activeView === "job-titles" && activeRole === "Admin" && (

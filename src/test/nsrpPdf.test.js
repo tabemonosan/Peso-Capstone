@@ -5,9 +5,9 @@ import { pdf as renderPdf } from 'pdf-to-img'
 import { PNG } from 'pngjs'
 import {
   NSRP_PAGE, NSRP_TEXT_FIELDS, NSRP_CHECKBOXES, NSRP_LANGUAGES,
-  NSRP_EDUCATION, NSRP_TRAINING, NSRP_ELIGIBILITY, NSRP_WORK_EXPERIENCE,
+  NSRP_EDUCATION, NSRP_TRAINING, NSRP_ELIGIBILITY, NSRP_WORK_EXPERIENCE, NSRP_SIGNATURE,
 } from '../../server/nsrpLayout.js'
-import { generateNsrpPdf, nsrpMarkSegments, nsrpSkillMarks, fitText, drawFittedText } from '../../server/nsrpPdf.js'
+import { generateNsrpPdf, nsrpMarkSegments, nsrpSkillMarks, fitText, drawFittedText, nsrpSignaturePlacement } from '../../server/nsrpPdf.js'
 import { nsrpCheckboxCenter } from '../../server/nsrpLayout.js'
 import { NSRP_SKILLS } from '../../shared/nsrpSkills.js'
 import * as fontkit from 'fontkit'
@@ -220,7 +220,12 @@ describe('drawFittedText', () => {
       expect(result.lines.slice(0, -1).some((line) => line.includes('...'))).toBe(false)
       expect(result.lineWidths.every((width) => width <= 43)).toBe(true)
       expect(result.blockHeight).toBeLessThanOrEqual(20)
-      expect(warnings).toEqual([{ field: 'education[Elementary].awards', reason: 'truncated', size: 6 }])
+      expect(warnings).toEqual([{
+        field: 'education[Elementary].awards',
+        reason: 'truncated',
+        size: 6,
+        length: 'A VERY LONG AWARD DESCRIPTION THAT CANNOT FIT IN THE AWARDS CELL WITHOUT BEING SHORTENED'.length,
+      }])
       expect(warn).toHaveBeenCalledWith('[NSRP PDF] Truncated text for field: education[Elementary].awards')
       expect(drawn).toHaveLength(result.lines.length)
     } finally {
@@ -396,5 +401,55 @@ describe('generateNsrpPdf', () => {
       occupation1: 'DRIVER',
     })
     expect(Buffer.isBuffer(buffer)).toBe(true)
+  })
+
+  describe('certification block', () => {
+    const makeSignaturePng = (width, height) => {
+      const png = new PNG({ width, height })
+      for (let index = 0; index < png.data.length; index += 4) {
+        png.data[index] = 20
+        png.data[index + 1] = 20
+        png.data[index + 2] = 20
+        png.data[index + 3] = 255
+      }
+      return PNG.sync.write(png)
+    }
+
+    it('scales the signature into the line bounds and keeps its aspect ratio', () => {
+      // Wide image: limited by the line width
+      const wide = nsrpSignaturePlacement(NSRP_SIGNATURE, 800, 200)
+      expect(wide.width).toBeLessThanOrEqual(NSRP_SIGNATURE.maxWidth + 0.001)
+      expect(wide.height).toBeLessThanOrEqual(NSRP_SIGNATURE.maxHeight + 0.001)
+      expect(wide.width / wide.height).toBeCloseTo(800 / 200, 3)
+      // Tall image: limited by the max height
+      const tall = nsrpSignaturePlacement(NSRP_SIGNATURE, 200, 800)
+      expect(tall.height).toBeLessThanOrEqual(NSRP_SIGNATURE.maxHeight + 0.001)
+      expect(tall.width / tall.height).toBeCloseTo(200 / 800, 3)
+      // Both stay within the line's horizontal span and sit just above the line
+      for (const placement of [wide, tall]) {
+        expect(placement.x).toBeGreaterThanOrEqual(NSRP_SIGNATURE.x - 0.001)
+        expect(placement.x + placement.width).toBeLessThanOrEqual(NSRP_SIGNATURE.x + NSRP_SIGNATURE.maxWidth + 0.001)
+        expect(placement.top + placement.height).toBeCloseTo(NSRP_SIGNATURE.lineTop - NSRP_SIGNATURE.lineGap, 3)
+      }
+      expect(nsrpSignaturePlacement(NSRP_SIGNATURE, 0, 100)).toBeNull()
+    })
+
+    it('draws the signature image and the date when provided', async () => {
+      const signaturePng = makeSignaturePng(320, 120)
+      const buffer = await generateNsrpPdf(
+        { surname: 'TEST', firstName: 'SIG', email: 'sig@example.com' },
+        { signatureImage: { bytes: signaturePng, mimetype: 'image/png' }, certificationDate: '2026-10-28' },
+      )
+      expect(Buffer.isBuffer(buffer)).toBe(true)
+      const doc = await PDFDocument.load(buffer)
+      expect(doc.getPageCount()).toBe(NSRP_PAGE.pageCount)
+    })
+
+    it('generates with a blank signature line when no signature is provided', async () => {
+      const buffer = await generateNsrpPdf({ surname: 'TEST', firstName: 'NOSIG', email: 'nosig@example.com' })
+      expect(Buffer.isBuffer(buffer)).toBe(true)
+      const doc = await PDFDocument.load(buffer)
+      expect(doc.getPageCount()).toBe(NSRP_PAGE.pageCount)
+    })
   })
 })
