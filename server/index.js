@@ -15,10 +15,13 @@ import { sendVerificationEmail } from './mailer.js'
 import { notify, notifyAdmins } from './services/notify.js'
 import { startHireReportReminders } from './services/hireReminders.js'
 import { createNotificationsRouter } from './routes/notifications.js'
+import { generateNsrpPdf } from './nsrpPdf.js'
 import { createDashboardService } from './services/dashboard.js'
 import { normalizeEmail, generateVerifyToken, hashVerifyToken, VERIFY_TOKEN_TTL_MS, RESEND_COOLDOWN_MS } from './utils/emailVerification.js'
 import { passwordErrorMessage } from './utils/passwordPolicy.js'
 import { validateNameFields, sanitizeName } from '../shared/nameFields.js'
+import { NSRP_SKILL_LABELS, normalizeSkillLabel } from '../shared/nsrpSkills.js'
+import { NSRP_ROW_LIMITS } from '../shared/nsrpTableLimits.js'
 import { registrationProgress } from './utils/registration.js'
 import { validateReviewTransition } from './utils/docReview.js'
 import { baseApprovedJobFilter, buildJobFilter, countJobFacets } from './utils/jobFilters.js'
@@ -78,7 +81,7 @@ const JOB_SORTS = {
 const app = express()
 const PORT = process.env.PORT || 4000
 
-app.use(cors({ origin: 'http://localhost:5173' }))
+app.use(cors({ origin: 'http://localhost:5173', exposedHeaders: ['X-NSRP-Layout-Warnings'] }))
 // Capture raw request body for debugging JSON parse issues
 app.use(express.json({
   limit: '8mb',
@@ -1546,303 +1549,8 @@ app.put('/api/jobs/:id/status', async (req, res) => {
 const nsrpTemplatePath = path.join(process.cwd(), 'server', 'nsrp-template.docx')
 const nsrpOfficialPdfPath = path.join(process.cwd(), 'public', 'NSRP-Form-1-Jobseeker-Reg-Form.pdf')
 
-// Overlay answers onto the official NSRP Form 1 PDF at measured coordinates.
-// pdf-lib uses a bottom-left origin; coordinates below were measured from the top (see pdfplumber map),
-// so y = pageHeight - top.
-async function generateNsrpPdf(answers) {
-  const existingPdfBytes = fs.readFileSync(nsrpOfficialPdfPath)
-  const pdfDoc = await PDFDocument.load(existingPdfBytes)
-  const font = await pdfDoc.embedFont(StandardFonts.Helvetica)
-  const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold)
-  const ink = rgb(0, 0, 0)
-  const pages = pdfDoc.getPages()
-  const page1 = pages[0]
-  const H = page1.getSize().height
-  const y = (top) => H - top
-  const size = 9
-  const write = (text, x, top, opts = {}) => {
-    const value = text == null ? '' : String(text)
-    if (!value.trim()) return
-    page1.drawText(value, { x, y: y(top), size: opts.size || size, font: opts.bold ? bold : font, color: ink })
-  }
-  const mark = (checked, x, top) => {
-    if (!checked) return
-    page1.drawText('X', { x, y: y(top), size: 10, font: bold, color: ink })
-  }
-
-  // I. PERSONAL INFORMATION (answers placed inside each cell, using the table grid lines)
-  // Name row: labels at top 167; answer band ~180-206
-  write(answers.surname, 32, 196)
-  write(answers.firstName, 155, 196)
-  write(answers.middleName, 300, 196)
-  write(answers.suffix, 440, 196)
-  // DOB / PLACE OF BIRTH row: labels at 180; answer within band 192-206, right of the label
-  write(answers.dob, 170, 198)
-  write(answers.placeOfBirth, 340, 198)
-  // SEX row band ~206-228
-  mark(answers.sex === 'Male', 178, 211)
-  mark(answers.sex === 'Female', 250, 211)
-  // RELIGION row band ~206-228, answer right of label
-  write(answers.religion, 100, 224)
-  // PRESENT ADDRESS right column (x>=321), four stacked lines
-  write(answers.addressStreet, 340, 218)
-  write(answers.addressBarangay, 340, 233)
-  write(answers.addressCity, 340, 247)
-  write(answers.addressProvince, 340, 261)
-  // CIVIL STATUS checkboxes
-  mark(answers.civilStatus === 'Single', 105, 233)
-  mark(answers.civilStatus === 'Separated', 200, 233)
-  mark(answers.civilStatus === 'Married', 105, 246)
-  mark(answers.civilStatus === 'Live-in', 200, 246)
-  mark(answers.civilStatus === 'Widowed', 105, 261)
-  // TIN / HEIGHT row band ~270-284
-  write(answers.tin, 100, 278)
-  write(answers.height, 340, 278)
-  // GSIS/SSS / EMAIL row band ~284-298
-  write(answers.gsisSss, 100, 292)
-  write(answers.email, 340, 292)
-  // PAG-IBIG / LANDLINE row band ~298-312
-  write(answers.pagibig, 100, 306)
-  write(answers.landline, 340, 306)
-  // PHILHEALTH / CELLPHONE row band ~312-326
-  write(answers.philhealth, 100, 320)
-  write(answers.cellphone, 340, 320)
-  // DISABILITY specify line (next to 'Others, specify:')
-  write(answers.disability, 380, 344, { size: 8 })
-
-  // EMPLOYMENT STATUS / TYPE
-  mark(answers.employmentStatus === 'Employed', 116, 364)
-  mark(answers.employmentStatus === 'Unemployed', 246, 364)
-  const typeDetail = (answers.employmentTypeDetail || '').toLowerCase()
-  mark(typeDetail.includes('wage'), 132, 390)
-  mark(typeDetail.includes('self'), 132, 416)
-  mark(typeDetail.includes('fresh') || typeDetail.includes('new entrant'), 258, 390)
-  mark(typeDetail.includes('finished') || typeDetail.includes('contract'), 258, 412)
-  mark(typeDetail.includes('resigned'), 258, 432)
-  mark(typeDetail.includes('retired'), 258, 456)
-  if (typeDetail.includes('terminated') && typeDetail.includes('abroad')) write(answers.employmentTypeDetail, 443, 424, { size: 7 })
-  else if (typeDetail && !['wage', 'self', 'fresh', 'new entrant', 'finished', 'contract', 'resigned', 'retired'].some((k) => typeDetail.includes(k))) {
-    write(answers.employmentTypeDetail, 445, 444, { size: 7 })
-  }
-
-  // Looking-for-work questions
-  mark(answers.activelyLooking === 'Yes', 155, 473)
-  mark(answers.activelyLooking === 'No', 180, 473)
-  write(answers.lookingDuration, 430, 473, { size: 8 })
-  mark(answers.willingImmediately === 'Yes', 155, 485)
-  mark(answers.willingImmediately === 'No', 180, 485)
-  write(answers.willingWhen, 340, 485, { size: 8 })
-  mark(answers.fourPs === 'Yes', 155, 509)
-  mark(answers.fourPs === 'No', 180, 509)
-  write(answers.fourPsId, 430, 509, { size: 8 })
-
-  // II. JOB PREFERENCE
-  write(answers.occupation1, 36, 562)
-  write(answers.occupation2, 36, 584)
-  write(answers.occupation3, 36, 606)
-  write(answers.occupation4, 36, 626)
-  write(answers.localPref1, 175, 582)
-  write(answers.localPref2, 175, 606)
-  write(answers.localPref3, 175, 626)
-  write(answers.overseasPref1, 400, 582)
-  write(answers.overseasPref2, 400, 606)
-  write(answers.overseasPref3, 400, 626)
-  write(answers.expectedSalary, 36, 662)
-  write(answers.passportNo, 322, 662)
-  write(answers.passportExpiry, 480, 662)
-
-  const continuationSections = [
-    {
-      title: 'III. Educational Background',
-      rows: answers.education || [],
-      columns: [
-        ['Level', 'level'],
-        ['School', 'school'],
-        ['Course', 'course'],
-        ['Year', 'year'],
-      ],
-    },
-    {
-      title: 'IV. Technical / Vocational Training',
-      rows: answers.technicalTraining || [],
-      columns: [
-        ['Training', 'name'],
-        ['Provider', 'provider'],
-        ['Course', 'course'],
-        ['Year', 'year'],
-      ],
-    },
-    {
-      title: 'V. Work Experience',
-      rows: answers.workExperience || [],
-      columns: [
-        ['Company', 'company'],
-        ['Position', 'position'],
-        ['From', 'startDate'],
-        ['To', 'endDate'],
-      ],
-    },
-  ]
-  const hasContinuation = continuationSections.some((section) => section.rows.length) || answers.skills?.length
-  if (hasContinuation) {
-    const pageWidth = page1.getSize().width
-    const margin = 36
-    const contentWidth = pageWidth - margin * 2
-    const columnWidth = contentWidth / 4
-    let continuationPage
-    let cursorTop
-    const startContinuationPage = () => {
-      continuationPage = pdfDoc.addPage([pageWidth, H])
-      continuationPage.drawText('NSRP FORM 1 — CONTINUATION', {
-        x: margin,
-        y: H - 38,
-        size: 14,
-        font: bold,
-        color: ink,
-      })
-      cursorTop = 62
-    }
-    const wrapText = (value, maxWidth, fontSize) => {
-      const words = String(value || '').split(/\s+/).filter(Boolean)
-      const lines = []
-      let line = ''
-      for (const word of words) {
-        const next = line ? `${line} ${word}` : word
-        if (font.widthOfTextAtSize(next, fontSize) <= maxWidth) {
-          line = next
-          continue
-        }
-        if (line) lines.push(line)
-        let chunk = ''
-        for (const character of Array.from(word)) {
-          if (chunk && font.widthOfTextAtSize(chunk + character, fontSize) > maxWidth) {
-            lines.push(chunk)
-            chunk = ''
-          }
-          chunk += character
-        }
-        line = chunk
-      }
-      if (line) lines.push(line)
-      return lines.length ? lines : ['']
-    }
-    const drawSection = (section) => {
-      const ensureSpace = (height) => {
-        if (!continuationPage || cursorTop + height > H - margin) startContinuationPage()
-      }
-      ensureSpace(54)
-      continuationPage.drawText(section.title, {
-        x: margin,
-        y: H - cursorTop - 14,
-        size: 11,
-        font: bold,
-        color: ink,
-      })
-      cursorTop += 24
-      if (!section.rows.length) {
-        continuationPage.drawText('No entries provided.', {
-          x: margin,
-          y: H - cursorTop - 11,
-          size: 9,
-          font,
-          color: ink,
-        })
-        cursorTop += 22
-        return
-      }
-      for (const [label, key] of section.columns) {
-        continuationPage.drawText(label, {
-          x: margin + section.columns.findIndex((column) => column[1] === key) * columnWidth,
-          y: H - cursorTop - 10,
-          size: 8,
-          font: bold,
-          color: ink,
-        })
-      }
-      cursorTop += 16
-      for (const row of section.rows) {
-        const values = section.columns.map(([, key]) => wrapText(row[key], columnWidth - 12, 8))
-        const lineCount = Math.max(...values.map((lines) => lines.length))
-        const rowHeight = Math.max(24, lineCount * 10 + 10)
-        ensureSpace(rowHeight + 4)
-        if (cursorTop === 62) {
-          continuationPage.drawText(section.title, {
-            x: margin,
-            y: H - cursorTop - 14,
-            size: 11,
-            font: bold,
-            color: ink,
-          })
-          cursorTop += 24
-          for (let index = 0; index < section.columns.length; index += 1) {
-            continuationPage.drawText(section.columns[index][0], {
-              x: margin + index * columnWidth,
-              y: H - cursorTop - 10,
-              size: 8,
-              font: bold,
-              color: ink,
-            })
-          }
-          cursorTop += 16
-        }
-        values.forEach((lines, columnIndex) => {
-          lines.forEach((line, lineIndex) => {
-            continuationPage.drawText(line, {
-              x: margin + columnIndex * columnWidth,
-              y: H - cursorTop - 10 - lineIndex * 10,
-              size: 8,
-              font,
-              color: ink,
-            })
-          })
-        })
-        cursorTop += rowHeight
-      }
-      cursorTop += 12
-    }
-
-    for (const section of continuationSections) drawSection(section)
-    const skills = answers.skills || []
-    if (skills.length) {
-      const skillLines = wrapText(skills.join(', '), contentWidth, 9)
-      const lineHeight = 13
-      const skillsTitleHeight = 20
-      let skillsIndex = 0
-      while (skillsIndex < skillLines.length) {
-        if (!continuationPage) startContinuationPage()
-        let availableLines = Math.floor((H - margin - cursorTop - skillsTitleHeight) / lineHeight)
-        if (availableLines < 1) {
-          startContinuationPage()
-          availableLines = Math.floor((H - margin - cursorTop - skillsTitleHeight) / lineHeight)
-        }
-        continuationPage.drawText('VI. Skills', {
-          x: margin,
-          y: H - cursorTop - 14,
-          size: 11,
-          font: bold,
-          color: ink,
-        })
-        cursorTop += skillsTitleHeight
-        const linesOnPage = Math.min(availableLines, skillLines.length - skillsIndex)
-        for (let lineIndex = 0; lineIndex < linesOnPage; lineIndex += 1) {
-          continuationPage.drawText(skillLines[skillsIndex], {
-            x: margin,
-            y: H - cursorTop - 10,
-            size: 9,
-            font,
-            color: ink,
-          })
-          cursorTop += lineHeight
-          skillsIndex += 1
-        }
-        if (skillsIndex < skillLines.length) cursorTop = H
-      }
-    }
-  }
-
-  const pdfBytes = await pdfDoc.save()
-  return Buffer.from(pdfBytes)
-}
+// The NSRP overlay generator now lives in ./nsrpPdf.js with coordinates
+// centralized in ./nsrpLayout.js. Debug overlay: NSRP_DEBUG=1 or ?debug=1.
 
 const NSRP_TEXT_LIMITS = {
   surname: 80,
@@ -1867,8 +1575,11 @@ const NSRP_TEXT_LIMITS = {
   cellphone: 20,
   landline: 20,
   disability: 120,
+  disabilityOthers: 60,
   employmentStatus: 20,
   employmentTypeDetail: 120,
+  terminatedAbroadCountry: 60,
+  employmentTypeOther: 60,
   activelyLooking: 5,
   lookingDuration: 40,
   willingImmediately: 5,
@@ -1888,6 +1599,7 @@ const NSRP_TEXT_LIMITS = {
   expectedSalary: 40,
   passportNo: 30,
   passportExpiry: 10,
+  othersText: 60,
 }
 const NSRP_REQUIRED_FIELDS = [
   'surname', 'firstName', 'dob', 'placeOfBirth', 'sex', 'civilStatus',
@@ -1903,29 +1615,10 @@ const NSRP_ALLOWED_VALUES = {
   willingImmediately: ['Yes', 'No'],
   fourPs: ['Yes', 'No'],
 }
-const NSRP_ROW_LIMITS = {
-  education: {
-    level: 40,
-    school: 120,
-    course: 100,
-    year: 20,
-  },
-  technicalTraining: {
-    name: 120,
-    provider: 120,
-    course: 100,
-    year: 20,
-  },
-  workExperience: {
-    company: 120,
-    position: 100,
-    startDate: 20,
-    endDate: 20,
-  },
-}
 const NSRP_MAX_ROWS = 10
-const NSRP_MAX_SKILLS = 30
-const NSRP_MAX_SKILL_LENGTH = 50
+const NSRP_MAX_SKILLS = 18
+const NSRP_MAX_SKILL_LENGTH = 60
+const NSRP_SKILL_OPTIONS = new Set(NSRP_SKILL_LABELS.map((label) => normalizeSkillLabel(label)))
 
 function validateNsrpAnswers(input) {
   const fieldErrors = {}
@@ -1950,6 +1643,7 @@ function validateNsrpAnswers(input) {
     if (answers[field] && !allowed.includes(answers[field])) fieldErrors[field] = 'Choose one of the listed options.'
   }
   for (const [section, limits] of Object.entries(NSRP_ROW_LIMITS)) {
+    if (section === 'languages') continue // handled separately (boolean checkboxes)
     const rows = input?.[section] ?? []
     if (!Array.isArray(rows)) {
       fieldErrors[section] = 'Enter a list of rows.'
@@ -1966,25 +1660,32 @@ function validateNsrpAnswers(input) {
         fieldErrors[`${section}[${index}]`] = 'Enter a valid row.'
         return null
       }
+      // Migrate legacy draft field names saved before the section redesign
+      const legacyMap = section === 'workExperience'
+        ? { startDate: 'fromDate', endDate: 'toDate' }
+        : section === 'technicalTraining'
+          ? { name: 'course', provider: 'institution' }
+          : {}
+      const source = { ...row }
+      for (const [legacy, current] of Object.entries(legacyMap)) {
+        if (!source[current] && source[legacy]) source[current] = source[legacy]
+      }
       const normalizedRow = {}
       for (const [field, maxLength] of Object.entries(limits)) {
         const key = `${section}[${index}].${field}`
-        const value = row?.[field] ?? ''
+        const value = source?.[field] ?? ''
         if (typeof value !== 'string') {
           fieldErrors[key] = 'Enter text for this field.'
           normalizedRow[field] = ''
           continue
         }
         normalizedRow[field] = value.trim()
-        const rowHasValue = Object.values(row).some((entry) => typeof entry === 'string' && entry.trim())
-        if (rowHasValue && !normalizedRow[field]) {
-          fieldErrors[key] = 'Complete this field or remove the row.'
-        } else if (normalizedRow[field].length > maxLength) {
+        if (normalizedRow[field].length > maxLength) {
           fieldErrors[key] = `Use ${maxLength} characters or fewer.`
         }
       }
       return normalizedRow
-    }).filter((row) => row && Object.values(row).some(Boolean))
+    }).filter((row) => row && Object.values(row).some((entry) => typeof entry === 'string' && entry))
   }
   const validateDate = (field, value, preventFuture = false) => {
     if (!value) return
@@ -1998,36 +1699,101 @@ function validateNsrpAnswers(input) {
   validateDate('dob', answers.dob, true)
   validateDate('passportExpiry', answers.passportExpiry)
   for (const [index, row] of answers.workExperience.entries()) {
-    validateDate(`workExperience[${index}].startDate`, row.startDate)
-    validateDate(`workExperience[${index}].endDate`, row.endDate)
-    if (row.startDate && row.endDate && row.endDate < row.startDate) {
-      fieldErrors[`workExperience[${index}].endDate`] = 'End date cannot be before the start date.'
+    validateDate(`workExperience[${index}].fromDate`, row.fromDate)
+    validateDate(`workExperience[${index}].toDate`, row.toDate)
+    if (row.fromDate && row.toDate && row.toDate < row.fromDate) {
+      fieldErrors[`workExperience[${index}].toDate`] = 'End date cannot be before the start date.'
     }
+  }
+  for (const [index, row] of (answers.technicalTraining || []).entries()) {
+    validateDate(`technicalTraining[${index}].fromDate`, row.fromDate)
+    validateDate(`technicalTraining[${index}].toDate`, row.toDate)
+    if (row.fromDate && row.toDate && row.toDate < row.fromDate) {
+      fieldErrors[`technicalTraining[${index}].toDate`] = 'End date cannot be before the start date.'
+    }
+  }
+  for (const [index, row] of (answers.eligibility || []).entries()) {
+    validateDate(`eligibility[${index}].examDate`, row.examDate)
+    validateDate(`eligibility[${index}].validUntil`, row.validUntil)
   }
   if (answers.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(answers.email)) {
     fieldErrors.email = 'Enter a valid email address.'
   }
-  if (answers.cellphone && !/^[+()\d\s-]{7,20}$/.test(answers.cellphone)) {
-    fieldErrors.cellphone = 'Enter a valid phone number.'
+  if (answers.cellphone && !/^(09\d{9}|\+639\d{9})$/.test(answers.cellphone.replace(/[\s-]/g, ''))) {
+    fieldErrors.cellphone = 'Enter a valid mobile number (09XXXXXXXXX or +639XXXXXXXXX).'
   }
+  for (const field of ['landline', 'cellphone']) {
+    const value = answers[field]
+    if (value && !/^[+()\d\s-]+$/.test(value)) {
+      fieldErrors[field] = 'Use only digits, spaces, "+", "-", and parentheses.'
+    } else if (value && (value.replace(/\D/g, '').length < 7 || value.replace(/\D/g, '').length > 15)) {
+      fieldErrors[field] = 'Enter 7 to 15 digits.'
+    }
+  }
+  // Employment sub-type must match the chosen status
+  if (answers.employmentTypeDetail) {
+    const employedTypes = ['Wage Employed', 'Self Employed']
+    const unemployedTypes = ['New Entrant/Fresh Graduate', 'Finished Contract', 'Resigned', 'Retired', 'Terminated/Laidoff (local)', 'Terminated/Laidoff (abroad)', 'Others']
+    const valid = answers.employmentStatus === 'Employed' ? employedTypes : answers.employmentStatus === 'Unemployed' ? unemployedTypes : []
+    if (!valid.includes(answers.employmentTypeDetail)) fieldErrors.employmentTypeDetail = 'Choose a type that matches the employment status.'
+  }
+  if (!/abroad/i.test(answers.employmentTypeDetail || '')) answers.terminatedAbroadCountry = ''
+  if (!/^Others/i.test(answers.employmentTypeDetail || '')) answers.employmentTypeOther = ''
   const skills = input?.skills ?? []
   if (!Array.isArray(skills)) {
     fieldErrors.skills = 'Choose skills from the list.'
     answers.skills = []
-  } else if (skills.length > NSRP_MAX_SKILLS) {
-    fieldErrors.skills = `Choose no more than ${NSRP_MAX_SKILLS} skills.`
-    answers.skills = []
   } else {
-    answers.skills = [...new Set(skills.map((skill, index) => {
+    // Legacy profiles may hold more than the new limit. Fixed form options are
+    // kept first so a ticked checkbox can never be dropped by truncation;
+    // unknown free-text leftovers fill the remaining slots.
+    const cleaned = skills.map((skill, index) => {
       if (typeof skill !== 'string') {
         fieldErrors[`skills[${index}]`] = 'Skill must be text.'
         return ''
       }
-      const normalized = skill.trim()
+      const normalized = skill.trim().replace(/\s+/g, ' ')
       if (!normalized) fieldErrors[`skills[${index}]`] = 'Skill cannot be empty.'
       else if (normalized.length > NSRP_MAX_SKILL_LENGTH) fieldErrors[`skills[${index}]`] = `Use ${NSRP_MAX_SKILL_LENGTH} characters or fewer.`
       return normalized
-    }).filter(Boolean))]
+    }).filter(Boolean)
+    const seen = new Set()
+    const unique = cleaned.filter((skill) => {
+      const key = normalizeSkillLabel(skill)
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    const fixedOptions = unique.filter((skill) => NSRP_SKILL_OPTIONS.has(normalizeSkillLabel(skill)))
+    const leftovers = unique.filter((skill) => !NSRP_SKILL_OPTIONS.has(normalizeSkillLabel(skill)))
+    answers.skills = [...fixedOptions, ...leftovers].slice(0, NSRP_MAX_SKILLS)
+    // Others text only valid when Others is selected
+    if (answers.othersText && !answers.skills.some((skill) => skill.toLowerCase() === 'others')) {
+      answers.othersText = ''
+    }
+    // Conditional clears: never print contradictory answers
+    if (answers.activelyLooking !== 'Yes') answers.lookingDuration = ''
+    if (answers.willingImmediately !== 'No') answers.willingWhen = ''
+    if (answers.fourPs !== 'Yes') answers.fourPsId = ''
+  }
+  // Languages: fixed rows with boolean read/write/speak/understand
+  const languages = input?.languages ?? []
+  if (!Array.isArray(languages)) {
+    answers.languages = []
+  } else {
+    answers.languages = languages.slice(0, 3).map((row, index) => {
+      if (!row || typeof row !== 'object') return null
+      const name = String(row.name || '').trim()
+      const otherName = String(row.otherName || '').trim().slice(0, 40)
+      return {
+        name: ['English', 'Filipino', 'Others'].includes(name) ? name : 'Others',
+        otherName,
+        read: Boolean(row.read),
+        write: Boolean(row.write),
+        speak: Boolean(row.speak),
+        understand: Boolean(row.understand),
+      }
+    }).filter(Boolean).filter((row) => row.name !== 'Others' || row.otherName || row.read || row.write || row.speak || row.understand)
   }
   return { answers, fieldErrors }
 }
@@ -2104,10 +1870,15 @@ app.post('/api/nsrp/preview', async (req, res) => {
     if (Object.keys(fieldErrors).length) return res.status(422).json({ error: 'Check the highlighted NSRP fields.', fieldErrors })
     const applicant = await Applicant.findOne({ email: decoded.email }).select('email')
     if (!applicant) return res.status(404).json({ error: 'Applicant not found' })
-    const pdfBuffer = await generateNsrpPdf(answers)
+    const layoutWarnings = []
+    const pdfBuffer = await generateNsrpPdf(answers, {
+      debug: req.query.debug === '1',
+      onLayoutWarning: ({ field, reason }) => layoutWarnings.push({ field, reason }),
+    })
     res.set('Content-Type', 'application/pdf')
     res.set('Content-Disposition', 'inline; filename="NSRP-preview.pdf"')
     res.set('Cache-Control', 'no-store')
+    res.set('X-NSRP-Layout-Warnings', JSON.stringify(layoutWarnings))
     res.send(pdfBuffer)
   } catch (err) {
     console.error(err)

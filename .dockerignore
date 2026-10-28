@@ -1,0 +1,13 @@
+node_modules
+dist
+.git
+.github
+.vscode
+*.log
+build_output.txt
+test_output.txt
+docker-compose.yml
+Dockerfile
+Dockerfile.frontend
+nginx.conf
+README.md

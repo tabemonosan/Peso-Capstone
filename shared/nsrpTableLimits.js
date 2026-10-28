@@ -1,0 +1,40 @@
+export const NSRP_ROW_LIMITS = {
+  education: {
+    level: 40,
+    school: 45,
+    course: 40,
+    year: 10,
+    undergradLevel: 25,
+    yearLastAttended: 10,
+    awards: 40,
+  },
+  technicalTraining: {
+    course: 40,
+    fromDate: 10,
+    toDate: 10,
+    institution: 45,
+    certificate: 30,
+  },
+  workExperience: {
+    company: 40,
+    address: 40,
+    position: 35,
+    fromDate: 10,
+    toDate: 10,
+    status: 20,
+  },
+  eligibility: {
+    eligibility: 40,
+    rating: 8,
+    examDate: 10,
+    license: 30,
+    validUntil: 10,
+  },
+  languages: {
+    name: 40,
+    read: 5,
+    write: 5,
+    speak: 5,
+    understand: 5,
+  },
+}

@@ -1,6 +1,9 @@
 ﻿import { useCallback, useEffect, useRef, useState } from "react"
 import { API_URL } from "../config"
+import { NSRP_SKILL_LABELS } from "../../shared/nsrpSkills.js"
+import { NSRP_ROW_LIMITS } from "../../shared/nsrpTableLimits.js"
 import Modal from "./Modal"
+import NsrpPdfPreview from "./NsrpPdfPreview"
 import Pagination from "./Pagination"
 import SortControl from "./SortControl"
 import ConfirmDialog from "./ConfirmDialog"
@@ -74,24 +77,35 @@ function NsrpSelect({ label, fieldKey, options, values, onChange, error }) {
   )
 }
 
+const NSRP_SKILL_OPTIONS = NSRP_SKILL_LABELS
+const NSRP_LANGUAGE_ROWS = ['English', 'Filipino', 'Others']
+const NSRP_EDUCATION_LEVELS = ['Elementary', 'Secondary', 'Tertiary', 'Graduate Studies']
+const NSRP_WORK_STATUS_OPTIONS = ['Permanent', 'Contractual', 'Part-time', 'Probationary']
+const NSRP_EMP_TYPE_EMPLOYED = ['Wage Employed', 'Self Employed']
+const NSRP_EMP_TYPE_UNEMPLOYED = ['New Entrant/Fresh Graduate', 'Finished Contract', 'Resigned', 'Retired', 'Terminated/Laidoff (local)', 'Terminated/Laidoff (abroad)', 'Others']
+
 const nsrpRowFields = {
-  education: [
-    ['level', 'Education level'],
-    ['school', 'School'],
-    ['course', 'Course / degree'],
-    ['year', 'Year graduated'],
-  ],
   technicalTraining: [
-    ['name', 'Training name'],
-    ['provider', 'Training provider'],
-    ['course', 'Course / specialization'],
-    ['year', 'Year completed'],
+    ['course', 'Training / vocational course'],
+    ['fromDate', 'From', 'date'],
+    ['toDate', 'To', 'date'],
+    ['institution', 'Training institution'],
+    ['certificate', 'Certificate received (NC I, NC II, …)'],
   ],
   workExperience: [
     ['company', 'Company'],
+    ['address', 'Address (city / municipality)'],
     ['position', 'Position'],
-    ['startDate', 'From'],
-    ['endDate', 'To'],
+    ['fromDate', 'From', 'date'],
+    ['toDate', 'To', 'date'],
+    ['status', 'Status', 'select', NSRP_WORK_STATUS_OPTIONS],
+  ],
+  eligibility: [
+    ['eligibility', 'Civil Service eligibility'],
+    ['rating', 'Rating'],
+    ['examDate', 'Date of examination', 'date'],
+    ['license', 'PRC license'],
+    ['validUntil', 'Valid until', 'date'],
   ],
 }
 
@@ -283,12 +297,39 @@ function JobsView({
   const applicantHasActiveFilters = jobFilters.activeCount > 0
   const [nsrpError, setNsrpError] = useState('')
   const [nsrpPreviewUrl, setNsrpPreviewUrl] = useState('')
+  const [nsrpPreviewBlob, setNsrpPreviewBlob] = useState(null)
   const [nsrpPreviewLoading, setNsrpPreviewLoading] = useState(false)
+  const [nsrpLayoutWarnings, setNsrpLayoutWarnings] = useState([])
+  const clearNsrpPreview = () => {
+    setNsrpPreviewUrl((current) => {
+      if (current) URL.revokeObjectURL(current)
+      return ''
+    })
+    setNsrpPreviewBlob(null)
+    setNsrpLayoutWarnings([])
+  }
   const setNsrp = (key, value) => {
-    setNsrpAnswers((current) => ({ ...current, [key]: value }))
+    setNsrpAnswers((current) => {
+      const next = { ...current, [key]: value }
+      // Conditional clears so contradictory answers never persist or print
+      if (key === 'activelyLooking' && value !== 'Yes') next.lookingDuration = ''
+      if (key === 'willingImmediately' && value !== 'No') next.willingWhen = ''
+      if (key === 'fourPs' && value !== 'Yes') next.fourPsId = ''
+      if (key === 'skills' && !(value || []).some((skill) => skill.toLowerCase() === 'others')) next.othersText = ''
+      if (key === 'employmentStatus') {
+        next.employmentTypeDetail = ''
+        next.terminatedAbroadCountry = ''
+        next.employmentTypeOther = ''
+      }
+      if (key === 'employmentTypeDetail') {
+        if (!/abroad/i.test(value || '')) next.terminatedAbroadCountry = ''
+        if (!/^others/i.test(value || '')) next.employmentTypeOther = ''
+      }
+      return next
+    })
     setNsrpFieldErrors((current) => ({ ...current, [key]: undefined }))
     setNsrpError('')
-    setNsrpPreviewUrl('')
+    clearNsrpPreview()
   }
   const updateNsrpRow = (section, index, field, value) => {
     setNsrpAnswers((current) => ({
@@ -297,7 +338,7 @@ function JobsView({
     }))
     setNsrpFieldErrors((current) => ({ ...current, [`${section}[${index}].${field}`]: undefined }))
     setNsrpError('')
-    setNsrpPreviewUrl('')
+    clearNsrpPreview()
   }
   const addNsrpRow = (section) => {
     const fields = nsrpRowFields[section]
@@ -305,22 +346,27 @@ function JobsView({
       ...current,
       [section]: [...(current[section] || []), Object.fromEntries(fields.map(([field]) => [field, '']))],
     }))
-    setNsrpPreviewUrl('')
+    clearNsrpPreview()
+  }
+  const toggleNsrpSkill = (skill) => {
+    const current = nsrpAnswers.skills || []
+    const selected = current.some((item) => item.toLowerCase() === skill.toLowerCase())
+    setNsrp('skills', selected ? current.filter((item) => item.toLowerCase() !== skill.toLowerCase()) : [...current, skill])
   }
   const removeNsrpRow = (section, index) => {
     setNsrpAnswers((current) => ({
       ...current,
       [section]: (current[section] || []).filter((_, rowIndex) => rowIndex !== index),
     }))
-    setNsrpPreviewUrl('')
+    clearNsrpPreview()
   }
   const nsrpStorageKey = `peso-nsrp-${currentUser?.id || currentUser?.email || 'applicant'}`
   const nsrpSteps = ['Personal information', 'Address & contact', 'Education & training', 'Work & skills', 'Employment & preferences', 'Preview']
   const nsrpStepFields = [
     ['surname', 'firstName', 'middleName', 'suffix', 'dob', 'placeOfBirth', 'sex', 'religion', 'civilStatus', 'height'],
-    ['addressStreet', 'addressBarangay', 'addressCity', 'addressProvince', 'tin', 'gsisSss', 'pagibig', 'philhealth', 'email', 'cellphone', 'landline', 'disability'],
-    ['education', 'technicalTraining'],
-    ['workExperience', 'skills'],
+    ['addressStreet', 'addressBarangay', 'addressCity', 'addressProvince', 'tin', 'gsisSss', 'pagibig', 'philhealth', 'email', 'cellphone', 'landline', 'disability', 'disabilityOthers'],
+    ['education', 'technicalTraining', 'eligibility'],
+    ['workExperience', 'skills', 'othersText', 'languages'],
     ['employmentStatus', 'employmentTypeDetail', 'activelyLooking', 'lookingDuration', 'willingImmediately', 'willingWhen', 'fourPs', 'fourPsId', 'occupation1', 'occupation2', 'occupation3', 'occupation4', 'localPref1', 'localPref2', 'localPref3', 'overseasPref1', 'overseasPref2', 'overseasPref3', 'expectedSalary', 'passportNo', 'passportExpiry'],
   ]
   useEffect(() => {
@@ -349,9 +395,30 @@ function JobsView({
       setNsrpError('Your session has expired. Sign in again to continue.')
       return false
     }
+    // Client-side phone checks (server re-validates)
+    const phoneErrors = {}
+    for (const field of ['landline', 'cellphone']) {
+      const value = (nsrpAnswers[field] || '').trim()
+      if (!value) continue
+      if (!/^[+()\d\s-]+$/.test(value)) phoneErrors[field] = 'Use only digits, spaces, "+", "-", and parentheses.'
+      else {
+        const digits = value.replace(/\D/g, '').length
+        if (digits < 7 || digits > 15) phoneErrors[field] = 'Enter 7 to 15 digits.'
+      }
+    }
+    const mobile = (nsrpAnswers.cellphone || '').replace(/[\s-]/g, '')
+    if (mobile && !phoneErrors.cellphone && !/^(09\d{9}|\+639\d{9})$/.test(mobile)) {
+      phoneErrors.cellphone = 'Enter a valid mobile number (09XXXXXXXXX or +639XXXXXXXXX).'
+    }
+    if (Object.keys(phoneErrors).length) {
+      showNsrpFieldErrors(phoneErrors)
+      setNsrpError('Check the highlighted phone fields.')
+      return false
+    }
     setNsrpPreviewLoading(true)
     setNsrpError('')
     setNsrpFieldErrors({})
+    setNsrpLayoutWarnings([])
     try {
       const response = await fetch(`${API_URL}/api/nsrp/preview`, {
         method: 'POST',
@@ -369,7 +436,21 @@ function JobsView({
         setNsrpError('The preview service returned an invalid document. Please try again.')
         return false
       }
-      setNsrpPreviewUrl(URL.createObjectURL(blob))
+      const layoutWarningHeader = response.headers.get('X-NSRP-Layout-Warnings')
+      if (layoutWarningHeader) {
+        try {
+          setNsrpLayoutWarnings(JSON.parse(layoutWarningHeader))
+        } catch (error) {
+          console.error('Could not read NSRP PDF layout warnings:', error)
+          setNsrpError('The preview was created, but its print-fit warnings could not be read. Please regenerate it.')
+          return false
+        }
+      }
+      setNsrpPreviewUrl((current) => {
+        if (current) URL.revokeObjectURL(current)
+        return URL.createObjectURL(blob)
+      })
+      setNsrpPreviewBlob(blob)
       setNsrpStep(5)
       return true
     } catch (error) {
@@ -462,7 +543,7 @@ function JobsView({
     })
     setNsrpFieldErrors({})
     setNsrpError('')
-    setNsrpPreviewUrl('')
+    clearNsrpPreview()
     setNsrpStep(0)
     setApplicationJob(job)
     setApplicationTab('online')
@@ -813,7 +894,7 @@ function JobsView({
             )}
 
             {applicationTab === 'online' && (
-              <div className="mt-4 max-h-[55vh] space-y-4 overflow-y-auto pr-1">
+              <div className={`mt-4 space-y-4 ${nsrpStep === 5 ? '' : 'max-h-[55vh] overflow-y-auto pr-1'}`}>
                 <p className="rounded-xl border border-cyan-200 bg-cyan-50 p-3 text-sm text-cyan-900">
                   Your answers are saved on this device as you move between steps. The server validates every field before generating the preview.
                 </p>
@@ -854,23 +935,82 @@ function JobsView({
                         <NsrpField {...fieldProps} error={nsrpFieldErrors.email} label="Email Address" fieldKey="email" type="email" />
                         <NsrpField {...fieldProps} error={nsrpFieldErrors.cellphone} label="Cellphone Number" fieldKey="cellphone" />
                         <NsrpField {...fieldProps} error={nsrpFieldErrors.landline} label="Landline Number" fieldKey="landline" />
-                        <NsrpField {...fieldProps} error={nsrpFieldErrors.disability} label="Disability (if any)" fieldKey="disability" placeholder="e.g. Visual, Hearing, Physical" />
+                        <NsrpSelect {...fieldProps} error={nsrpFieldErrors.disability} label="Disability (if any)" fieldKey="disability" options={['Visual', 'Hearing', 'Speech', 'Physical', 'Others']} />
+                        {nsrpAnswers.disability === 'Others' && (
+                          <NsrpField {...fieldProps} error={nsrpFieldErrors.disabilityOthers} label="Others, specify" fieldKey="disabilityOthers" placeholder="Describe the disability" />
+                        )}
                       </div>
                         </div>
                       )}
                       {nsrpStep === 2 && (
                         <div className="space-y-6">
+                          <section className="space-y-3">
+                            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-600">IV. Educational Background</h3>
+                            <div className="space-y-3">
+                              {NSRP_EDUCATION_LEVELS.map((level) => {
+                                const row = (nsrpAnswers.education || []).find((entry) => entry.level === level) || {}
+                                const hasCourse = level === 'Tertiary' || level === 'Graduate Studies'
+                                const update = (field, value) => {
+                                  const next = [...(nsrpAnswers.education || [])]
+                                  const index = next.findIndex((entry) => entry.level === level)
+                                  const updated = { ...row, level, [field]: value }
+                                  if (index >= 0) next[index] = updated
+                                  else next.push(updated)
+                                  setNsrp('education', next)
+                                }
+                                return (
+                                  <div key={level} className="rounded-xl border border-slate-200 p-3">
+                                    <p className="text-xs font-bold text-slate-700">{level}</p>
+                                    <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                                      {[['school', 'School'], ...(hasCourse ? [['course', 'Course / degree']] : []), ['year', 'Year graduated'], ['undergradLevel', 'If undergraduate, what level?'], ['yearLastAttended', 'Year last attended'], ['awards', 'Awards received']].map(([field, label]) => {
+                                        const fieldKey = `education[${level}].${field}`
+                                        const limit = NSRP_ROW_LIMITS.education[field]
+                                        const value = row[field] || ''
+                                        const errorId = `nsrp-error-${fieldKey}`
+                                        const counterId = `nsrp-counter-${fieldKey}`
+                                        const showLongEntryHint = limit && value.length >= Math.ceil(limit * 0.8)
+                                        return (
+                                          <label key={fieldKey} className="block text-xs font-medium text-slate-700">
+                                            {label}
+                                            <input
+                                              type="text"
+                                              value={value}
+                                              maxLength={limit}
+                                              onChange={(event) => update(field, event.target.value)}
+                                              aria-invalid={Boolean(nsrpFieldErrors[fieldKey])}
+                                              aria-describedby={[
+                                                nsrpFieldErrors[fieldKey] ? errorId : '',
+                                                limit ? counterId : '',
+                                              ].filter(Boolean).join(' ') || undefined}
+                                              className={`mt-1 w-full rounded-xl border bg-white px-3 py-2 text-sm text-black ${nsrpFieldErrors[fieldKey] ? 'border-rose-500' : 'border-slate-300'}`}
+                                            />
+                                            {limit && (
+                                              <span id={counterId} aria-live="polite" className="mt-1 block text-right text-[11px] text-slate-500">
+                                                {value.length} / {limit}
+                                              </span>
+                                            )}
+                                            {showLongEntryHint && <span className="block text-[11px] text-amber-700">Long entries will be wrapped or shortened on the printed form.</span>}
+                                            {nsrpFieldErrors[fieldKey] && <span id={errorId} role="alert" className="mt-1 block text-rose-600">{nsrpFieldErrors[fieldKey]}</span>}
+                                          </label>
+                                        )
+                                      })}
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </section>
                           {[
-                            ['education', 'Educational Background'],
-                            ['technicalTraining', 'Technical / Vocational Training'],
-                          ].map(([section, title]) => (
+                            ['technicalTraining', 'V. Technical / Vocational Training (up to 3)', 3],
+                            ['eligibility', 'VI. Eligibility / Professional License (up to 2)', 2],
+                          ].map(([section, title, maxRows]) => (
                             <section key={section} className="space-y-3">
                               <div className="flex items-center justify-between gap-3">
                                 <h3 className="text-sm font-bold uppercase tracking-wider text-slate-600">{title}</h3>
                                 <button
                                   type="button"
                                   onClick={() => addNsrpRow(section)}
-                                  disabled={(nsrpAnswers[section] || []).length >= 10}
+                                  disabled={(nsrpAnswers[section] || []).length >= maxRows}
                                   className="rounded-lg border border-cyan-600 px-3 py-1 text-xs font-semibold text-cyan-800 disabled:opacity-40"
                                 >
                                   Add row
@@ -880,19 +1020,46 @@ function JobsView({
                               {(nsrpAnswers[section] || []).map((row, rowIndex) => (
                                 <div key={`${section}-${rowIndex}`} className="rounded-xl border border-slate-200 p-3">
                                   <div className="grid gap-3 sm:grid-cols-2">
-                                    {nsrpRowFields[section].map(([field, label]) => {
+                                    {nsrpRowFields[section].map(([field, label, type, options]) => {
                                       const fieldKey = `${section}[${rowIndex}].${field}`
+                                      const limit = type === 'date' || type === 'select' ? undefined : NSRP_ROW_LIMITS[section]?.[field]
+                                      const value = row[field] || ''
+                                      const errorId = `nsrp-error-${fieldKey}`
+                                      const counterId = `nsrp-counter-${fieldKey}`
+                                      const showLongEntryHint = limit && value.length >= Math.ceil(limit * 0.8)
                                       return (
                                         <label key={fieldKey} className="block text-xs font-medium text-slate-700">
                                           {label}
-                                          <input
-                                            type={['startDate', 'endDate'].includes(field) ? 'date' : 'text'}
-                                            value={row[field] || ''}
-                                            onChange={(event) => updateNsrpRow(section, rowIndex, field, event.target.value)}
-                                            aria-invalid={Boolean(nsrpFieldErrors[fieldKey])}
-                                            className={`mt-1 w-full rounded-xl border bg-white px-3 py-2 text-sm text-black ${nsrpFieldErrors[fieldKey] ? 'border-rose-500' : 'border-slate-300'}`}
-                                          />
-                                          {nsrpFieldErrors[fieldKey] && <span role="alert" className="mt-1 block text-rose-600">{nsrpFieldErrors[fieldKey]}</span>}
+                                          {type === 'select' ? (
+                                            <select
+                                              value={row[field] || ''}
+                                              onChange={(event) => updateNsrpRow(section, rowIndex, field, event.target.value)}
+                                              className={`mt-1 w-full rounded-xl border bg-white px-3 py-2 text-sm text-black ${nsrpFieldErrors[fieldKey] ? 'border-rose-500' : 'border-slate-300'}`}
+                                            >
+                                              <option value="">Select…</option>
+                                              {options.map((option) => <option key={option} value={option}>{option}</option>)}
+                                            </select>
+                                          ) : (
+                                            <input
+                                              type={type === 'date' ? 'date' : 'text'}
+                                              value={value}
+                                              maxLength={limit}
+                                              onChange={(event) => updateNsrpRow(section, rowIndex, field, event.target.value)}
+                                              aria-invalid={Boolean(nsrpFieldErrors[fieldKey])}
+                                              aria-describedby={[
+                                                nsrpFieldErrors[fieldKey] ? errorId : '',
+                                                limit ? counterId : '',
+                                              ].filter(Boolean).join(' ') || undefined}
+                                              className={`mt-1 w-full rounded-xl border bg-white px-3 py-2 text-sm text-black ${nsrpFieldErrors[fieldKey] ? 'border-rose-500' : 'border-slate-300'}`}
+                                            />
+                                          )}
+                                          {limit && (
+                                            <span id={counterId} aria-live="polite" className="mt-1 block text-right text-[11px] text-slate-500">
+                                              {value.length} / {limit}
+                                            </span>
+                                          )}
+                                          {showLongEntryHint && <span className="block text-[11px] text-amber-700">Long entries will be wrapped or shortened on the printed form.</span>}
+                                          {nsrpFieldErrors[fieldKey] && <span id={errorId} role="alert" className="mt-1 block text-rose-600">{nsrpFieldErrors[fieldKey]}</span>}
                                         </label>
                                       )
                                     })}
@@ -910,12 +1077,79 @@ function JobsView({
                       {nsrpStep === 3 && (
                         <div className="space-y-6">
                           <section className="space-y-3">
+                            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-600">III. Language / Dialect Proficiency</h3>
+                            <div className="overflow-x-auto">
+                              <table className="w-full min-w-[420px] text-sm">
+                                <thead>
+                                  <tr className="text-left text-xs uppercase tracking-wider text-slate-500">
+                                    <th className="pb-1 pr-3 font-semibold">Language</th>
+                                    {['Read', 'Write', 'Speak', 'Understand'].map((col) => <th key={col} className="pb-1 pr-3 text-center font-semibold">{col}</th>)}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {NSRP_LANGUAGE_ROWS.map((name) => {
+                                    const rows = nsrpAnswers.languages || []
+                                    const row = rows.find((entry) => entry.name === name) || { name }
+                                    const isOther = name === 'Others'
+                                    const otherNameLimit = NSRP_ROW_LIMITS.languages.name
+                                    const otherNameCounterId = `nsrp-counter-language-${name}`
+                                    const otherName = row.otherName || ''
+                                    const setLang = (field, value) => {
+                                      const next = [...rows]
+                                      const index = next.findIndex((entry) => entry.name === name)
+                                      const updated = { ...row, name, [field]: value }
+                                      if (index >= 0) next[index] = updated
+                                      else next.push(updated)
+                                      setNsrp('languages', next)
+                                    }
+                                    return (
+                                      <tr key={name} className="border-t border-slate-100">
+                                        <td className="py-1.5 pr-3">
+                                          {isOther ? (
+                                            <>
+                                              <input
+                                                type="text"
+                                                value={otherName}
+                                                maxLength={otherNameLimit}
+                                                placeholder="Other language"
+                                                onChange={(event) => setLang('otherName', event.target.value)}
+                                                aria-describedby={otherNameCounterId}
+                                                className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-black"
+                                              />
+                                              <span id={otherNameCounterId} aria-live="polite" className="mt-1 block text-right text-[11px] text-slate-500">
+                                                {otherName.length} / {otherNameLimit}
+                                              </span>
+                                              {otherName.length >= Math.ceil(otherNameLimit * 0.8) && (
+                                                <span className="block text-[11px] text-amber-700">Long entries will be wrapped or shortened on the printed form.</span>
+                                              )}
+                                            </>
+                                          ) : <span className="text-sm font-medium text-black">{name}</span>}
+                                        </td>
+                                        {['read', 'write', 'speak', 'understand'].map((field) => (
+                                          <td key={field} className="py-1.5 pr-3 text-center">
+                                            <input
+                                              type="checkbox"
+                                              checked={Boolean(row[field])}
+                                              onChange={(event) => setLang(field, event.target.checked)}
+                                              className="h-4 w-4 accent-cyan-600"
+                                              aria-label={`${name} ${field}`}
+                                            />
+                                          </td>
+                                        ))}
+                                      </tr>
+                                    )
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          </section>
+                          <section className="space-y-3">
                             <div className="flex items-center justify-between gap-3">
-                              <h3 className="text-sm font-bold uppercase tracking-wider text-slate-600">Work Experience</h3>
+                              <h3 className="text-sm font-bold uppercase tracking-wider text-slate-600">VII. Work Experience (up to 5)</h3>
                               <button
                                 type="button"
                                 onClick={() => addNsrpRow('workExperience')}
-                                disabled={(nsrpAnswers.workExperience || []).length >= 10}
+                                disabled={(nsrpAnswers.workExperience || []).length >= 5}
                                 className="rounded-lg border border-cyan-600 px-3 py-1 text-xs font-semibold text-cyan-800 disabled:opacity-40"
                               >
                                 Add row
@@ -925,18 +1159,29 @@ function JobsView({
                             {(nsrpAnswers.workExperience || []).map((row, rowIndex) => (
                               <div key={`workExperience-${rowIndex}`} className="rounded-xl border border-slate-200 p-3">
                                 <div className="grid gap-3 sm:grid-cols-2">
-                                  {nsrpRowFields.workExperience.map(([field, label]) => {
+                                  {nsrpRowFields.workExperience.map(([field, label, type, options]) => {
                                     const fieldKey = `workExperience[${rowIndex}].${field}`
                                     return (
                                       <label key={fieldKey} className="block text-xs font-medium text-slate-700">
                                         {label}
-                                        <input
-                                          type={['startDate', 'endDate'].includes(field) ? 'date' : 'text'}
-                                          value={row[field] || ''}
-                                          onChange={(event) => updateNsrpRow('workExperience', rowIndex, field, event.target.value)}
-                                          aria-invalid={Boolean(nsrpFieldErrors[fieldKey])}
-                                          className={`mt-1 w-full rounded-xl border bg-white px-3 py-2 text-sm text-black ${nsrpFieldErrors[fieldKey] ? 'border-rose-500' : 'border-slate-300'}`}
-                                        />
+                                        {type === 'select' ? (
+                                          <select
+                                            value={row[field] || ''}
+                                            onChange={(event) => updateNsrpRow('workExperience', rowIndex, field, event.target.value)}
+                                            className={`mt-1 w-full rounded-xl border bg-white px-3 py-2 text-sm text-black ${nsrpFieldErrors[fieldKey] ? 'border-rose-500' : 'border-slate-300'}`}
+                                          >
+                                            <option value="">Select…</option>
+                                            {options.map((option) => <option key={option} value={option}>{option}</option>)}
+                                          </select>
+                                        ) : (
+                                          <input
+                                            type={type === 'date' ? 'date' : 'text'}
+                                            value={row[field] || ''}
+                                            onChange={(event) => updateNsrpRow('workExperience', rowIndex, field, event.target.value)}
+                                            aria-invalid={Boolean(nsrpFieldErrors[fieldKey])}
+                                            className={`mt-1 w-full rounded-xl border bg-white px-3 py-2 text-sm text-black ${nsrpFieldErrors[fieldKey] ? 'border-rose-500' : 'border-slate-300'}`}
+                                          />
+                                        )}
                                         {nsrpFieldErrors[fieldKey] && <span role="alert" className="mt-1 block text-rose-600">{nsrpFieldErrors[fieldKey]}</span>}
                                       </label>
                                     )
@@ -950,51 +1195,32 @@ function JobsView({
                             {(nsrpAnswers.workExperience || []).length === 0 && <p className="text-xs text-slate-500">No entries added.</p>}
                           </section>
                           <section className="space-y-3">
-                            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-600">Skills <span className="font-normal normal-case text-slate-400">(optional)</span></h3>
-                            <div className="flex gap-2">
-                              <input
-                                type="text"
-                                value={nsrpSkillInput}
-                                maxLength={50}
-                                onChange={(event) => setNsrpSkillInput(event.target.value)}
-                                onKeyDown={(event) => {
-                                  if (event.key === 'Enter') {
-                                    event.preventDefault()
-                                    const skill = nsrpSkillInput.trim()
-                                    if (!skill) return
-                                    if ((nsrpAnswers.skills || []).length < 30 && !(nsrpAnswers.skills || []).some((existing) => existing.toLowerCase() === skill.toLowerCase())) {
-                                      setNsrp('skills', [...(nsrpAnswers.skills || []), skill])
-                                    }
-                                    setNsrpSkillInput('')
-                                  }
-                                }}
-                                placeholder="Type a skill and press Enter"
-                                className="min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-black"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const skill = nsrpSkillInput.trim()
-                                  if (!skill) return
-                                  if ((nsrpAnswers.skills || []).length < 30 && !(nsrpAnswers.skills || []).some((existing) => existing.toLowerCase() === skill.toLowerCase())) {
-                                    setNsrp('skills', [...(nsrpAnswers.skills || []), skill])
-                                  }
-                                  setNsrpSkillInput('')
-                                }}
-                                disabled={!nsrpSkillInput.trim() || (nsrpAnswers.skills || []).length >= 30}
-                                className="rounded-xl bg-cyan-500 px-3 py-2 text-sm font-semibold text-slate-950 disabled:opacity-40"
-                              >
-                                Add
-                              </button>
+                            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-600">VIII. Other Skills <span className="font-normal normal-case text-slate-400">(optional)</span></h3>
+                            <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+                              {NSRP_SKILL_OPTIONS.map((skill) => {
+                                const checked = (nsrpAnswers.skills || []).some((item) => item.toLowerCase() === skill.toLowerCase())
+                                return (
+                                  <label key={skill} className={`flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs font-medium ${checked ? 'border-cyan-500 bg-cyan-50 text-cyan-900' : 'border-slate-200 bg-white text-slate-700'}`}>
+                                    <input type="checkbox" checked={checked} onChange={() => toggleNsrpSkill(skill)} className="h-3.5 w-3.5 accent-cyan-600" />
+                                    {skill}
+                                  </label>
+                                )
+                              })}
                             </div>
+                            {(nsrpAnswers.skills || []).some((item) => item.toLowerCase() === 'others') && (
+                              <label className="block text-xs font-medium text-slate-700">
+                                Others, specify (max 60 characters)
+                                <input
+                                  type="text"
+                                  value={nsrpAnswers.othersText || ''}
+                                  maxLength={60}
+                                  onChange={(event) => setNsrp('othersText', event.target.value)}
+                                  className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-black"
+                                />
+                                {nsrpFieldErrors.othersText && <span role="alert" className="mt-1 block text-rose-600">{nsrpFieldErrors.othersText}</span>}
+                              </label>
+                            )}
                             {nsrpFieldErrors.skills && <p role="alert" className="text-xs text-rose-600">{nsrpFieldErrors.skills}</p>}
-                            <div className="flex flex-wrap gap-2">
-                              {(nsrpAnswers.skills || []).map((skill) => (
-                                <button key={skill} type="button" onClick={() => setNsrp('skills', nsrpAnswers.skills.filter((item) => item !== skill))} className="rounded-full border border-cyan-300 bg-cyan-50 px-3 py-1 text-xs font-medium text-cyan-900">
-                                  {skill} <span aria-hidden="true">×</span>
-                                </button>
-                              ))}
-                            </div>
                           </section>
                         </div>
                       )}
@@ -1003,13 +1229,32 @@ function JobsView({
                       <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Employment</p>
                       <div className="grid gap-3 sm:grid-cols-2">
                         <NsrpSelect {...fieldProps} error={nsrpFieldErrors.employmentStatus} label="Employment Status" fieldKey="employmentStatus" options={['Employed', 'Unemployed']} />
-                        <NsrpField {...fieldProps} error={nsrpFieldErrors.employmentTypeDetail} label="Type / Details" fieldKey="employmentTypeDetail" placeholder="e.g. Fresh Graduate, Finished Contract" />
+                        {nsrpAnswers.employmentStatus === 'Employed' && (
+                          <NsrpSelect {...fieldProps} error={nsrpFieldErrors.employmentTypeDetail} label="Type" fieldKey="employmentTypeDetail" options={NSRP_EMP_TYPE_EMPLOYED} />
+                        )}
+                        {nsrpAnswers.employmentStatus === 'Unemployed' && (
+                          <>
+                            <NsrpSelect {...fieldProps} error={nsrpFieldErrors.employmentTypeDetail} label="Type" fieldKey="employmentTypeDetail" options={NSRP_EMP_TYPE_UNEMPLOYED} />
+                            {/abroad/i.test(nsrpAnswers.employmentTypeDetail || '') && (
+                              <NsrpField {...fieldProps} error={nsrpFieldErrors.terminatedAbroadCountry} label="Specify country" fieldKey="terminatedAbroadCountry" />
+                            )}
+                            {/^Others/i.test(nsrpAnswers.employmentTypeDetail || '') && (
+                              <NsrpField {...fieldProps} error={nsrpFieldErrors.employmentTypeOther} label="Others, specify" fieldKey="employmentTypeOther" />
+                            )}
+                          </>
+                        )}
                         <NsrpSelect {...fieldProps} error={nsrpFieldErrors.activelyLooking} label="Actively looking for work?" fieldKey="activelyLooking" options={['Yes', 'No']} />
-                        <NsrpField {...fieldProps} error={nsrpFieldErrors.lookingDuration} label="How long looking for work?" fieldKey="lookingDuration" placeholder="e.g. 3 months" />
+                        {nsrpAnswers.activelyLooking === 'Yes' && (
+                          <NsrpField {...fieldProps} error={nsrpFieldErrors.lookingDuration} label="How long looking for work?" fieldKey="lookingDuration" placeholder="e.g. 3 months" />
+                        )}
                         <NsrpSelect {...fieldProps} error={nsrpFieldErrors.willingImmediately} label="Willing to work immediately?" fieldKey="willingImmediately" options={['Yes', 'No']} />
-                        <NsrpField {...fieldProps} error={nsrpFieldErrors.willingWhen} label="If no, when?" fieldKey="willingWhen" />
+                        {nsrpAnswers.willingImmediately === 'No' && (
+                          <NsrpField {...fieldProps} error={nsrpFieldErrors.willingWhen} label="If no, when?" fieldKey="willingWhen" />
+                        )}
                         <NsrpSelect {...fieldProps} error={nsrpFieldErrors.fourPs} label="4Ps beneficiary?" fieldKey="fourPs" options={['Yes', 'No']} />
-                        <NsrpField {...fieldProps} error={nsrpFieldErrors.fourPsId} label="4Ps Household ID No." fieldKey="fourPsId" />
+                        {nsrpAnswers.fourPs === 'Yes' && (
+                          <NsrpField {...fieldProps} error={nsrpFieldErrors.fourPsId} label="4Ps Household ID No." fieldKey="fourPsId" />
+                        )}
                       </div>
                       <p className="text-xs font-bold uppercase tracking-wider text-slate-500">II. Job Preference</p>
                       <div className="grid gap-3 sm:grid-cols-2">
@@ -1072,6 +1317,19 @@ function JobsView({
             {applicationTab === 'online' && nsrpStep === 5 && (
               <div className="mt-4">
                 <p className="mb-3 text-sm text-slate-600">Review the generated PDF below. Use Edit to return to a step. Any change clears this preview and requires a new one before submission.</p>
+                {nsrpLayoutWarnings.length > 0 && (
+                  <div role="status" className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+                    <p className="font-semibold">Some fields need a print-fit review:</p>
+                    <ul className="mt-1 list-inside list-disc">
+                      {nsrpLayoutWarnings.map(({ field, reason }) => (
+                        <li key={`${field}-${reason}`}>
+                          {field}: {reason === 'truncated' ? 'shortened on the printed form' : 'printed at the minimum font size'}
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="mt-1">Edit these entries to improve readability before confirming.</p>
+                  </div>
+                )}
                 <div className="mb-3 flex flex-wrap gap-2">
                   {nsrpSteps.slice(0, 5).map((step, index) => (
                     <button key={step} type="button" onClick={() => setNsrpStep(index)} className="rounded-xl border border-slate-300 px-3 py-1.5 text-sm font-semibold text-cyan-800">
@@ -1079,15 +1337,18 @@ function JobsView({
                     </button>
                   ))}
                 </div>
-                {nsrpPreviewUrl ? (
-                  <iframe src={nsrpPreviewUrl} title="Generated NSRP PDF preview" className="h-[55vh] w-full rounded-xl border border-slate-300 bg-white" />
-                ) : (
-                  <p className="rounded-xl border border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-600">Preview not generated. Return to the form and generate the PDF again.</p>
-                )}
+                <NsrpPdfPreview
+                  blob={nsrpPreviewBlob}
+                  blobUrl={nsrpPreviewUrl}
+                  loading={nsrpPreviewLoading}
+                  error={!nsrpPreviewLoading && nsrpError && !nsrpPreviewUrl ? nsrpError : ''}
+                  onRetry={generateNsrpPreview}
+                  downloadName={`NSRP-${(nsrpAnswers.surname || 'form').replace(/\s+/g, '_')}.pdf`}
+                />
               </div>
             )}
 
-            {nsrpError && <p role="alert" className="mt-4 rounded-xl border border-rose-300 bg-rose-50 p-3 text-sm text-rose-700">{nsrpError}</p>}
+            {nsrpError && !(applicationTab === 'online' && nsrpStep === 5 && !nsrpPreviewUrl) && <p role="alert" className="mt-4 rounded-xl border border-rose-300 bg-rose-50 p-3 text-sm text-rose-700">{nsrpError}</p>}
 
             {applicationTab === 'online' && (
               <div className="mt-5 flex flex-wrap justify-between gap-2 border-t border-slate-200 pt-4">
@@ -1128,7 +1389,7 @@ function JobsView({
                           try { localStorage.removeItem(nsrpStorageKey) } catch (error) { console.error('Could not clear NSRP draft:', error) }
                           setApplicationJob(null)
                           setNsrpAnswers({})
-                          setNsrpPreviewUrl('')
+                          clearNsrpPreview()
                         } else if (result?.error) {
                           setNsrpError(result.error)
                         }
@@ -1647,4 +1908,3 @@ function JobsView({
 }
 
 export default JobsView
-

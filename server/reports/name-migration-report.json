@@ -1,0 +1,205 @@
+{
+  "ranAt": "2026-10-26T13:37:03.206Z",
+  "dryRun": false,
+  "migrated": [
+    {
+      "id": "6a77e8c9d2e698c518b79221",
+      "email": "user2@gmail.com",
+      "from": "William D",
+      "to": {
+        "firstName": "William",
+        "middleName": "",
+        "lastName": "D",
+        "suffix": ""
+      }
+    },
+    {
+      "id": "6a77e964222ce18be47d1840",
+      "email": "user1@gmail.com",
+      "from": "User One",
+      "to": {
+        "firstName": "User",
+        "middleName": "",
+        "lastName": "One",
+        "suffix": ""
+      }
+    },
+    {
+      "id": "6a8079fe6ce9387571eada66",
+      "email": "third@gmail.com",
+      "from": "third123",
+      "to": {
+        "firstName": "Third123",
+        "middleName": "",
+        "lastName": "",
+        "suffix": ""
+      }
+    },
+    {
+      "id": "6a816e7310dde2d32132e2e9",
+      "email": "dajac@gmail.com",
+      "from": "Jwill",
+      "to": {
+        "firstName": "Jwill",
+        "middleName": "",
+        "lastName": "",
+        "suffix": ""
+      }
+    },
+    {
+      "id": "6a817c664915de6e5f125333",
+      "email": "melvic@gmail.com",
+      "from": "melvic",
+      "to": {
+        "firstName": "Melvic",
+        "middleName": "",
+        "lastName": "",
+        "suffix": ""
+      }
+    },
+    {
+      "id": "6abe6dd43de7350f9b38a782",
+      "email": "qa@gmail.com",
+      "from": "QA",
+      "to": {
+        "firstName": "Qa",
+        "middleName": "",
+        "lastName": "",
+        "suffix": ""
+      }
+    },
+    {
+      "id": "6abe715c910d785204750d11",
+      "email": "QA1@gmail.com",
+      "from": "QA1",
+      "to": {
+        "firstName": "Qa1",
+        "middleName": "",
+        "lastName": "",
+        "suffix": ""
+      }
+    },
+    {
+      "id": "6abe7f0eb63149343ef549df",
+      "email": "omg@gmail.com",
+      "from": "omg",
+      "to": {
+        "firstName": "Omg",
+        "middleName": "",
+        "lastName": "",
+        "suffix": ""
+      }
+    },
+    {
+      "id": "6ad75dea6623cea9dfa2f318",
+      "email": "111@gmail.com",
+      "from": "111",
+      "to": {
+        "firstName": "111",
+        "middleName": "",
+        "lastName": "",
+        "suffix": ""
+      }
+    },
+    {
+      "id": "6ad7651c52a25661bf93cf54",
+      "email": "doctest1792501020807@example.com",
+      "from": "Doc Test",
+      "to": {
+        "firstName": "Doc",
+        "middleName": "",
+        "lastName": "Test",
+        "suffix": ""
+      }
+    },
+    {
+      "id": "6ad7655ae570d5707a5904fa",
+      "email": "doctest2-1792501082428@example.com",
+      "from": "Doc Test",
+      "to": {
+        "firstName": "Doc",
+        "middleName": "",
+        "lastName": "Test",
+        "suffix": ""
+      }
+    },
+    {
+      "id": "6ad765d2e570d5707a5904fb",
+      "email": "rt3-1792501202203@example.com",
+      "from": "T",
+      "to": {
+        "firstName": "T",
+        "middleName": "",
+        "lastName": "",
+        "suffix": ""
+      }
+    },
+    {
+      "id": "6ad76719e570d5707a591b46",
+      "email": "superman@gmail.com",
+      "from": "superman",
+      "to": {
+        "firstName": "Superman",
+        "middleName": "",
+        "lastName": "",
+        "suffix": ""
+      }
+    },
+    {
+      "id": "6ad76e426f54b3a1ed3f5a0a",
+      "email": "V.erify.Test+1792503362541@GMAIL.com",
+      "from": "V",
+      "to": {
+        "firstName": "V",
+        "middleName": "",
+        "lastName": "",
+        "suffix": ""
+      }
+    },
+    {
+      "id": "6ad76e426f54b3a1ed3f5a0b",
+      "email": "verify-1792503362541@gmail.com",
+      "from": "V",
+      "to": {
+        "firstName": "V",
+        "middleName": "",
+        "lastName": "",
+        "suffix": ""
+      }
+    },
+    {
+      "id": "6ad76e426f54b3a1ed3f5a0c",
+      "email": "verify1792503362541+alias@gmail.com",
+      "from": "Alias",
+      "to": {
+        "firstName": "Alias",
+        "middleName": "",
+        "lastName": "",
+        "suffix": ""
+      }
+    },
+    {
+      "id": "6ad7706c85917f0306360f65",
+      "email": "pwtest-1792503916841@example.com",
+      "from": "PW Test",
+      "to": {
+        "firstName": "Pw",
+        "middleName": "",
+        "lastName": "Test",
+        "suffix": ""
+      }
+    },
+    {
+      "id": "6ad7718206cc30beecef1bd2",
+      "email": "regtest-1792504193979@example.com",
+      "from": "Reg Test",
+      "to": {
+        "firstName": "Reg",
+        "middleName": "",
+        "lastName": "Test",
+        "suffix": ""
+      }
+    }
+  ],
+  "skipped": []
+}
