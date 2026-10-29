@@ -35,7 +35,7 @@ async function compressImageIfNeeded(file) {
 
 const labelCls = "block text-sm font-semibold text-[#071c35]"
 const helperCls = "mt-1 text-xs text-[#5c7490]"
-const selectCls = "w-full rounded-[10px] border border-[#c4d4e5] bg-[#f8fbfe] px-3 py-2.5 text-sm text-[#071c35]"
+const selectCls = "shared-form-control w-full rounded-[10px] border border-[#c4d4e5] bg-[#f8fbfe] px-3 py-2.5 text-sm text-[#071c35]"
 
 function FileField({ label, hint, required, file, error, onSelect, onRemove, disabled }) {
   const inputRef = useRef(null)

@@ -5,7 +5,7 @@ const ACCEPTED_TYPES = ["image/png", "image/jpeg"]
 
 // Crop fully transparent margins off a canvas and return a PNG data URL.
 function canvasToTrimmedPng(canvas) {
-  const context = canvas.getContext("2d")
+  const context = canvas.getContext("2d", { willReadFrequently: true })
   const { width, height } = canvas
   const pixels = context.getImageData(0, 0, width, height).data
   let minX = width
@@ -51,7 +51,7 @@ export default function NsrpSignatureInput({ value, onChange, error }) {
   const redraw = () => {
     const canvas = canvasRef.current
     if (!canvas) return
-    const context = canvas.getContext("2d")
+    const context = canvas.getContext("2d", { willReadFrequently: true })
     context.clearRect(0, 0, canvas.width, canvas.height)
     context.lineWidth = 2.5
     context.lineCap = "round"

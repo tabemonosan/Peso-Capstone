@@ -1,11 +1,15 @@
 // @vitest-environment node
 // Integration tests for the NSRP sign-up flow against a real MongoDB
 // (mongodb-memory-server). The Express app is exercised over HTTP via supertest.
+import fs from 'node:fs'
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest'
 import request from 'supertest'
 import mongoose from 'mongoose'
 import jwt from 'jsonwebtoken'
-import { startTestDb, stopTestDb, clearDb, validNsrpAnswers, pdfBuffer, signupRequest, FIVE_MB } from './helpers.js'
+import { PDFDocument } from 'pdf-lib'
+import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs'
+import { PNG } from 'pngjs'
+import { startTestDb, stopTestDb, clearDb, validNsrpAnswers, pdfBuffer, signupRequest, emailProofFor, FIVE_MB } from './helpers.js'
 
 // Failure injection switches, flipped by individual tests.
 const failure = vi.hoisted(() => ({ pdf: false, createUser: false }))
@@ -76,6 +80,40 @@ afterEach(() => {
 })
 
 describe('POST /api/signup (real database)', () => {
+  it('allows the unauthenticated employer Form 2 preview before account creation', async () => {
+    const signature = new PNG({ width: 1, height: 1 })
+    signature.data = Buffer.from([0, 0, 0, 255])
+    const signatureDataUrl = `data:image/png;base64,${PNG.sync.write(signature).toString('base64')}`
+    const res = await request(app).post('/api/employer-registration/preview').send({
+      companyName: 'Example Works',
+      contactName: 'Jamie Cruz',
+      email: 'employer-preview@example.com',
+      phone: '09171234567',
+      representativeName: 'Jamie Cruz',
+      certified: true,
+      signatureDataUrl,
+      registrationDetails: {
+        acronym: 'EW',
+        taxIdentificationNumber: '123-456-789',
+        employerType: 'Private',
+        workforceSize: 'Small (10-99)',
+        lineOfBusiness: 'Retail',
+        address: '12 Main Street',
+        barangay: 'San Roque',
+        cityMunicipality: 'Legazpi City',
+        province: 'Albay',
+        contactTitle: 'Ms.',
+        contactPosition: 'HR Manager',
+        telephone: '052-123-4567',
+        fax: '',
+      },
+    })
+
+    expect(res.status).toBe(200)
+    expect(res.headers['content-type']).toContain('application/pdf')
+    expect(res.body.subarray(0, 4).toString()).toBe('%PDF')
+  }, 60000)
+
   it('maps saved NSRP phone and location into the admin list and review details', async () => {
     const applicant = await Applicant.create({
       email: 'mapped-details@example.com',
@@ -137,7 +175,7 @@ describe('POST /api/signup (real database)', () => {
     expect(docs.validId1.idType).toBe('SSS')
     expect(docs.validId1.versions[0].back?.originalName).toBe('id1-back.pdf')
     expect(docs.validId2.versions).toHaveLength(1)
-    expect(docs.resume.versions).toHaveLength(1)
+    expect(docs.resume).toBeUndefined()
 
     // The generated NSRP PDF must be retrievable and start with %PDF
     const stored = await Applicant.findById(applicant._id)
@@ -223,6 +261,88 @@ describe('POST /api/signup (real database)', () => {
     }
     expect(await applicantCount()).toBe(1)
   }, 120000)
+
+  it('creates an employer account and a generated Form 2 PDF from online registration details', async () => {
+    const signature = new PNG({ width: 1, height: 1 })
+    signature.data = Buffer.from([0, 0, 0, 255])
+    const signatureDataUrl = `data:image/png;base64,${PNG.sync.write(signature).toString('base64')}`
+    const email = 'employer-form2@example.com'
+    const res = await request(app).post('/api/employer-requests')
+      .field('email', email)
+      .field('emailProof', emailProofFor(email))
+      .field('password', 'Password123!')
+      .field('consent', 'true')
+      .field('mode', 'online')
+      .field('companyName', 'Example Works')
+      .field('contactName', 'Jamie Cruz')
+      .field('location', '12 Main Street, Brgy. San Roque, Legazpi City, Albay')
+      .field('phone', '09171234567')
+      .field('representativeName', 'Jamie Cruz')
+      .field('certified', 'true')
+      .field('signatureDataUrl', signatureDataUrl)
+      .field('registrationDetails', JSON.stringify({
+        acronym: 'EW',
+        taxIdentificationNumber: '123-456-789',
+        employerType: 'Private',
+        workforceSize: 'Small (10-99)',
+        lineOfBusiness: 'Retail',
+        address: '12 Main Street',
+        barangay: 'San Roque',
+        cityMunicipality: 'Legazpi City',
+        province: 'Albay',
+        contactTitle: 'Ms.',
+        otherContactTitle: '',
+        contactPosition: 'HR Manager',
+        telephone: '052-123-4567',
+        fax: '',
+      }))
+    expect(res.status).toBe(200)
+
+    const employerRequest = await mongoose.model('EmployerRequest')
+      .findOne({ email: 'employer-form2@example.com' }).lean()
+    expect(employerRequest.registrationDetails).toMatchObject({
+      employerType: 'Private',
+      workforceSize: 'Small (10-99)',
+      lineOfBusiness: 'Retail',
+      contactPosition: 'HR Manager',
+    })
+    const pdfPath = employerRequest.requirementsFile.path
+    try {
+      const pdfBytes = fs.readFileSync(pdfPath)
+      expect(pdfBytes.subarray(0, 4).toString()).toBe('%PDF')
+      const pdf = await PDFDocument.load(pdfBytes)
+      expect(pdf.getPageCount()).toBe(2)
+      expect(employerRequest.requirementsFile.originalName).toBe('NSRP-Form-2-Employer-Reg-Form.pdf')
+      const generated = await pdfjs.getDocument({ data: new Uint8Array(pdfBytes) }).promise
+      const firstPage = await generated.getPage(1)
+      const text = (await firstPage.getTextContent()).items.map((item) => item.str).join(' ')
+      expect(text).toContain('Example Works')
+      expect(text).toContain('Retail')
+      expect(text).toContain('Jamie Cruz')
+    } finally {
+      fs.rmSync(pdfPath, { force: true })
+    }
+  }, 60000)
+
+  it('accepts a completed Form 2 upload for an email-verified employer', async () => {
+    const email = 'employer-upload@example.com'
+    const form2 = fs.readFileSync(new URL('../../../public/NSRP-Form-2-Employer-Reg-Form.pdf', import.meta.url))
+    const res = await request(app).post('/api/employer-requests')
+      .field('email', email)
+      .field('emailProof', emailProofFor(email))
+      .field('password', 'Password123!')
+      .field('consent', 'true')
+      .field('mode', 'upload')
+      .field('companyName', 'Uploaded Works')
+      .field('contactName', 'Jamie Cruz')
+      .field('location', '12 Main Street, Legazpi City, Albay')
+      .field('phone', '09171234567')
+      .attach('requirements', form2, { filename: 'filled-form-2.pdf', contentType: 'application/pdf' })
+    expect(res.status).toBe(200)
+    const employerRequest = await mongoose.model('EmployerRequest').findOne({ email }).lean()
+    expect(employerRequest.requirementsFile.originalName).toBe('filled-form-2.pdf')
+    expect(employerRequest.requirementsFile.size).toBe(form2.length)
+  }, 60000)
 })
 
 describe('PUT /api/profile/nsrp (Update NSRP)', () => {
@@ -316,7 +436,7 @@ describe('legacy applicants (uploaded NSRP file, no structured data)', () => {
     expect(res.status).toBe(200)
     const keys = res.body.documents.map((d) => d.docKey)
     expect(keys).toContain('nsrpForm')
-    expect(keys).toContain('resume')
+    expect(keys).not.toContain('resume')
     const nsrp = res.body.documents.find((d) => d.docKey === 'nsrpForm')
     expect(nsrp.status).toBe('pending')
     expect(res.body.nsrpData).toBeNull()
@@ -362,7 +482,7 @@ describe('document ownership', () => {
     const resume = await request(app)
       .get(`/api/applicants/${owner._id}/resume`)
       .set('Authorization', `Bearer ${tokenB}`)
-    expect(resume.status).toBe(403)
+    expect(resume.status).toBe(410)
 
     const nsrp = await request(app)
       .get(`/api/applicants/${owner._id}/nsrp-verification`)
@@ -401,7 +521,7 @@ describe('document storage size', () => {
     const size = BSON.calculateObjectSize(raw)
     expect(size).toBeLessThan(16 * 1024 * 1024)
 
-    // File bytes (6 uploaded files + generated NSRP PDF ≈ 31 MB) must not be
+    // File bytes (5 uploads + generated NSRP PDF ≈ 26 MB) must not be
     // embedded in the applicant document; they live in document_files.
     const withData = await mongoose.connection.db.collection('applicants').findOne({ email: 'max-files@example.com' })
     const slots = withData.verificationDocuments || {}
@@ -413,8 +533,8 @@ describe('document storage size', () => {
     }
     const files = await mongoose.connection.db.collection('document_files')
       .find({ applicant: withData._id }).toArray()
-    expect(files.length).toBeGreaterThanOrEqual(7) // 6 uploads (incl. ID backs) + generated NSRP
-    expect(files.reduce((total, f) => total + (f.size || 0), 0)).toBeGreaterThanOrEqual(6 * FIVE_MB)
+    expect(files.length).toBeGreaterThanOrEqual(6) // 5 uploads (incl. ID backs) + generated NSRP
+    expect(files.reduce((total, f) => total + (f.size || 0), 0)).toBeGreaterThanOrEqual(5 * FIVE_MB)
   }, 120000)
 
   it('keeps the generated NSRP streamable after externalization', async () => {

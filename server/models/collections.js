@@ -1,6 +1,7 @@
 import mongoose from 'mongoose'
 import { normalizeEmail } from '../utils/emailVerification.js'
 import { formatFullName, formatDisplayName } from '../../shared/nameFields.js'
+import { EMPLOYER_VERIFICATION_STATUSES, EMPLOYER_VERIFICATION_STATUS } from '../../shared/employerVerification.js'
 
 const { Schema } = mongoose
 
@@ -166,9 +167,19 @@ const employerSchema = new Schema({
   email: { type: String, required: true, unique: true },
   passwordHash: { type: String, required: true },
   ...emailVerificationFields,
-  verificationStatus: { type: String, enum: ['pending_verification', 'under_review', 'approved', 'declined'], default: 'approved' },
+  verificationStatus: { type: String, enum: EMPLOYER_VERIFICATION_STATUSES, default: EMPLOYER_VERIFICATION_STATUS.UNDER_REVIEW },
   verificationReason: String,
   requirementsSubmittedAt: Date,
+  verificationHistory: {
+    type: [{
+      status: { type: String, enum: EMPLOYER_VERIFICATION_STATUSES, required: true },
+      reason: String,
+      by: String,
+      at: { type: Date, default: Date.now },
+    }],
+    default: [],
+  },
+  approvalNoticePending: { type: Boolean, default: false },
   companyName: String,
   contactName: String,
   phone: String,

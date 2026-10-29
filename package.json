@@ -10,6 +10,7 @@
     "migrate:names": "node server/scripts/migrate-split-names.js",
     "migrate:document-files": "node server/scripts/migrate-document-files.js",
     "test:job-titles": "node server/scripts/test-job-titles.js",
+    "test:form-styles": "vitest run src/test/sharedFormStyles.test.js",
     "mail:test": "node server/scripts/test-email.js",
     "build": "vite build",
     "lint": "oxlint",

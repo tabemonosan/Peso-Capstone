@@ -39,7 +39,15 @@ docker build -f Dockerfile.frontend -t capstone-frontend .
 
 ## Email setup
 
+## Form control styling
+
+All native form controls use the shared light styles in `src/App.css` and the light color scheme in `src/index.css`. All form controls must use the shared light form components. Do not add dark backgrounds. Keep input, select, textarea, checkbox, and radio controls on the shared light palette, including in admin and document-review screens.
+
 Verification codes and notifications are sent via the mailer in `server/mailer.js`. It has two delivery modes plus a safe fallback (subject-only logging). It never logs codes, tokens, links, or recipient email addresses.
+
+## Employer account verification
+
+New employer accounts remain on the Account verification page until an admin approves their NSRP Form 2. Job posting, applicant, referral, hire-report, and rating routes enforce approval on the server; existing employers whose verification status is already approved keep access. Declined or resubmitted documents retain version history and can be reviewed from Employer Requests.
 
 ### Quick start (development, no account needed): Ethereal
 

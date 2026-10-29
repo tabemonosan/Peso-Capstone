@@ -78,4 +78,25 @@ describe('OverlayModal', () => {
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(onClose).not.toHaveBeenCalled()
   })
+
+  it('moves focus into the modal and traps Tab navigation within it', () => {
+    render(
+      <OverlayModal
+        onClose={vi.fn()}
+        labelledBy="focus-modal-title"
+        header={<><h2 id="focus-modal-title">Focus title</h2><button type="button">Close</button></>}
+        footer={<button type="button">Submit</button>}
+      >
+        <button type="button">Body action</button>
+      </OverlayModal>,
+    )
+    const close = screen.getByRole('button', { name: 'Close' })
+    const submit = screen.getByRole('button', { name: 'Submit' })
+
+    expect(document.activeElement).toBe(close)
+    fireEvent.keyDown(close, { key: 'Tab', shiftKey: true })
+    expect(document.activeElement).toBe(submit)
+    fireEvent.keyDown(submit, { key: 'Tab' })
+    expect(document.activeElement).toBe(close)
+  })
 })

@@ -86,7 +86,7 @@ export function emailProofFor(email, overrides = {}) {
   )
 }
 
-export function signupRequest(req, { email, password = 'Password123!', answers = validNsrpAnswers(), emailProof, resume = true, ...rest } = {}) {
+export function signupRequest(req, { email, password = 'Password123!', answers = validNsrpAnswers(), emailProof, resume = false, ...rest } = {}) {
   const withFields = req
     .field('email', email)
     .field('password', password)

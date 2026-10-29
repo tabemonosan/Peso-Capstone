@@ -11,8 +11,11 @@ import JobTitlePicker from "./components/JobTitlePicker"
 import AdminJobTitlesPage from "./components/AdminJobTitlesPage"
 import PasswordChecklist from "./components/PasswordChecklist"
 import ApplicantSignupWizard from "./components/ApplicantSignupWizard"
+import EmployerSignupWizard from "./components/EmployerSignupWizard"
+import EmployerVerificationPage from "./components/EmployerVerificationPage"
 import { validatePassword } from "./utils/passwordPolicy"
 import { SUFFIX_OPTIONS, capitalizeName, validateNameField, formatFullName, formatDisplayName } from "../shared/nameFields.js"
+import { EMPLOYER_VERIFICATION_STATUS as EMPLOYER_STATUS } from "../shared/employerVerification.js"
 import ReferralList from "./components/ReferralList"
 import Pagination from "./components/Pagination"
 import SortControl, { SortableTh } from "./components/SortControl"
@@ -49,6 +52,7 @@ const navigationByRole = {
   ],
   Employer: [
     { id: "complete", label: "Complete Registration" },
+    { id: "verification", label: "Account verification" },
     { id: "home", label: "Home" },
     { id: "dashboard", label: "Dashboard" },
     { id: "all-dashboard", label: "All Dashboard" },
@@ -949,8 +953,6 @@ const MY_JOBS_SORT_OPTIONS = [
   { id: 'deadline:asc', sortBy: 'deadline', order: 'asc', label: 'Application deadline (soonest first)' },
 ]
 
-const albayMunicipalities = Object.keys(albayLocations)
-
 const normalizeSkills = (skills) => {
   if (Array.isArray(skills)) return skills.filter((skill) => typeof skill === 'string' && skill.trim()).map((skill) => skill.trim())
   if (typeof skills === 'string') return skills.split(',').map((skill) => skill.trim()).filter(Boolean)
@@ -986,7 +988,6 @@ function App() {
   )
   const [showPassword, setShowPassword] = useState(false)
   const [showSignupPassword, setShowSignupPassword] = useState(false)
-  const [showEmployerPasswords, setShowEmployerPasswords] = useState(false)
   const [profileData, setProfileData] = useState({
     name: "",
     firstName: "",
@@ -1065,9 +1066,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
   const suggestions = trimmed
     ? availableSkills.filter((skill) => skill.toLowerCase().includes(trimmed.toLowerCase()) && !normalized.includes(skill)).slice(0, 8)
     : []
-  const inputCls = theme === 'dark'
-    ? 'w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white'
-    : 'w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-black'
+  const inputCls = 'shared-form-control w-full rounded-2xl px-3 py-2 text-sm'
   const suggestionCls = theme === 'dark'
     ? 'cursor-pointer px-3 py-2 text-sm text-slate-200 hover:bg-slate-700'
     : 'cursor-pointer px-3 py-2 text-sm text-black hover:bg-slate-100'
@@ -1146,25 +1145,7 @@ const [authView, setAuthView] = useState("login")
   const [signupConsent, setSignupConsent] = useState(false)
   const [signupUploading, setSignupUploading] = useState(false)
   const [signupProgress, setSignupProgress] = useState("")
-  const [employerRequestForm, setEmployerRequestForm] = useState({
-    email: "",
-    password: "",
-    confirmPassword: "",
-    companyName: "",
-    contactName: "",
-    location: "",
-    phone: "",
-    message: "",
-  })
-  const [employerAddress, setEmployerAddress] = useState({
-    street: "",
-    subdivision: "",
-    municipality: "",
-    barangay: "",
-    landmark: "",
-  })
   const [requirementsFile, setRequirementsFile] = useState(null)
-  const [employerSignupFile, setEmployerSignupFile] = useState(null)
   const [employerRequests, setEmployerRequests] = useState({ items: [], total: 0, totalPages: 1, loading: false })
   const [adminUsers, setAdminUsers] = useState([])
   const [jobForm, setJobForm] = useState({
@@ -1225,6 +1206,7 @@ const [authView, setAuthView] = useState("login")
   const [selectedNotification, setSelectedNotification] = useState(null)
   const [referralPrefill, setReferralPrefill] = useState({ jobId: '', applicantIds: [] })
   const [appMessage, setAppMessage] = useState(null)
+  const [approvalNotice, setApprovalNotice] = useState(false)
   // Promise-based confirm dialog (one instance, used by every approve/decline flow)
   const [confirmDialog, setConfirmDialog] = useState(null)
   const [confirmBusy, setConfirmBusy] = useState(false)
@@ -1477,6 +1459,11 @@ const [authView, setAuthView] = useState("login")
         setActiveView('complete')
         return true
       }
+      if (r.status === 403 && data?.code === 'EMPLOYER_NOT_VERIFIED') {
+        setCurrentUser((current) => ({ ...current, verificationStatus: data.status }))
+        setActiveView('verification')
+        return true
+      }
       return false
     }
     if (activeRole === "Applicant") {
@@ -1497,8 +1484,9 @@ const [authView, setAuthView] = useState("login")
     if (activeRole === "Employer") {
       setJobLoading(true)
       fetch(`${API_URL}/api/jobs?status=mine`, { headers })
-        .then((r) => r.json())
-        .then((data) => {
+        .then(async (r) => {
+          const data = await r.json()
+          if (handleEmailGate(r, data)) return
           const jobs = Array.isArray(data) ? data : []
           setMyJobs(jobs)
           setPendingJobs(jobs.filter((job) => job.status === 'pending'))
@@ -1845,57 +1833,6 @@ const [authView, setAuthView] = useState("login")
     }
   }
 
-  const handleSubmitEmployerRequest = async (event) => {
-    event.preventDefault()
-    const { email, password, confirmPassword, companyName, contactName } = employerRequestForm
-    if (!email || !password || !companyName || !contactName) return alert('Please fill in required fields')
-    const employerPasswordErrors = validatePassword(password)
-    if (employerPasswordErrors.length > 0) return alert('Password requirements not met. Check the rules under the password field.')
-    if (password !== confirmPassword) return alert('Passwords do not match')
-    if (!/^\d{11}$/.test(employerRequestForm.phone)) return alert('Phone number must contain exactly 11 digits')
-    if (!employerAddress.municipality || !employerAddress.barangay) return alert('Please select your City/Municipality and Barangay')
-    if (!employerSignupFile) return alert('Please upload your NSRP registration form (PDF) to complete sign up')
-
-    const addressParts = [
-      employerAddress.street,
-      employerAddress.subdivision,
-      `Brgy. ${employerAddress.barangay}`,
-      employerAddress.municipality,
-      'Albay',
-      employerAddress.landmark ? `Landmark: ${employerAddress.landmark}` : '',
-    ].filter((part) => typeof part === 'string' && part.trim() !== '')
-    const payload = { ...employerRequestForm, location: addressParts.join(', ') }
-
-    try {
-      const formPayload = new FormData()
-      Object.entries(payload).forEach(([key, value]) => {
-        if (value !== undefined && value !== null) formPayload.append(key, value)
-      })
-      formPayload.append('requirements', employerSignupFile)
-      const response = await fetch(`${API_URL}/api/employer-requests`, {
-        method: 'POST',
-        body: formPayload,
-      })
-
-      const contentType = response.headers.get('content-type') || ''
-      const data = contentType.includes('application/json') ? await response.json() : null
-
-      if (!response.ok) {
-        const message = data?.error || `Request failed: ${response.status} ${response.statusText}`
-        return alert(message)
-      }
-
-      setEmployerRequestForm({ email: '', password: '', confirmPassword: '', companyName: '', contactName: '', location: '', phone: '', message: '' })
-      setEmployerAddress({ street: '', subdivision: '', municipality: '', barangay: '', landmark: '' })
-      setEmployerSignupFile(null)
-      setAuthView('login')
-      alert('Employer account created. Your NSRP registration form was submitted for admin review.')
-    } catch (err) {
-      console.error('Employer request submit failed:', err)
-      alert(err?.message || 'Failed to submit employer request')
-    }
-  }
-
   const handleSubmitEmployerRequirements = async (event) => {
     event.preventDefault()
     const token = getToken()
@@ -1951,7 +1888,7 @@ const [authView, setAuthView] = useState("login")
       const response = await fetch(`${API_URL}/api/employer-requests/${requestId}/status`, {
         method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ status, reason: status === 'declined' ? reason.trim() : '' }),
+      body: JSON.stringify({ status, reason: status === 'approved' ? '' : reason.trim() }),
     })
     const data = await response.json().catch(() => null)
     if (!response.ok || data?.error) return { error: data?.error || 'Failed to update employer request' }
@@ -1969,23 +1906,24 @@ const [authView, setAuthView] = useState("login")
   // All employer request decisions go through the shared confirm dialog
   const confirmEmployerRequest = (requestId, companyName, status) => {
     if (status === 'approved') {
-    return requestConfirm({
-      title: `Approve ${companyName || 'this employer'}?`,
-      note: 'The employer will be notified and gain access to employer features.',
-      confirmLabel: 'Yes, approve',
-      busyLabel: 'Approving...',
-      onConfirm: () => handleReviewEmployerRequest(requestId, 'approved'),
-    })
+      return requestConfirm({
+        title: `Approve ${companyName || 'this employer'}?`,
+        note: 'The employer will be notified and gain access to employer features.',
+        confirmLabel: 'Yes, approve',
+        busyLabel: 'Approving...',
+        onConfirm: () => handleReviewEmployerRequest(requestId, 'approved'),
+      })
     }
+    const needsResubmission = status === 'needs_resubmission'
     return requestConfirm({
-    title: `Decline ${companyName || 'this employer'}?`,
-    note: 'The employer will be notified with your reason.',
-    confirmLabel: 'Confirm decline',
-    confirmTone: 'danger',
-    busyLabel: 'Declining...',
-    requireReason: true,
-    quickReasons: ['Incomplete requirements', 'Wrong document type', 'Unreadable document', 'Duplicate request'],
-    onConfirm: (reason) => handleReviewEmployerRequest(requestId, 'declined', reason),
+      title: `${needsResubmission ? 'Request a new document from' : 'Decline'} ${companyName || 'this employer'}?`,
+      note: 'The employer will be notified with your reason.',
+      confirmLabel: needsResubmission ? 'Request new document' : 'Confirm decline',
+      confirmTone: 'danger',
+      busyLabel: needsResubmission ? 'Requesting...' : 'Declining...',
+      requireReason: true,
+      quickReasons: ['Document unreadable', "Details don't match", 'Not a registered establishment'],
+      onConfirm: (reason) => handleReviewEmployerRequest(requestId, status, reason),
     })
   }
 
@@ -2183,13 +2121,17 @@ const [authView, setAuthView] = useState("login")
   useEffect(() => {
     // Unverified applicants don't fetch job data (the jobs view is hidden anyway)
     const applicantBlocked = activeRole === 'Applicant' && currentUser?.verificationStatus && currentUser.verificationStatus !== 'approved'
+    const employerBlocked = activeRole === 'Employer' && currentUser?.verificationStatus && currentUser.verificationStatus !== EMPLOYER_STATUS.APPROVED
     const registrationIncomplete = ['Applicant', 'Employer'].includes(activeRole) && currentUser?.registration && !currentUser.registration.complete
-    if (isLoggedIn && !applicantBlocked && !registrationIncomplete) {
+    if (isLoggedIn && !applicantBlocked && !employerBlocked && !registrationIncomplete) {
       fetchJobs()
       fetchNotifications()
     }
-    if (isLoggedIn && activeRole === 'Employer' && currentUser?.verificationStatus && currentUser.verificationStatus !== 'approved' && !['home', 'dashboard', 'profile'].includes(activeView)) {
-      setActiveView('home')
+    if (isLoggedIn && activeRole === 'Employer' && currentUser?.verificationStatus && currentUser.verificationStatus !== EMPLOYER_STATUS.APPROVED && activeView !== 'verification') {
+      setActiveView('verification')
+    }
+    if (isLoggedIn && activeRole === 'Employer' && currentUser?.verificationStatus === EMPLOYER_STATUS.APPROVED && activeView === 'verification') {
+      setActiveView('dashboard')
     }
     if (isLoggedIn && activeRole === 'Admin' && ['records', 'employers', 'applicants', 'requests', 'jobs', 'peso-referrals'].includes(activeView)) fetchAdminUsers()
   }, [isLoggedIn, activeRole, activeView, currentUser?.verificationStatus, currentUser?.registration?.complete, profileData.skills])
@@ -2234,32 +2176,65 @@ const [authView, setAuthView] = useState("login")
       })
   }, [])
 
+  const updateEmployerVerification = useCallback((data) => {
+    if (!data) return
+    setCurrentUser((current) => current ? ({
+      ...current,
+      email: data.email || current.email,
+      verificationStatus: data.verificationStatus,
+      verificationReason: data.verificationReason,
+      requirementsFile: data.document || current.requirementsFile,
+      requirementsSubmittedAt: data.submittedAt || current.requirementsSubmittedAt,
+      approvalNoticePending: data.approvalNoticePending,
+    }) : current)
+    if (data.verificationStatus === EMPLOYER_STATUS.APPROVED && data.approvalNoticePending) {
+      setApprovalNotice(true)
+    }
+  }, [])
+
   useEffect(() => {
     if (!isLoggedIn || activeRole !== 'Employer') return undefined
 
     const refreshEmployerVerification = () => {
       const token = getToken()
       if (!token) return
-      fetch(`${API_URL}/api/profile`, {
+      fetch(`${API_URL}/api/employer/verification`, {
         headers: { Authorization: `Bearer ${token}` },
       })
-        .then((response) => response.json())
+        .then((response) => {
+          if (!response.ok) throw new Error('Could not refresh employer verification status.')
+          return response.json()
+        })
         .then((data) => {
           if (data.error) return
-          setCurrentUser((current) => ({
-            ...current,
-            verificationStatus: data.verificationStatus,
-            verificationReason: data.verificationReason,
-            requirementsFile: data.requirementsFile,
-          }))
+          updateEmployerVerification(data)
         })
-        .catch(() => {})
+        .catch((error) => console.error('Employer verification refresh failed:', error))
     }
 
     refreshEmployerVerification()
-    const intervalId = window.setInterval(refreshEmployerVerification, 5000)
+    const intervalId = window.setInterval(refreshEmployerVerification, 30000)
     return () => window.clearInterval(intervalId)
   }, [isLoggedIn, activeRole])
+
+  const acknowledgeEmployerApproval = async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/employer/verification/approval-notice/seen`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getToken()}` },
+      })
+      if (!response.ok) {
+        setAppMessage({ type: 'error', text: 'Could not dismiss the approval message. Please try again.' })
+        return
+      }
+      setApprovalNotice(false)
+      setCurrentUser((current) => ({ ...current, approvalNoticePending: false }))
+      setActiveView('dashboard')
+    } catch (error) {
+      console.error('Employer approval notice update failed:', error)
+      setAppMessage({ type: 'error', text: 'Could not dismiss the approval message. Please try again.' })
+    }
+  }
 
   const handleLogin = (event) => {
     event.preventDefault()
@@ -2285,8 +2260,9 @@ const [authView, setAuthView] = useState("login")
         setActiveRole(data.user.role)
         const needsVerification = ['Employer', 'Applicant'].includes(data.user.role) && data.user.verificationStatus && data.user.verificationStatus !== 'approved'
         const registrationIncomplete = ['Applicant', 'Employer'].includes(data.user.role) && data.user.registration && !data.user.registration.complete
-        const initialView = navigationByRole[data.user.role]?.find((item) => item.id !== 'complete')?.id || "dashboard"
-        setActiveView(registrationIncomplete ? 'complete' : needsVerification ? 'home' : initialView)
+        const initialView = navigationByRole[data.user.role]?.find((item) => !['complete', 'verification'].includes(item.id))?.id || "dashboard"
+        const employerWaiting = data.user.role === 'Employer' && data.user.verificationStatus !== EMPLOYER_STATUS.APPROVED
+        setActiveView(employerWaiting ? 'verification' : registrationIncomplete ? 'complete' : needsVerification ? 'home' : initialView)
         setIsLoggedIn(true)
         setProfileData(normalizeProfile(data.user, data.user.role))
         setResumeInfo(data.user.resumeFile || null)
@@ -2415,6 +2391,7 @@ const [authView, setAuthView] = useState("login")
     localStorage.removeItem("peso-portal-remembered-email")
     localStorage.removeItem('peso-token')
     setCurrentUser(null)
+    setApprovalNotice(false)
     setIsLoggedIn(false)
     setFormData({ email: "", password: "" })
     setRememberMe(false)
@@ -2507,8 +2484,8 @@ const [authView, setAuthView] = useState("login")
             />
           </div>
           <div className="auth-heading">
-            <h1>{authView === "signup" ? "Sign Up" : "Welcome back"}</h1>
-            <p>Enter your PESO account credentials to continue.</p>
+            <h1>{authView === "signup" ? "Sign Up" : authView === "employer" ? "Employer Sign Up" : "Welcome back"}</h1>
+            <p>{authView === "employer" ? "Create your employer account." : "Enter your PESO account credentials to continue."}</p>
           </div>
           {authView === "signup" ? (
             <ApplicantSignupWizard onCancel={() => setAuthView("login")} />
@@ -2580,221 +2557,7 @@ const [authView, setAuthView] = useState("login")
               </div>
             </form>
           ) : authView === "employer" ? (
-            <form className="auth-form auth-detail-form" onSubmit={handleSubmitEmployerRequest}>
-              <div>
-                <label htmlFor="employer-email" className="block text-sm font-medium text-slate-200">
-                  Email
-                </label>
-                <input
-                  id="employer-email"
-                  type="email"
-                  value={employerRequestForm.email}
-                  onChange={(e) => setEmployerRequestForm({ ...employerRequestForm, email: e.target.value })}
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-                  required
-                />
-              </div>
-              <div>
-                <label htmlFor="employer-password" className="block text-sm font-medium text-slate-200">
-                  Password
-                </label>
-                <input
-                  id="employer-password"
-                  type={showEmployerPasswords ? "text" : "password"}
-                  value={employerRequestForm.password}
-                  onChange={(e) => setEmployerRequestForm({ ...employerRequestForm, password: e.target.value })}
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-                  autoComplete="new-password"
-                  required
-                />
-                <button
-                  type="button"
-                  aria-label={showEmployerPasswords ? "Hide passwords" : "Show passwords"}
-                  onClick={() => setShowEmployerPasswords((value) => !value)}
-                  className="auth-password-toggle"
-                >
-                  {showEmployerPasswords ? "?" : "?"}
-                </button>
-              </div>
-              <div>
-                <label htmlFor="employer-confirm-password" className="block text-sm font-medium text-slate-200">
-                  Confirm Password
-                </label>
-                <input
-                  id="employer-confirm-password"
-                  type={showEmployerPasswords ? "text" : "password"}
-                  value={employerRequestForm.confirmPassword}
-                  onChange={(e) => setEmployerRequestForm({ ...employerRequestForm, confirmPassword: e.target.value })}
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-                  autoComplete="new-password"
-                  required
-                />
-                <PasswordChecklist password={employerRequestForm.password} confirmPassword={employerRequestForm.confirmPassword} />
-                <button
-                  type="button"
-                  aria-label={showEmployerPasswords ? "Hide passwords" : "Show passwords"}
-                  onClick={() => setShowEmployerPasswords((value) => !value)}
-                  className="auth-password-toggle"
-                >
-                  {showEmployerPasswords ? "?" : "?"}
-                </button>
-              </div>
-              <div>
-                <label htmlFor="employer-company" className="block text-sm font-medium text-slate-200">
-                  Company Name
-                </label>
-                <input
-                  id="employer-company"
-                  type="text"
-                  value={employerRequestForm.companyName}
-                  onChange={(e) => setEmployerRequestForm({ ...employerRequestForm, companyName: e.target.value })}
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-                  required
-                />
-              </div>
-              <div>
-                <label htmlFor="employer-contact" className="block text-sm font-medium text-slate-200">
-                  Contact Name
-                </label>
-                <input
-                  id="employer-contact"
-                  type="text"
-                  value={employerRequestForm.contactName}
-                  onChange={(e) => setEmployerRequestForm({ ...employerRequestForm, contactName: e.target.value })}
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-                  required
-                />
-              </div>
-              <div>
-                <label htmlFor="employer-street" className="block text-sm font-medium text-slate-200">
-                  House/Unit No. &amp; Street
-                </label>
-                <input
-                  id="employer-street"
-                  type="text"
-                  value={employerAddress.street}
-                  onChange={(e) => setEmployerAddress({ ...employerAddress, street: e.target.value })}
-                  placeholder="e.g. Blk 2 Lot 5, Rizal St."
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-                />
-              </div>
-              <div>
-                <label htmlFor="employer-subdivision" className="block text-sm font-medium text-slate-200">
-                  Subdivision/Village/Building <span className="font-normal text-slate-400">(if applicable)</span>
-                </label>
-                <input
-                  id="employer-subdivision"
-                  type="text"
-                  value={employerAddress.subdivision}
-                  onChange={(e) => setEmployerAddress({ ...employerAddress, subdivision: e.target.value })}
-                  placeholder="e.g. Greenview Subdivision"
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-                />
-              </div>
-              <div>
-                <label htmlFor="employer-municipality" className="block text-sm font-medium text-slate-200">
-                  City/Municipality
-                </label>
-                <select
-                  id="employer-municipality"
-                  value={employerAddress.municipality}
-                  onChange={(e) => setEmployerAddress({ ...employerAddress, municipality: e.target.value, barangay: '' })}
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-                  required
-                >
-                  <option value="">Select city/municipality</option>
-                  {albayMunicipalities.map((municipality) => (
-                    <option key={municipality} value={municipality}>{municipality}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label htmlFor="employer-barangay" className="block text-sm font-medium text-slate-200">
-                  Barangay
-                </label>
-                <select
-                  id="employer-barangay"
-                  value={employerAddress.barangay}
-                  onChange={(e) => setEmployerAddress({ ...employerAddress, barangay: e.target.value })}
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-                  disabled={!employerAddress.municipality}
-                  required
-                >
-                  <option value="">{employerAddress.municipality ? 'Select barangay' : 'Select city/municipality first'}</option>
-                  {(albayLocations[employerAddress.municipality] || []).map((barangay) => (
-                    <option key={barangay} value={barangay}>{barangay}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label htmlFor="employer-landmark" className="block text-sm font-medium text-slate-200">
-                  Landmark
-                </label>
-                <input
-                  id="employer-landmark"
-                  type="text"
-                  value={employerAddress.landmark}
-                  onChange={(e) => setEmployerAddress({ ...employerAddress, landmark: e.target.value })}
-                  placeholder="e.g. Near Brgy. Hall"
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-                />
-              </div>
-              <div>
-                <label htmlFor="employer-phone" className="block text-sm font-medium text-slate-200">
-                  Phone
-                </label>
-                <input
-                  id="employer-phone"
-                  type="tel"
-                  inputMode="numeric"
-                  maxLength={11}
-                  pattern="[0-9]{11}"
-                  value={employerRequestForm.phone}
-                  onChange={(e) => setEmployerRequestForm({ ...employerRequestForm, phone: e.target.value.replace(/\D/g, '').slice(0, 11) })}
-                  className="mt-2 w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-black"
-                  required
-                />
-              </div>
-              <div>
-                <label htmlFor="employer-message" className="block text-sm font-medium text-slate-200">
-                  Message
-                </label>
-                <textarea
-                  id="employer-message"
-                  rows="3"
-                  value={employerRequestForm.message}
-                  onChange={(e) => setEmployerRequestForm({ ...employerRequestForm, message: e.target.value })}
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-                  placeholder="Tell us about your company or hiring needs."
-                />
-              </div>
-              <div>
-                <label htmlFor="employer-requirements" className="block text-sm font-medium text-slate-200">
-                  NSRP Registration Form (PDF)
-                </label>
-                <input
-                  id="employer-requirements"
-                  type="file"
-                  accept="application/pdf,.pdf"
-                  onChange={(e) => setEmployerSignupFile(e.target.files?.[0] || null)}
-                  className="mt-2 w-full text-sm text-slate-300 file:mr-3 file:rounded-xl file:border-0 file:bg-slate-700 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-white"
-                  required
-                />
-                <p className="mt-1 text-xs text-slate-400">Required for account verification. An admin will review it before your postings are approved.</p>
-              </div>
-              <div className="flex gap-2">
-                <button type="submit" className="auth-primary-button auth-account-submit">
-                  Create employer account
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAuthView("login")}
-                  className="auth-secondary-button"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
+            <EmployerSignupWizard locations={albayLocations} onCancel={() => setAuthView("login")} />
           ) : (
             <form className="auth-form auth-detail-form applicant-signup-form" onSubmit={handleSignup}>
               <div>
@@ -2807,7 +2570,7 @@ const [authView, setAuthView] = useState("login")
                   value={signupForm.firstName}
                   onChange={(e) => setSignupForm({ ...signupForm, firstName: e.target.value })}
                   onBlur={() => handleSignupNameBlur('firstName')}
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                  className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                   required
                 />
                 {signupNameErrors.firstName && <p className="mt-1 text-xs text-rose-300">{signupNameErrors.firstName}</p>}
@@ -2823,7 +2586,7 @@ const [authView, setAuthView] = useState("login")
                   onChange={(e) => setSignupForm({ ...signupForm, middleName: e.target.value })}
                   onBlur={() => handleSignupNameBlur('middleName')}
                   disabled={signupForm.noMiddleName}
-                  className={`mt-2 w-full rounded-2xl border px-3 py-2 text-sm ${signupForm.noMiddleName ? 'cursor-not-allowed border-slate-700 bg-slate-900 text-slate-400' : 'border-slate-700 bg-slate-800 text-white'}`}
+                  className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                 />
                 <label className="mt-2 flex items-center gap-2 text-xs text-slate-300">
                   <input
@@ -2850,7 +2613,7 @@ const [authView, setAuthView] = useState("login")
                   value={signupForm.lastName}
                   onChange={(e) => setSignupForm({ ...signupForm, lastName: e.target.value })}
                   onBlur={() => handleSignupNameBlur('lastName')}
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                  className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                   required
                 />
                 {signupNameErrors.lastName && <p className="mt-1 text-xs text-rose-300">{signupNameErrors.lastName}</p>}
@@ -2863,7 +2626,7 @@ const [authView, setAuthView] = useState("login")
                   id="signup-suffix"
                   value={signupForm.suffix}
                   onChange={(e) => setSignupForm({ ...signupForm, suffix: e.target.value })}
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                  className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                 >
                   {SUFFIX_OPTIONS.map((option) => (
                     <option key={option} value={option}>{option === '' ? 'None' : option}</option>
@@ -2879,7 +2642,7 @@ const [authView, setAuthView] = useState("login")
                   type="text"
                   value={signupForm.location}
                   onChange={(e) => setSignupForm({ ...signupForm, location: e.target.value })}
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                  className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                   required
                 />
               </div>
@@ -2892,7 +2655,7 @@ const [authView, setAuthView] = useState("login")
                   rows="3"
                   value={signupForm.summary}
                   onChange={(e) => setSignupForm({ ...signupForm, summary: e.target.value })}
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                  className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                   required
                 />
               </div>
@@ -2905,7 +2668,7 @@ const [authView, setAuthView] = useState("login")
                   type="email"
                   value={signupForm.email}
                   onChange={(e) => setSignupForm({ ...signupForm, email: e.target.value })}
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                  className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                   required
                 />
               </div>
@@ -2918,7 +2681,7 @@ const [authView, setAuthView] = useState("login")
                   type={showSignupPassword ? "text" : "password"}
                   value={signupForm.password}
                   onChange={(e) => setSignupForm({ ...signupForm, password: e.target.value })}
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                  className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                   autoComplete="new-password"
                   required
                 />
@@ -2933,7 +2696,7 @@ const [authView, setAuthView] = useState("login")
                   type={showSignupPassword ? "text" : "password"}
                   value={signupForm.confirmPassword}
                   onChange={(e) => setSignupForm({ ...signupForm, confirmPassword: e.target.value })}
-                  className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                  className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                   required
                 />
                 <button
@@ -2953,7 +2716,7 @@ const [authView, setAuthView] = useState("login")
                   type="file"
                   accept="application/pdf,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx,image/jpeg,.jpg,.jpeg,image/png,.png"
                   onChange={(e) => setSignupResumeFile(e.target.files?.[0] || null)}
-                  className="mt-2 w-full text-sm text-slate-300 file:mr-3 file:rounded-xl file:border-0 file:bg-slate-700 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-white"
+                  className="shared-form-control mt-2 w-full text-sm"
                   required
                 />
               </div>
@@ -2981,22 +2744,23 @@ const [authView, setAuthView] = useState("login")
   }
 
   const navItems = navigationByRole[activeRole] || []
-  const employerApproved = activeRole !== 'Employer' || !currentUser?.verificationStatus || currentUser.verificationStatus === 'approved'
+  const employerApproved = activeRole !== 'Employer' || !currentUser?.verificationStatus || currentUser.verificationStatus === EMPLOYER_STATUS.APPROVED
   const applicantApproved = activeRole !== 'Applicant' || !currentUser?.verificationStatus || currentUser.verificationStatus === 'approved'
   const registrationIncomplete = ['Applicant', 'Employer'].includes(activeRole) && currentUser?.registration && !currentUser.registration.complete
 
   const portalNavItems = navItems.filter((item) => {
     if (item.id === "profile") return false
+    if (activeRole === 'Employer' && !employerApproved) return item.id === 'verification'
     if (registrationIncomplete) return item.id === 'complete'
     if (item.id === 'complete') return ['Applicant', 'Employer'].includes(activeRole) && !currentUser?.registration?.complete
-    if (activeRole === 'Employer') return employerApproved || ['home', 'dashboard', 'profile'].includes(item.id)
+    if (activeRole === 'Employer') return employerApproved && item.id !== 'verification'
     // Unverified applicants only get My Documents (job listings stay hidden)
     if (activeRole === 'Applicant') return applicantApproved || item.id === 'documents'
     return true
   })
   // Server state is the source of truth; this is just UI gating
   const applicantDocAttention = activeRole === 'Applicant' ? (currentUser?.attentionCount || 0) : 0
-  const showProfileTab = ["Applicant", "Employer"].includes(activeRole)
+  const showProfileTab = ["Applicant", "Employer"].includes(activeRole) && (activeRole !== 'Employer' || employerApproved)
 
   return (
     <div className={`portal-shell portal-shell-${activeRole.toLowerCase()}`}>
@@ -3132,6 +2896,21 @@ const [authView, setAuthView] = useState("login")
               </button>
             </div>
           )}
+          {approvalNotice && activeRole === 'Employer' && (
+            <section className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-green-300 bg-green-50 p-5 text-green-950" role="status">
+              <div>
+                <h2 className="text-lg font-bold">Your account is approved</h2>
+                <p className="mt-1 text-sm">You can now access employer features.</p>
+              </div>
+              <button type="button" onClick={acknowledgeEmployerApproval} className="rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white">
+                Go to dashboard
+              </button>
+            </section>
+          )}
+          {activeRole === 'Employer' && !employerApproved ? (
+            <EmployerVerificationPage token={getToken()} onStatusChange={updateEmployerVerification} />
+          ) : (
+            <>
           {activeView === "complete" && ['Applicant', 'Employer'].includes(activeRole) && (
             <CompleteRegistrationPage
               role={activeRole}
@@ -3272,9 +3051,9 @@ const [authView, setAuthView] = useState("login")
                 <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-600">
                   {activeRole === 'Employer' ? (
                     <>
-                      <li>Complete your employer profile and submit your NSRP form for verification.</li>
-                      <li>Create a job posting request and wait for admin approval.</li>
+                      <li>Create and manage job postings for your establishment.</li>
                       <li>Review applicants and send referrals from the Job Postings tab.</li>
+                      <li>Track your posting requests and notifications from your dashboard.</li>
                     </>
                   ) : (
                     <>
@@ -3684,7 +3463,7 @@ const [authView, setAuthView] = useState("login")
                           type="file"
                           accept="image/*"
                           onChange={(event) => handleImageFile(event.target.files?.[0], 'profileImage')}
-                          className="mt-2 block w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white file:mr-3 file:rounded-xl file:border-0 file:bg-cyan-500 file:px-3 file:py-2 file:font-semibold file:text-slate-950"
+                          className="shared-form-control mt-2 block w-full rounded-2xl px-3 py-2 text-sm"
                         />
                       </div>
                       <div>
@@ -3694,7 +3473,7 @@ const [authView, setAuthView] = useState("login")
                           type="file"
                           accept="image/*"
                           onChange={(event) => handleImageFile(event.target.files?.[0], 'bannerImage')}
-                          className="mt-2 block w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white file:mr-3 file:rounded-xl file:border-0 file:bg-cyan-500 file:px-3 file:py-2 file:font-semibold file:text-slate-950"
+                          className="shared-form-control mt-2 block w-full rounded-2xl px-3 py-2 text-sm"
                         />
                       </div>
                     </div>
@@ -3736,7 +3515,7 @@ const [authView, setAuthView] = useState("login")
                         disabled={!isEditingProfile}
                         onChange={(event) => setProfileData({ ...profileData, firstName: event.target.value })}
                         onBlur={() => isEditingProfile && setProfileData((current) => ({ ...current, firstName: capitalizeName(current.firstName) }))}
-                        className={`mt-2 w-full rounded-2xl border px-3 py-2 text-sm ${isEditingProfile ? 'border-slate-700 bg-slate-800 text-white' : 'cursor-not-allowed border-slate-700 bg-slate-900 text-slate-400'}`}
+                        className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                       />
                     </div>
                     <div>
@@ -3750,7 +3529,7 @@ const [authView, setAuthView] = useState("login")
                         disabled={!isEditingProfile || profileData.noMiddleName}
                         onChange={(event) => setProfileData({ ...profileData, middleName: event.target.value })}
                         onBlur={() => isEditingProfile && setProfileData((current) => ({ ...current, middleName: capitalizeName(current.middleName) }))}
-                        className={`mt-2 w-full rounded-2xl border px-3 py-2 text-sm ${isEditingProfile && !profileData.noMiddleName ? 'border-slate-700 bg-slate-800 text-white' : 'cursor-not-allowed border-slate-700 bg-slate-900 text-slate-400'}`}
+                        className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                       />
                       {isEditingProfile && (
                         <label className="mt-2 flex items-center gap-2 text-xs text-slate-400">
@@ -3774,7 +3553,7 @@ const [authView, setAuthView] = useState("login")
                         disabled={!isEditingProfile}
                         onChange={(event) => setProfileData({ ...profileData, lastName: event.target.value })}
                         onBlur={() => isEditingProfile && setProfileData((current) => ({ ...current, lastName: capitalizeName(current.lastName) }))}
-                        className={`mt-2 w-full rounded-2xl border px-3 py-2 text-sm ${isEditingProfile ? 'border-slate-700 bg-slate-800 text-white' : 'cursor-not-allowed border-slate-700 bg-slate-900 text-slate-400'}`}
+                        className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                       />
                     </div>
                     <div>
@@ -3786,7 +3565,7 @@ const [authView, setAuthView] = useState("login")
                         value={profileData.suffix}
                         disabled={!isEditingProfile}
                         onChange={(event) => setProfileData({ ...profileData, suffix: event.target.value })}
-                        className={`mt-2 w-full rounded-2xl border px-3 py-2 text-sm ${isEditingProfile ? 'border-slate-700 bg-slate-800 text-white' : 'cursor-not-allowed border-slate-700 bg-slate-900 text-slate-400'}`}
+                        className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                       >
                         {SUFFIX_OPTIONS.map((option) => (
                           <option key={option} value={option}>{option === '' ? 'None' : option}</option>
@@ -3803,7 +3582,7 @@ const [authView, setAuthView] = useState("login")
                         value={profileData.summary}
                         disabled={!isEditingProfile}
                         onChange={(event) => setProfileData({ ...profileData, summary: event.target.value })}
-                        className={`mt-2 w-full rounded-2xl border px-3 py-2 text-sm ${isEditingProfile ? 'border-slate-700 bg-slate-800 text-white' : 'cursor-not-allowed border-slate-700 bg-slate-900 text-slate-400'}`}
+                        className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                         placeholder="Write a brief profile summary."
                       />
                     </div>
@@ -3817,7 +3596,7 @@ const [authView, setAuthView] = useState("login")
                         value={profileData.location}
                         disabled={!isEditingProfile}
                         onChange={(event) => setProfileData({ ...profileData, location: event.target.value })}
-                        className={`mt-2 w-full rounded-2xl border px-3 py-2 text-sm ${isEditingProfile ? 'border-slate-700 bg-slate-800 text-white' : 'cursor-not-allowed border-slate-700 bg-slate-900 text-slate-400'}`}
+                        className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                       />
                     </div>
                     <div>
@@ -3830,7 +3609,7 @@ const [authView, setAuthView] = useState("login")
                         value={profileData.traits}
                         disabled={!isEditingProfile}
                         onChange={(event) => setProfileData({ ...profileData, traits: event.target.value })}
-                        className={`mt-2 w-full rounded-2xl border px-3 py-2 text-sm ${isEditingProfile ? 'border-slate-700 bg-slate-800 text-white' : 'cursor-not-allowed border-slate-700 bg-slate-900 text-slate-400'}`}
+                        className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                         placeholder="e.g. reliable, detail-oriented, team player"
                       />
                     </div>
@@ -3923,7 +3702,7 @@ const [authView, setAuthView] = useState("login")
                             reader.onload = () => setProfileData((current) => ({ ...current, profileImage: reader.result }))
                             reader.readAsDataURL(file)
                           }}
-                          className="mt-2 block w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white file:mr-3 file:rounded-xl file:border-0 file:bg-cyan-500 file:px-3 file:py-2 file:font-semibold file:text-slate-950"
+                          className="shared-form-control mt-2 block w-full rounded-2xl px-3 py-2 text-sm"
                         />
                       </div>
                       <div>
@@ -3940,7 +3719,7 @@ const [authView, setAuthView] = useState("login")
                             reader.onload = () => setProfileData((current) => ({ ...current, bannerImage: reader.result }))
                             reader.readAsDataURL(file)
                           }}
-                          className="mt-2 block w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white file:mr-3 file:rounded-xl file:border-0 file:bg-cyan-500 file:px-3 file:py-2 file:font-semibold file:text-slate-950"
+                          className="shared-form-control mt-2 block w-full rounded-2xl px-3 py-2 text-sm"
                         />
                       </div>
                     </div>
@@ -3955,7 +3734,7 @@ const [authView, setAuthView] = useState("login")
                         value={profileData.companyName}
                         disabled={!isEditingProfile}
                         onChange={(e) => setProfileData({ ...profileData, companyName: e.target.value })}
-                        className={`mt-2 w-full rounded-2xl border px-3 py-2 text-sm ${isEditingProfile ? 'border-slate-700 bg-slate-800 text-white' : 'cursor-not-allowed border-slate-700 bg-slate-900 text-slate-400'}`}
+                        className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                       />
                     </div>
                     <div>
@@ -3966,7 +3745,7 @@ const [authView, setAuthView] = useState("login")
                         value={profileData.contactName}
                         disabled={!isEditingProfile}
                         onChange={(e) => setProfileData({ ...profileData, contactName: e.target.value })}
-                        className={`mt-2 w-full rounded-2xl border px-3 py-2 text-sm ${isEditingProfile ? 'border-slate-700 bg-slate-800 text-white' : 'cursor-not-allowed border-slate-700 bg-slate-900 text-slate-400'}`}
+                        className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                       />
                     </div>
                     <div>
@@ -3977,7 +3756,7 @@ const [authView, setAuthView] = useState("login")
                         value={profileData.location}
                         disabled={!isEditingProfile}
                         onChange={(e) => setProfileData({ ...profileData, location: e.target.value })}
-                        className={`mt-2 w-full rounded-2xl border px-3 py-2 text-sm ${isEditingProfile ? 'border-slate-700 bg-slate-800 text-white' : 'cursor-not-allowed border-slate-700 bg-slate-900 text-slate-400'}`}
+                        className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                       />
                     </div>
                     <div>
@@ -3988,7 +3767,7 @@ const [authView, setAuthView] = useState("login")
                         value={profileData.phone}
                         disabled={!isEditingProfile}
                         onChange={(e) => setProfileData({ ...profileData, phone: e.target.value })}
-                        className={`mt-2 w-full rounded-2xl border px-3 py-2 text-sm ${isEditingProfile ? 'border-slate-700 bg-slate-800 text-white' : 'cursor-not-allowed border-slate-700 bg-slate-900 text-slate-400'}`}
+                        className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                       />
                     </div>
                     <div>
@@ -3999,7 +3778,7 @@ const [authView, setAuthView] = useState("login")
                         value={profileData.website}
                         disabled={!isEditingProfile}
                         onChange={(e) => setProfileData({ ...profileData, website: e.target.value })}
-                        className={`mt-2 w-full rounded-2xl border px-3 py-2 text-sm ${isEditingProfile ? 'border-slate-700 bg-slate-800 text-white' : 'cursor-not-allowed border-slate-700 bg-slate-900 text-slate-400'}`}
+                        className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                       />
                     </div>
                     <div>
@@ -4010,7 +3789,7 @@ const [authView, setAuthView] = useState("login")
                         value={profileData.summary}
                         disabled={!isEditingProfile}
                         onChange={(event) => setProfileData({ ...profileData, summary: event.target.value })}
-                        className={`mt-2 w-full rounded-2xl border px-3 py-2 text-sm ${isEditingProfile ? 'border-slate-700 bg-slate-800 text-white' : 'cursor-not-allowed border-slate-700 bg-slate-900 text-slate-400'}`}
+                        className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                         placeholder="Brief description of company or services"
                       />
                     </div>
@@ -4139,7 +3918,7 @@ const [authView, setAuthView] = useState("login")
                       rows="3"
                       value={jobForm.description}
                       onChange={(e) => setJobForm({ ...jobForm, description: e.target.value })}
-                      className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                      className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                       placeholder="Describe the responsibilities and role."
                     />
                   </div>
@@ -4152,7 +3931,7 @@ const [authView, setAuthView] = useState("login")
                       rows="2"
                       value={jobForm.requirements}
                       onChange={(e) => setJobForm({ ...jobForm, requirements: e.target.value })}
-                      className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                      className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                       placeholder="Describe the qualifications and expectations."
                     />
                   </div>
@@ -4173,7 +3952,7 @@ const [authView, setAuthView] = useState("login")
                         id="job-location-type"
                         value={jobForm.locationType}
                         onChange={(e) => setJobForm({ ...jobForm, locationType: e.target.value })}
-                        className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                        className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                       >
                         <option value="">Select location type</option>
                         <option value="On-site">On-site</option>
@@ -4189,7 +3968,7 @@ const [authView, setAuthView] = useState("login")
                         id="job-employment-type"
                         value={jobForm.employmentType}
                         onChange={(e) => setJobForm({ ...jobForm, employmentType: e.target.value })}
-                        className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                        className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                       >
                         <option value="">Select employment type</option>
                         <option value="Full-time">Full-time</option>
@@ -4208,7 +3987,7 @@ const [authView, setAuthView] = useState("login")
                       value={jobForm.salary}
                       inputMode="numeric"
                       onChange={(e) => setJobForm({ ...jobForm, salary: formatPesoSalary(e.target.value) })}
-                      className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                      className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                       placeholder="e.g. \u20B125,000"
                     />
                   </div>
@@ -4222,7 +4001,7 @@ const [authView, setAuthView] = useState("login")
                         max="10000"
                         value={jobForm.slots}
                         onChange={(event) => setJobForm({ ...jobForm, slots: event.target.value })}
-                        className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                        className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                         placeholder="Optional"
                       />
                     </label>
@@ -4233,7 +4012,7 @@ const [authView, setAuthView] = useState("login")
                         type="date"
                         value={jobForm.deadline}
                         onChange={(event) => setJobForm({ ...jobForm, deadline: event.target.value })}
-                        className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                        className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                       />
                     </label>
                   </div>
@@ -4768,17 +4547,18 @@ const [authView, setAuthView] = useState("login")
               ) : (
                 <div className={`mt-6 space-y-4${employerRequests.loading ? ' opacity-60 transition-opacity' : ''}`} aria-busy={employerRequests.loading}>
                   {employerRequests.items.map((request) => (
-                    <div key={request._id} className="admin-request-item rounded-2xl border border-slate-700 bg-slate-950/80 p-5">
+                    <div key={request._id} className="admin-request-item rounded-2xl border border-slate-300 bg-slate-50 p-5">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div>
-                          <p className="text-lg font-semibold text-white">{request.companyName}</p>
-                          <p className="text-sm text-slate-400">Contact: {request.contactName}</p>
-                          <p className="text-sm text-slate-400">Email: {request.email}</p>
-                          <p className="text-sm text-slate-400">Location: {request.location || 'N/A'}</p>
-                          <p className="text-sm text-slate-400">Phone: {request.phone || 'N/A'}</p>
-                          <p className="mt-2 text-sm text-slate-300">{request.message || 'No additional message provided.'}</p>
-                          <p className="mt-2 text-sm text-amber-300">Status: {request.status.replace('_', ' ')}</p>
-                          {request.reviewReason && <p className="mt-1 text-sm text-rose-300">Previous review note: {request.reviewReason}</p>}
+                          <p className="text-lg font-semibold text-slate-900">{request.companyName}</p>
+                          <p className="text-sm text-slate-600">Contact: {request.contactName}</p>
+                          <p className="text-sm text-slate-600">Email: {request.email}</p>
+                          <p className="text-sm text-slate-600">Location: {request.location || 'N/A'}</p>
+                          <p className="text-sm text-slate-600">Phone: {request.phone || 'N/A'}</p>
+                          {request.message && <p className="mt-2 text-sm text-slate-700">{request.message}</p>}
+                          <p className="mt-2 text-sm font-medium text-amber-800">Status: {request.status.replaceAll('_', ' ')}</p>
+                          {request.resubmittedAt && <p className="mt-1 text-sm font-semibold text-blue-800">Resubmitted</p>}
+                          {request.reviewReason && <p className="mt-1 text-sm text-rose-700">Previous review note: {request.reviewReason}</p>}
                           {request.requirementsFile && (
                             <div className="mt-3 flex flex-wrap gap-2">
                               <button
@@ -4791,7 +4571,7 @@ const [authView, setAuthView] = useState("login")
                               <button
                                 type="button"
                                 onClick={() => handleDownloadRequirements(request._id, request.requirementsFile.originalName)}
-                                className="rounded-2xl border border-cyan-500/50 bg-slate-800 px-3 py-2 text-sm font-semibold text-cyan-300"
+                                className="rounded-2xl border border-cyan-300 bg-white px-3 py-2 text-sm font-semibold text-cyan-800"
                               >
                                 Download PDF
                               </button>
@@ -4802,16 +4582,23 @@ const [authView, setAuthView] = useState("login")
                           <button
                             type="button"
                             onClick={() => confirmEmployerRequest(request._id, request.companyName, 'approved')}
-                            className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
+                            className="rounded-2xl bg-cyan-700 px-4 py-2 text-sm font-semibold text-white"
                           >
                             Approve
                           </button>
                           <button
                             type="button"
                             onClick={() => confirmEmployerRequest(request._id, request.companyName, 'declined')}
-                            className="rounded-2xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-200"
+                            className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800"
                           >
                             Decline
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => confirmEmployerRequest(request._id, request.companyName, 'needs_resubmission')}
+                            className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-900"
+                          >
+                            Request new document
                           </button>
                         </div>
                       </div>
@@ -4842,6 +4629,8 @@ const [authView, setAuthView] = useState("login")
               initialJobId={referralPrefill.jobId}
               initialApplicantIds={referralPrefill.applicantIds}
             />
+          )}
+            </>
           )}
           </main>
         </div>

@@ -94,7 +94,7 @@ export default function Pagination({
             value={pageSize}
             onChange={(event) => onPageSizeChange(Number(event.target.value))}
             aria-label="Rows per page"
-            className="rounded-lg border border-slate-600 bg-slate-800 px-2 py-1 text-xs text-white"
+            className="rounded-lg border border-slate-300 px-2 py-1 text-xs"
           >
             {pageSizeOptions.map((option) => (
               <option key={option} value={option}>{option}</option>

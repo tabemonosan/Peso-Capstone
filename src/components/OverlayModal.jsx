@@ -1,4 +1,4 @@
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
 import { createPortal } from "react-dom"
 
 /**
@@ -9,9 +9,15 @@ import { createPortal } from "react-dom"
  * Locks body scroll while open; Esc and the header's Close button call onClose.
  */
 export default function OverlayModal({ onClose, labelledBy, header, footer, children, closeDisabled = false }) {
+  const dialogRef = useRef(null)
+
   useEffect(() => {
+    const previousFocus = document.activeElement
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = "hidden"
+    const focusable = dialogRef.current?.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])') || []
+    if (focusable.length) focusable[0].focus()
+    else dialogRef.current?.focus()
     const onKeyDown = (event) => {
       if (event.key === "Escape" && !closeDisabled) {
         event.preventDefault()
@@ -22,6 +28,7 @@ export default function OverlayModal({ onClose, labelledBy, header, footer, chil
     return () => {
       document.body.style.overflow = previousOverflow
       document.removeEventListener("keydown", onKeyDown)
+      previousFocus?.focus?.()
     }
   }, [onClose, closeDisabled])
 
@@ -34,9 +41,29 @@ export default function OverlayModal({ onClose, labelledBy, header, footer, chil
       }}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelledBy}
+        tabIndex={-1}
+        onKeyDown={(event) => {
+          if (event.key !== "Tab") return
+          const focusable = dialogRef.current?.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])') || []
+          if (!focusable.length) {
+            event.preventDefault()
+            dialogRef.current?.focus()
+            return
+          }
+          const first = focusable[0]
+          const last = focusable[focusable.length - 1]
+          if (event.shiftKey && (document.activeElement === first || !dialogRef.current.contains(document.activeElement))) {
+            event.preventDefault()
+            last.focus()
+          } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialogRef.current)) {
+            event.preventDefault()
+            first.focus()
+          }
+        }}
         className="flex max-h-[calc(100dvh-2rem)] w-full max-w-[min(1100px,100%)] flex-col overflow-hidden rounded-2xl border border-slate-300 bg-white text-black shadow-2xl"
       >
         <div className="flex-none border-b border-slate-200 p-4 sm:px-6">{header}</div>

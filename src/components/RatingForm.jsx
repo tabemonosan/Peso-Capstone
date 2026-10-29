@@ -84,7 +84,7 @@ function RatingForm({ token, toUserId, toRole, hireReportId, onCreated }) {
           rows="3"
           value={comment}
           onChange={(event) => setComment(event.target.value)}
-          className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+          className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
           placeholder="Share feedback about the applicant"
           disabled={submitting}
         />

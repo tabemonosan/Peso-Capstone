@@ -1591,6 +1591,109 @@
   }
 }
 
+:root {
+  --form-control-bg: #f8fafc;
+  --form-control-text: #1e293b;
+  --form-control-border: #cbd5e1;
+  --form-control-focus: #2563eb;
+  --form-control-disabled-bg: #f1f5f9;
+  --form-control-disabled-text: #94a3b8;
+  --form-control-error: #dc2626;
+  color-scheme: light;
+}
+
+/* All form controls must use the shared light form components. Do not add dark backgrounds. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+select,
+textarea,
+.shared-form-control {
+  color-scheme: light;
+  border-color: var(--form-control-border);
+  background-color: var(--form-control-bg);
+  color: var(--form-control-text);
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):focus,
+select:focus,
+textarea:focus,
+.shared-form-control:focus {
+  border-color: var(--form-control-focus);
+  outline: 2px solid color-mix(in srgb, var(--form-control-focus) 24%, transparent);
+  outline-offset: 1px;
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"])[aria-invalid="true"],
+select[aria-invalid="true"],
+textarea[aria-invalid="true"],
+.shared-form-control[aria-invalid="true"] {
+  border-color: var(--form-control-error);
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):disabled,
+select:disabled,
+textarea:disabled,
+.shared-form-control:disabled {
+  background-color: var(--form-control-disabled-bg);
+  color: var(--form-control-disabled-text);
+  cursor: not-allowed;
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"])::placeholder,
+textarea::placeholder,
+.shared-form-control::placeholder {
+  color: #64748b;
+  opacity: 1;
+}
+
+select option {
+  background-color: #ffffff;
+  color: var(--form-control-text);
+}
+
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"] {
+  color-scheme: light;
+  accent-color: var(--form-control-focus);
+}
+
+input[type="file"]::file-selector-button {
+  border: 0;
+  border-radius: 0.5rem;
+  background: #e2e8f0;
+  color: #1e293b;
+  cursor: pointer;
+  margin-right: 0.75rem;
+  padding: 0.4rem 0.75rem;
+}
+
+.shared-form-control {
+  display: block;
+  width: 100%;
+  min-height: 2.75rem;
+  margin-top: 0.375rem;
+  border: 1px solid var(--form-control-border);
+  border-radius: 0.625rem;
+  padding: 0.65rem 0.875rem;
+  font: inherit;
+}
+
+.employer-signup-wizard input.employer-code-digit {
+  width: 2.5rem;
+  min-height: 2.5rem;
+  margin-top: 0;
+  padding: 0.25rem;
+}
+
+.shared-form-control[type="checkbox"],
+.shared-form-control[type="radio"] {
+  display: inline-block;
+  width: 1rem;
+  min-height: 1rem;
+  margin: 0;
+  padding: 0;
+}
+
 .auth-page {
   min-height: 100vh;
   display: flex;
@@ -1676,8 +1779,8 @@
 }
 
 .auth-form input:focus {
-  border-color: #07833f;
-  box-shadow: 0 0 0 3px rgba(7, 131, 63, 0.12);
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16);
 }
 
 .auth-form input::placeholder {
@@ -1747,7 +1850,7 @@
   width: 13px;
   height: 13px;
   margin: 0;
-  accent-color: #07833f;
+  accent-color: var(--form-control-focus);
 }
 
 .auth-detail-form > div:last-child {
@@ -1798,7 +1901,7 @@
   width: 13px;
   height: 13px;
   margin: 0;
-  accent-color: #07833f;
+  accent-color: var(--form-control-focus);
 }
 
 .auth-link {

@@ -137,7 +137,7 @@ describe('online path without a resume', () => {
     expect(res.status).toBe(200)
     expect(res.body.attentionCount).toBe(0)
     const resumeDoc = res.body.verificationDocuments.find((d) => d.docKey === 'resume')
-    expect(resumeDoc.required).toBe(false)
+    expect(resumeDoc).toBeUndefined()
     const requiredDocs = res.body.verificationDocuments.filter((d) => d.required)
     expect(requiredDocs.map((d) => d.docKey).sort()).toEqual(['birthCertificate', 'nsrpForm', 'validId1'])
   }, 60000)

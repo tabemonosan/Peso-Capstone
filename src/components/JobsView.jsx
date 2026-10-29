@@ -1618,13 +1618,13 @@ function JobsView({
                   value={adminJobSearchTerm}
                   onChange={(event) => setAdminJobSearchTerm(event.target.value)}
                   placeholder="Search title, company, location, requester"
-                  className="w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white sm:col-span-2"
+                  className="w-full rounded-2xl border border-slate-300 px-3 py-2 text-sm sm:col-span-2"
                 />
                 <select
                   id="admin-job-status-filter"
                   value={adminJobStatusFilter}
                   onChange={(event) => setAdminJobStatusFilter(event.target.value)}
-                  className="w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                  className="w-full rounded-2xl border border-slate-300 px-3 py-2 text-sm"
                 >
                   <option value="all">All statuses</option>
                   <option value="pending">Pending</option>

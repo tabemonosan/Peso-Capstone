@@ -146,7 +146,7 @@ const stepErrors = [
   ["employmentStatus", "employmentTypeDetail", "activelyLooking", "lookingDuration", "willingImmediately", "willingWhen", "fourPs", "fourPsId", "occupation1", "occupation2", "occupation3", "occupation4", "localPref1", "localPref2", "localPref3", "overseasPref1", "overseasPref2", "overseasPref3", "expectedSalary", "passportNo", "passportExpiry"],
   ["certified"],
 ]
-const inputClass = "mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-black"
+const inputClass = "shared-form-control mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-black"
 
 // Step ids: 0 Account, 9 Your NSRP (path choice), 1-6 NSRP answer steps,
 // 7 Documents, 8 Preview & submit (online), 10 Basic information and

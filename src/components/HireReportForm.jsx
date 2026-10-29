@@ -55,7 +55,7 @@ function HireReportForm({ token, applicantId, jobId, referralId, onCreated }) {
           id={`hire-status-${referralId}`}
           value={status}
           onChange={(event) => setStatus(event.target.value)}
-          className="mt-2 w-full rounded-2xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+          className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
           disabled={submitting}
         >
           <option value="hired">Hired</option>

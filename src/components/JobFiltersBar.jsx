@@ -160,7 +160,7 @@ export default function JobFiltersBar({ filters, facets, resultCount, mySkills =
           onChange={(event) => onKeyword(event.target.value)}
           placeholder="Keyword (title, company)"
           aria-label="Keyword search"
-          className="w-44 rounded-full border border-slate-600 bg-slate-800 px-3.5 py-1.5 text-sm text-white"
+          className="w-44 rounded-full border border-slate-300 px-3.5 py-1.5 text-sm"
         />
 
         {sections.map((section) => {
@@ -206,7 +206,7 @@ export default function JobFiltersBar({ filters, facets, resultCount, mySkills =
                       onChange={(event) => (section.id === 'skills' ? setSkillQuery(event.target.value) : setLocationQuery(event.target.value))}
                       placeholder={`Search ${section.title.toLowerCase()}…`}
                       aria-label={`Search ${section.title}`}
-                      className="mb-2 w-full rounded-xl border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-sm text-white"
+                      className="mb-2 w-full rounded-xl border border-slate-300 px-2.5 py-1.5 text-sm"
                     />
                   )}
                   <Checklist
@@ -288,7 +288,7 @@ export default function JobFiltersBar({ filters, facets, resultCount, mySkills =
               onChange={(event) => onKeyword(event.target.value)}
               placeholder="Keyword (title, company)"
               aria-label="Keyword search"
-              className="mb-4 w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+              className="mb-4 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
             />
             {sections.map((section) => (
               <div key={section.id} className="mb-5">
