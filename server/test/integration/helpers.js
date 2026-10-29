@@ -1,6 +1,9 @@
 // Shared helpers for real-database (mongodb-memory-server) integration tests.
 import { MongoMemoryServer } from 'mongodb-memory-server'
 import mongoose from 'mongoose'
+import crypto from 'crypto'
+import jwt from 'jsonwebtoken'
+import { normalizeEmail } from '../../utils/emailVerification.js'
 
 let mongod
 
@@ -72,7 +75,18 @@ export function attachDocuments(req, { size = 1024, resumeSize = size } = {}) {
     .attach('resume', pdfBuffer(resumeSize), { filename: 'resume.pdf', contentType: 'application/pdf' })
 }
 
-export function signupRequest(req, { email, password = 'Password123!', answers = validNsrpAnswers(), ...rest } = {}) {
+// Sign a valid signup-email-proof token directly (bypasses the code flow for
+// tests that only exercise the signup handler). Pass emailProof: null to omit.
+export function emailProofFor(email, overrides = {}) {
+  const secret = process.env.JWT_SECRET || 'dev-secret'
+  return jwt.sign(
+    { email: normalizeEmail(email), purpose: 'signup-email-proof', jti: crypto.randomBytes(16).toString('hex'), ...overrides.payload },
+    secret,
+    { expiresIn: '30m', ...overrides.sign },
+  )
+}
+
+export function signupRequest(req, { email, password = 'Password123!', answers = validNsrpAnswers(), emailProof, resume = true, ...rest } = {}) {
   const withFields = req
     .field('email', email)
     .field('password', password)
@@ -80,5 +94,44 @@ export function signupRequest(req, { email, password = 'Password123!', answers =
     .field('id1Type', 'SSS')
     .field('id2Type', 'Passport')
     .field('nsrpAnswers', JSON.stringify(answers))
-  return attachDocuments(withFields, rest)
+  if (emailProof !== null) withFields.field('emailProof', emailProof || emailProofFor(email))
+  const size = rest.size || 1024
+  const withDocs = req => req
+    .attach('birthCertificate', pdfBuffer(size), { filename: 'birth.pdf', contentType: 'application/pdf' })
+    .attach('validId1Front', pdfBuffer(size), { filename: 'id1-front.pdf', contentType: 'application/pdf' })
+    .attach('validId1Back', pdfBuffer(size), { filename: 'id1-back.pdf', contentType: 'application/pdf' })
+    .attach('validId2Front', pdfBuffer(size), { filename: 'id2-front.pdf', contentType: 'application/pdf' })
+    .attach('validId2Back', pdfBuffer(size), { filename: 'id2-back.pdf', contentType: 'application/pdf' })
+  if (resume) withFields.attach('resume', pdfBuffer(rest.resumeSize || size), { filename: 'resume.pdf', contentType: 'application/pdf' })
+  return withDocs(withFields)
+}
+
+export const validBasicInfo = (overrides = {}) => ({
+  firstName: 'Juan',
+  middleName: 'Santos',
+  lastName: 'Cruz',
+  suffix: '',
+  dob: '1990-01-01',
+  cellphone: '09171234567',
+  addressCity: 'Legazpi',
+  addressProvince: 'Albay',
+  ...overrides,
+})
+
+// Upload-path signup: nsrpFile + basic information, no nsrpAnswers.
+export function signupUploadRequest(req, { email, basic = validBasicInfo(), emailProof, nsrpFile } = {}) {
+  const withFields = req
+    .field('email', email)
+    .field('password', 'Password123!')
+    .field('consent', 'true')
+    .field('nsrpMode', 'upload')
+    .field('id1Type', 'SSS')
+  for (const [key, value] of Object.entries(basic)) withFields.field(key, value)
+  if (emailProof !== null) withFields.field('emailProof', emailProof || emailProofFor(email))
+  if (nsrpFile !== null) {
+    withFields.attach('nsrpFile', nsrpFile || pdfBuffer(), { filename: 'nsrp.pdf', contentType: 'application/pdf' })
+  }
+  return withFields
+    .attach('birthCertificate', pdfBuffer(), { filename: 'birth.pdf', contentType: 'application/pdf' })
+    .attach('validId1Front', pdfBuffer(), { filename: 'id1-front.pdf', contentType: 'application/pdf' })
 }

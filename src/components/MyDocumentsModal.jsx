@@ -3,6 +3,7 @@ import { API_URL } from "../config"
 import Modal from "./Modal"
 import { ID_TYPE_OPTIONS } from "./VerificationDocumentsForm"
 import ApplicantSignupWizard from "./ApplicantSignupWizard"
+import { NSRP_SOURCE_LABELS } from "../../shared/verificationDocs.js"
 
 // Applicant-facing documents modal: one card per requirement with a status
 // badge, file details, View (signed expiring URL), and Replace/Upload for
@@ -28,10 +29,8 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
   const pickFile = (docKey, file) => {
     setError("")
     if (!file) return setPendingFile((current) => ({ ...current, [docKey]: null }))
-    const acceptedTypes = docKey === "resume"
-      ? ["image/jpeg", "image/png", "application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]
-      : ["image/jpeg", "image/png", "application/pdf"]
-    if (!acceptedTypes.includes(file.type)) return setError(docKey === "resume" ? "Resume must be a PDF, DOCX, JPG, or PNG file." : "Only JPG, PNG, or PDF files are accepted.")
+    const acceptedTypes = ["image/jpeg", "image/png", "application/pdf"]
+    if (!acceptedTypes.includes(file.type)) return setError("Only JPG, PNG, or PDF files are accepted.")
     if (file.size > 5 * 1024 * 1024) return setError(`"${file.name}" is too large. Maximum is 5 MB.`)
     setPendingFile((current) => ({ ...current, [docKey]: file }))
   }
@@ -81,7 +80,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
           </div>
           <ApplicantSignupWizard
             mode="update"
-            initialAnswers={info.nsrpData || { email: "" }}
+            initialAnswers={info.nsrpData || { email: "", firstName: info.basic?.firstName || "", middleName: info.basic?.middleName || "", surname: info.basic?.lastName || "", suffix: info.basic?.suffix || "", cellphone: info.basic?.cellphone || "", addressCity: info.basic?.addressCity || "", addressProvince: info.basic?.addressProvince || "" }}
             token={token}
             onCancel={() => {
               closeEditor()
@@ -128,15 +127,28 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
                 </span>
                 {chip(doc.status)}
                 {doc.required && <span className="text-xs text-slate-500">required</span>}
-                {doc.latest?.url && (
-                  <button type="button" onClick={() => viewVersion(doc.latest.url)} className="rounded-xl bg-cyan-500 px-2 py-1 text-xs font-semibold text-white">
-                    View
-                  </button>
-                )}
-                {doc.latest?.back?.url && (
-                  <button type="button" onClick={() => viewVersion(doc.latest.back.url)} className="rounded-xl border border-cyan-700 px-2 py-1 text-xs font-semibold text-cyan-800">
-                    View back
-                  </button>
+                {doc.docKey === "nsrpForm" && doc.sourceType && <span className="text-xs text-slate-500">{NSRP_SOURCE_LABELS[doc.sourceType]}</span>}
+                {doc.docKey.startsWith("validId") ? (
+                  (doc.latest?.url || doc.latest?.back?.url) && (
+                    <div role="group" aria-label={`${doc.label} file views`} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1">
+                      {doc.latest?.url && (
+                        <button type="button" onClick={() => viewVersion(doc.latest.url)} className="rounded-md bg-cyan-500 px-2 py-1 text-xs font-semibold text-white">
+                          View front
+                        </button>
+                      )}
+                      {doc.latest?.back?.url && (
+                        <button type="button" onClick={() => viewVersion(doc.latest.back.url)} className="rounded-md border border-cyan-700 px-2 py-1 text-xs font-semibold text-cyan-800">
+                          View back
+                        </button>
+                      )}
+                    </div>
+                  )
+                ) : (
+                  doc.latest?.url && (
+                    <button type="button" onClick={() => viewVersion(doc.latest.url)} className="rounded-xl bg-cyan-500 px-2 py-1 text-xs font-semibold text-white">
+                      View
+                    </button>
+                  )
                 )}
               </div>
 
@@ -159,15 +171,31 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
               {canReplace && (
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   {doc.docKey === "nsrpForm" ? (
-                    info.nsrpData ? (
+                    <>
                       <button type="button" onClick={() => setEditingNsrp(true)} className="rounded-xl bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-white">
-                        Update NSRP
+                        {info.nsrpData ? "Update NSRP" : "Fill out online instead"}
                       </button>
-                    ) : (
-                      <button type="button" onClick={() => setEditingNsrp(true)} className="rounded-xl bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-white">
-                        Fill out your NSRP online
-                      </button>
-                    )
+                      {doc.sourceType === "uploaded" && (
+                        <>
+                          <input
+                            type="file"
+                            aria-label="Replace NSRP file"
+                            accept="image/jpeg,image/png,application/pdf"
+                            onChange={(e) => pickFile(doc.docKey, e.target.files?.[0] || null)}
+                            className="text-xs text-slate-700 file:mr-2 file:rounded-lg file:border-0 file:bg-slate-200 file:px-2 file:py-1 file:text-xs file:font-semibold file:text-slate-900"
+                          />
+                          <button
+                            type="button"
+                            disabled={!pendingFile[doc.docKey] || uploading === doc.docKey}
+                            onClick={() => replaceDoc(doc.docKey)}
+                            className="rounded-xl border border-cyan-700 px-3 py-1.5 text-xs font-semibold text-cyan-800 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            {uploading === doc.docKey ? "Uploading…" : "Replace file"}
+                          </button>
+                          <span className="text-xs text-slate-500">{doc.uploadsRemaining} of 5 uploads left</span>
+                        </>
+                      )}
+                    </>
                   ) : (
                     <>
                   {doc.docKey.startsWith("validId") && (
@@ -184,7 +212,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
                   )}
                   <input
                     type="file"
-                    accept={doc.docKey === "resume" ? "image/jpeg,image/png,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" : "image/jpeg,image/png,application/pdf"}
+                    accept="image/jpeg,image/png,application/pdf"
                     onChange={(e) => pickFile(doc.docKey, e.target.files?.[0] || null)}
                     className="text-xs text-slate-700 file:mr-2 file:rounded-lg file:border-0 file:bg-slate-200 file:px-2 file:py-1 file:text-xs file:font-semibold file:text-slate-900"
                   />

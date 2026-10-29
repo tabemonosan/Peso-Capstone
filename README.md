@@ -36,3 +36,42 @@ You can also build the images individually:
 docker build -t capstone-backend .
 docker build -f Dockerfile.frontend -t capstone-frontend .
 ```
+
+## Email setup
+
+Verification codes and notifications are sent via the mailer in `server/mailer.js`. It has two delivery modes plus a safe fallback (subject-only logging). It never logs codes, tokens, links, or recipient email addresses.
+
+### Quick start (development, no account needed): Ethereal
+
+1. In `.env`, set `EMAIL_DEV_MODE=ethereal` and leave the `SMTP_*` vars unset.
+2. Start the server — a throwaway Ethereal inbox is created automatically.
+3. After each email is "sent", the console prints a `[DEV ONLY] Email preview: <url>` line. Open that URL to read the email. Nothing is really delivered, and Ethereal is never used when `NODE_ENV=production`.
+
+### Real delivery: Gmail (or any SMTP)
+
+1. Turn on 2-Step Verification on the Google account.
+2. Go to Google Account → Security → **App passwords** and generate one. **Never use your real account password.**
+3. In `.env`:
+   ```
+   SMTP_HOST=smtp.gmail.com
+   SMTP_PORT=587
+   SMTP_USER=you@gmail.com
+   SMTP_PASS=the-16-char-app-password
+   ```
+   (`MAIL_FROM` is optional and defaults to `SMTP_USER`. Port 465 also works — it uses SSL instead of STARTTLS.)
+4. On server start you'll see `Mailer ready` (or a short, redacted error — startup continues either way).
+
+Send a test email without starting the whole app:
+
+```sh
+npm run mail:test -- someone@example.com
+```
+
+In Ethereal mode this also prints the preview URL.
+
+### Troubleshooting
+
+- **"Authentication failed"** — check the app password and that 2-Step Verification is on (a normal Gmail password will not work).
+- **"Could not reach the SMTP server"** — check host and port (587 = STARTTLS, 465 = SSL), and that no firewall is blocking outbound SMTP.
+- **TLS/certificate error** — make sure the port matches the encryption, and check the server certificate.
+- **"Email is not configured..."** — no mode is active; set `SMTP_*` or `EMAIL_DEV_MODE=ethereal`.

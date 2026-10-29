@@ -13,9 +13,10 @@ const QUICK_REJECT_REASONS = ["Blurry or unreadable", "Wrong document type", "Na
 // - Resubmitted documents (new pending version after a rejection) are flagged.
 // - Version history is expandable so admins can compare with previous versions.
 // - Reject requires a reason; the applicant only has to re-upload that document.
-export default function VerificationDocsReviewModal({ applicant, token, onClose, onReviewed }) {
+export default function VerificationDocsReviewModal({ applicant, token, onClose, onReviewed, onRestrict }) {
   const [documents, setDocuments] = useState(null)
   const [status, setStatus] = useState(null)
+  const [details, setDetails] = useState(null)
   const [expanded, setExpanded] = useState({}) // docKey -> bool
   // confirmAction: { docKey, action: 'approved' | 'rejected' | 'revert' } | null
   const [confirmAction, setConfirmAction] = useState(null)
@@ -33,6 +34,7 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
       if (response.ok && data) {
         setDocuments(data.documents || [])
         setStatus({ verificationStatus: data.verificationStatus, verificationReason: data.verificationReason })
+        setDetails({ basic: data.basic || {}, nsrpData: data.nsrpData || null })
       }
     } catch {
       setDocuments([])
@@ -41,6 +43,8 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
 
   useEffect(() => {
     setDocuments(null)
+    setDetails(null)
+    setStatus(null)
     load()
   }, [load])
 
@@ -104,7 +108,35 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
     return <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${colors[docStatus] || colors.pending}`}>{docStatus || "missing"}</span>
   }
 
-  const applicantName = formatFullName(applicant.profile) || applicant.companyName || applicant.email
+  const applicantName = applicant.displayName || formatFullName(applicant.profile) || applicant.companyName || applicant.email
+  const profile = applicant.profile || {}
+  const basic = details?.basic || {}
+  const nsrp = details?.nsrpData || profile.nsrp || {}
+  const fullName = formatFullName({
+    firstName: basic.firstName || profile.firstName || nsrp.firstName,
+    middleName: basic.middleName || profile.middleName || nsrp.middleName,
+    lastName: basic.lastName || profile.lastName || nsrp.surname,
+    suffix: basic.suffix || profile.suffix || nsrp.suffix,
+  }) || profile.name || ""
+  const phone = basic.phone || basic.cellphone || applicant.phone || profile.phone || nsrp.cellphone
+  const city = basic.addressCity || profile.addressCity || nsrp.addressCity
+  const province = basic.addressProvince || profile.addressProvince || nsrp.addressProvince
+  const location = [city, province].filter(Boolean).join(", ") || basic.location || profile.location
+  const dob = basic.dob || profile.dob || nsrp.dob
+  const registrationDate = (() => {
+    if (!applicant.createdAt) return ""
+    const date = new Date(applicant.createdAt)
+    return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString()
+  })()
+  const skills = Array.isArray(profile.skills) ? profile.skills.filter(Boolean) : []
+  const nsrpDocument = documents?.find((doc) => doc.docKey === "nsrpForm")
+  const hasNsrpDocument = Boolean(nsrpDocument?.latest)
+  const nsrpSource = nsrpDocument?.sourceType === "generated" || (!nsrpDocument?.sourceType && Object.keys(nsrp).length > 0)
+    ? "Generated from online answers"
+    : "Uploaded by applicant"
+  const displayValue = (value) => value
+    ? <span className="text-slate-900">{value}</span>
+    : <span className="text-slate-400">Not provided</span>
 
   return (
     <Modal onClose={onClose} labelledBy="verification-docs-review-title" describedBy="verification-docs-review-description">
@@ -114,19 +146,85 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
             <p id="verification-docs-review-description" className="mt-1 text-sm text-slate-600">
               {applicantName} · {applicant.email}
             </p>
-            <p className="mt-1 text-sm text-slate-600">
-              Email: {applicant.emailVerified ? <span className="font-semibold text-green-700">verified</span> : <span className="font-semibold text-amber-700">not verified</span>}
-              {status?.verificationStatus && (
-                <>
-                  {" · "}Account: <span className="font-semibold capitalize">{status.verificationStatus.replaceAll("_", " ")}</span>
-                </>
-              )}
-            </p>
+            {status?.verificationStatus && (
+              <p className="mt-1 text-sm text-slate-600">
+                Account: <span className="font-semibold capitalize">{status.verificationStatus.replaceAll("_", " ")}</span>
+              </p>
+            )}
           </div>
           <button type="button" onClick={onClose} aria-label="Close verification documents" className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold">
             Close
           </button>
         </div>
+
+        <section aria-labelledby="applicant-details-heading" className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <h3 id="applicant-details-heading" className="font-semibold text-slate-900">Applicant details</h3>
+          <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+            <div>
+              <dt className="text-xs font-semibold text-slate-500">Full name</dt>
+              <dd>{displayValue(fullName)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs font-semibold text-slate-500">Email</dt>
+              <dd className="break-all">
+                {displayValue(applicant.email)}
+                {" "}
+                {applicant.emailVerified
+                  ? <span className="text-xs font-semibold text-green-700">(verified)</span>
+                  : <span className="text-xs font-semibold text-amber-700">(not verified)</span>}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs font-semibold text-slate-500">Phone</dt>
+              <dd>{displayValue(phone)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs font-semibold text-slate-500">Location (city/municipality, province)</dt>
+              <dd>{displayValue(location)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs font-semibold text-slate-500">Date of birth</dt>
+              <dd>{displayValue(dob)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs font-semibold text-slate-500">Registration date</dt>
+              <dd>{displayValue(registrationDate)}</dd>
+            </div>
+            {skills.length > 0 && (
+              <div className="sm:col-span-2">
+                <dt className="text-xs font-semibold text-slate-500">Skills</dt>
+                <dd className="mt-1 flex flex-wrap gap-1.5">
+                  {skills.map((skill) => (
+                    <span key={skill} className="rounded-full border border-cyan-200 bg-cyan-50 px-2 py-0.5 text-xs font-medium text-cyan-800">{skill}</span>
+                  ))}
+                </dd>
+              </div>
+            )}
+            <div className="sm:col-span-2">
+              <dt className="text-xs font-semibold text-slate-500">NSRP</dt>
+              <dd className="mt-1 flex flex-wrap items-center gap-2">
+                {documents === null ? (
+                  <span className="text-xs text-slate-500">Loading…</span>
+                ) : hasNsrpDocument ? (
+                  <>
+                    {badge(nsrpDocument.status)}
+                    <span className="text-xs text-slate-600">{nsrpSource}</span>
+                    {nsrpDocument.latest.url && (
+                      <button type="button" onClick={() => viewVersion(nsrpDocument.latest.url)} className="rounded-lg bg-cyan-500 px-2 py-1 text-xs font-semibold text-white">View</button>
+                    )}
+                  </>
+                ) : (
+                  <span className="text-xs text-slate-500">Not submitted</span>
+                )}
+              </dd>
+            </div>
+          </dl>
+          {applicant.verificationStatus === "approved" && onRestrict && (
+            <button type="button" onClick={() => onRestrict(applicant.id)} className="mt-3 rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-white">
+              Restrict applicant
+            </button>
+          )}
+        </section>
 
         {documents === null ? (
           <p className="mt-5 text-sm text-slate-500">Loading…</p>
@@ -142,13 +240,35 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
                     {doc.latest ? ` (v${doc.latest.version})` : ""}
                   </span>
                   {badge(doc.status)}
+                  {doc.docKey === "nsrpForm" && doc.sourceType && (
+                    <span className="rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
+                      {doc.sourceType === "uploaded" ? "Uploaded file" : "Generated online"}
+                    </span>
+                  )}
                   {doc.resubmitted && (
                     <span className="rounded-full border border-cyan-300 bg-cyan-100 px-2 py-0.5 text-xs font-semibold text-cyan-800">resubmitted</span>
                   )}
-                  {doc.latest?.url && (
-                    <button type="button" onClick={() => viewVersion(doc.latest.url)} className="rounded-xl bg-cyan-500 px-2 py-1 text-xs font-semibold text-white">
-                      View
-                    </button>
+                  {doc.docKey.startsWith("validId") ? (
+                    (doc.latest?.url || doc.latest?.back?.url) && (
+                      <div role="group" aria-label={`${doc.label} file views`} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1">
+                        {doc.latest?.url && (
+                          <button type="button" onClick={() => viewVersion(doc.latest.url)} className="rounded-md bg-cyan-500 px-2 py-1 text-xs font-semibold text-white">
+                            View front
+                          </button>
+                        )}
+                        {doc.latest?.back?.url && (
+                          <button type="button" onClick={() => viewVersion(doc.latest.back.url)} className="rounded-md border border-cyan-700 px-2 py-1 text-xs font-semibold text-cyan-800">
+                            View back
+                          </button>
+                        )}
+                      </div>
+                    )
+                  ) : (
+                    doc.latest?.url && (
+                      <button type="button" onClick={() => viewVersion(doc.latest.url)} className="rounded-xl bg-cyan-500 px-2 py-1 text-xs font-semibold text-white">
+                        View
+                      </button>
+                    )
                   )}
                   {doc.status === "pending" && (
                     <>
@@ -217,10 +337,27 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
                         {badge(version.status)}
                         <span className="truncate">{version.originalName}</span>
                         {version.uploadedAt && <span>{new Date(version.uploadedAt).toLocaleString()}</span>}
-                        {version.url && (
-                          <button type="button" onClick={() => viewVersion(version.url)} className="rounded-lg border border-slate-300 bg-white px-1.5 py-0.5 text-slate-700">
-                            View
-                          </button>
+                        {doc.docKey.startsWith("validId") ? (
+                          (version.url || version.back?.url) && (
+                            <div role="group" aria-label={`${doc.label} version ${version.version} file views`} className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white p-0.5">
+                              {version.url && (
+                                <button type="button" onClick={() => viewVersion(version.url)} className="rounded px-1.5 py-0.5 text-cyan-800">
+                                  View front
+                                </button>
+                              )}
+                              {version.back?.url && (
+                                <button type="button" onClick={() => viewVersion(version.back.url)} className="rounded border-l border-slate-200 px-1.5 py-0.5 text-cyan-800">
+                                  View back
+                                </button>
+                              )}
+                            </div>
+                          )
+                        ) : (
+                          version.url && (
+                            <button type="button" onClick={() => viewVersion(version.url)} className="rounded-lg border border-slate-300 bg-white px-1.5 py-0.5 text-slate-700">
+                              View
+                            </button>
+                          )
                         )}
                         {version.reviewReason && <span className="text-rose-700">({version.reviewReason})</span>}
                       </li>

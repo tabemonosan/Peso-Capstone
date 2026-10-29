@@ -33,6 +33,12 @@ beforeEach(() => {
         blob: async () => new Blob(['%PDF-1.4 preview'], { type: 'application/pdf' }),
       })
     }
+    if (url === 'http://localhost:4000/api/signup/email-code') {
+      return Promise.resolve({ ok: true, json: async () => ({ ok: true }) })
+    }
+    if (url === 'http://localhost:4000/api/signup/email-code/verify') {
+      return Promise.resolve({ ok: true, json: async () => ({ ok: true, proofToken: 'proof-token-123' }) })
+    }
     if (url === 'http://localhost:4000/api/signup') {
       return Promise.resolve({
         ok: true,
@@ -53,14 +59,34 @@ function openSignup() {
   fireEvent.click(screen.getByRole('button', { name: /Create an account \(Applicant\)/i }))
 }
 
+// Completes the step-1 email-code verification via the mocked endpoints.
+async function verifyStepOneEmail(email = 'new@peso.gov') {
+  fireEvent.change(screen.getByLabelText(/^Email$/i), { target: { value: email } })
+  fireEvent.click(screen.getByRole('button', { name: /^Send code$/i }))
+  await screen.findByLabelText(/^Code digit 1$/i)
+  for (let i = 1; i <= 6; i += 1) {
+    fireEvent.change(screen.getByLabelText(new RegExp(`^Code digit ${i}$`, 'i')), { target: { value: String(i) } })
+  }
+  fireEvent.click(screen.getByRole('button', { name: /^Verify$/i }))
+  await screen.findByText(/Email verified/i)
+}
+
+// Past the Account step, choose the online NSRP path.
+async function chooseOnlinePath() {
+  fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
+  await screen.findByRole('radio', { name: /Fill out my NSRP online/i })
+  fireEvent.click(screen.getByRole('radio', { name: /Fill out my NSRP online/i }))
+  fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
+}
+
 // Walks the wizard from the account step to the Documents step with valid input.
 async function advanceToDocumentsStep() {
   openSignup()
-  fireEvent.change(screen.getByLabelText(/^Email$/i), { target: { value: 'new@peso.gov' } })
+  await verifyStepOneEmail()
   fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'Password123!' } })
   fireEvent.change(screen.getByLabelText(/Confirm password/i), { target: { value: 'Password123!' } })
   fireEvent.click(screen.getByRole('checkbox', { name: /collection and processing/i }))
-  fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
+  await chooseOnlinePath()
 
   await screen.findByLabelText(/^Surname/i)
   fireEvent.change(screen.getByLabelText(/^Surname/i), { target: { value: 'Cruz' } })
@@ -96,7 +122,6 @@ async function advanceToDocumentsStep() {
   fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
 
   await screen.findByText('Documents')
-  fireEvent.change(screen.getByLabelText(/Resume \(PDF/i), { target: { files: [pdfFile('resume.pdf')] } })
   const docsFieldset = screen.getByText('Verification documents').closest('fieldset')
   const files = docsFieldset.querySelectorAll('input[type="file"]')
   fireEvent.change(files[0], { target: { files: [pdfFile('birth.pdf')] } })
@@ -115,7 +140,8 @@ describe('Applicant sign-up wizard', () => {
     expect(screen.getByText(/collection and processing/i)).toBeInTheDocument()
     expect(screen.queryByLabelText(/^Location$/i)).not.toBeInTheDocument()
     expect(screen.queryByLabelText(/^About me$/i)).not.toBeInTheDocument()
-    expect(screen.getByRole('navigation', { name: /Sign-up progress/i })).toHaveTextContent('9. Preview & submit')
+    // Before a path is chosen, only Account and Your NSRP are shown
+    expect(screen.getByRole('navigation', { name: /Sign-up progress/i })).toHaveTextContent('2. Your NSRP')
   })
 
   it('does not persist the password or confirmation while saving browser progress', async () => {
@@ -131,11 +157,11 @@ describe('Applicant sign-up wizard', () => {
 
   it('sends NSRP answers and all signup documents in one multipart request', async () => {
     openSignup()
-    fireEvent.change(screen.getByLabelText(/^Email$/i), { target: { value: 'new@peso.gov' } })
+    await verifyStepOneEmail()
     fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'Password123!' } })
     fireEvent.change(screen.getByLabelText(/Confirm password/i), { target: { value: 'Password123!' } })
     fireEvent.click(screen.getByRole('checkbox', { name: /collection and processing/i }))
-    fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
+    await chooseOnlinePath()
 
     await screen.findByLabelText(/^Surname/i)
     fireEvent.change(screen.getByLabelText(/^Surname/i), { target: { value: 'Cruz' } })
@@ -171,7 +197,6 @@ describe('Applicant sign-up wizard', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
 
     await screen.findByText('Documents')
-    fireEvent.change(screen.getByLabelText(/Resume \(PDF/i), { target: { files: [pdfFile('resume.pdf')] } })
     const docsFieldset = screen.getByText('Verification documents').closest('fieldset')
     const files = docsFieldset.querySelectorAll('input[type="file"]')
     fireEvent.change(files[0], { target: { files: [pdfFile('birth.pdf')] } })
@@ -194,9 +219,12 @@ describe('Applicant sign-up wizard', () => {
     expect(JSON.parse(request.body.get('nsrpAnswers')).surname).toBe('Cruz')
     expect(request.body.has('birthCertificate')).toBe(true)
     expect(request.body.has('validId1Front')).toBe(true)
-    expect(request.body.has('resume')).toBe(true)
+    // The resume is optional and no longer collected at sign-up
+    expect(request.body.has('resume')).toBe(false)
+    expect(request.body.get('nsrpMode')).toBe('online')
     expect(request.body.has('nsrpForm')).toBe(false)
-    await screen.findByText('Check your email')
+    expect(request.body.get('emailProof')).toBe('proof-token-123')
+    await screen.findByText('Account created')
   })
 
   it('shows the server rate-limit message when the preview is throttled', async () => {

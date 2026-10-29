@@ -911,10 +911,11 @@ function JobsView({
             </>
           )}
           footer={applicationTab === 'online' && !currentUser?.profile?.nsrp && hasSavedNsrpFile ? (
-            <div className="flex flex-wrap justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <button type="button" onClick={() => { setApplicationJob(null); onEditNsrp?.() }} className="rounded-xl border border-cyan-700 px-4 py-2 text-sm font-semibold text-cyan-800">
                 Fill out your NSRP online
               </button>
+              <p className="w-full text-xs text-slate-500">Tip: fill out your NSRP online to get better job matches.</p>
               <button
                 type="button"
                 disabled={applicationSubmitting}

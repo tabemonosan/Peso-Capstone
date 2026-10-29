@@ -33,6 +33,9 @@ const verificationDocVersionSchema = new Schema({
   },
   version: { type: Number, required: true },
   status: { type: String, enum: ['pending', 'approved', 'rejected', 'superseded'], default: 'pending' },
+  // nsrpForm only: whether the document was generated from online answers or
+  // uploaded as a pre-filled form.
+  sourceType: { type: String, enum: ['generated', 'uploaded'], default: undefined },
   reviewReason: String,
   reviewedAt: Date,
   reviewedBy: String,
@@ -87,6 +90,7 @@ const applicantSchema = new Schema({
   documentsPurgedAt: Date,
   // Set by the name-split migration; user is asked to confirm their name on next login
   needsNameConfirmation: { type: Boolean, default: false },
+  phone: String, // applicant contact number (from NSRP answers or basic info)
   profile: {
     // Structured name parts are canonical; `name` is the legacy field kept in
     // sync with the computed full name until the migration is fully verified.
@@ -95,7 +99,11 @@ const applicantSchema = new Schema({
     lastName: { type: String, maxlength: 50 },
     suffix: { type: String, enum: ['', 'Jr.', 'Sr.', 'II', 'III', 'IV'], default: '' },
     name: String,
+    dob: String,
     location: String,
+    phone: String,
+    addressCity: String,
+    addressProvince: String,
     skills: [String],
     education: { type: [nsrpEducationSchema], default: [] },
     technicalTraining: { type: [nsrpTrainingSchema], default: [] },
@@ -261,6 +269,29 @@ const ratingSchema = new Schema({
   createdAt: { type: Date, default: Date.now },
 }, { collection: 'ratings', timestamps: true })
 
+// 6-digit signup email verification codes. Only the HMAC-SHA256 hash of the
+// code is stored; the TTL index matches the 10-minute code lifetime.
+const emailCodeSchema = new Schema({
+  email: { type: String, required: true, unique: true }, // normalized
+  codeHash: { type: String, required: true },
+  attempts: { type: Number, default: 0 },
+  sentAt: { type: Date, default: Date.now },
+  createdAt: { type: Date, default: Date.now, expires: 600 },
+})
+
+// Send log used for the per-email hourly send limit. Entries live for 1 hour.
+const emailCodeSendSchema = new Schema({
+  key: { type: String, required: true, index: true }, // e.g. "email:<normalized>"
+  createdAt: { type: Date, default: Date.now, expires: 3600 },
+})
+
+// jti values of consumed signup-email-proof tokens (single use). TTL matches
+// the token lifetime so the collection stays small.
+const usedEmailProofSchema = new Schema({
+  jti: { type: String, required: true, unique: true },
+  expiresAt: { type: Date, required: true, expires: 0 },
+})
+
 const Applicant = mongoose.models.Applicant || mongoose.model('Applicant', applicantSchema)
 const Employer = mongoose.models.Employer || mongoose.model('Employer', employerSchema)
 const Admin = mongoose.models.Admin || mongoose.model('Admin', adminSchema)
@@ -270,6 +301,9 @@ const Referral = mongoose.models.Referral || mongoose.model('Referral', referral
 const HireReport = mongoose.models.HireReport || mongoose.model('HireReport', hireReportSchema)
 const Rating = mongoose.models.Rating || mongoose.model('Rating', ratingSchema)
 const DocumentFile = mongoose.models.DocumentFile || mongoose.model('DocumentFile', documentFileSchema)
+const EmailCode = mongoose.models.EmailCode || mongoose.model('EmailCode', emailCodeSchema)
+const EmailCodeSend = mongoose.models.EmailCodeSend || mongoose.model('EmailCodeSend', emailCodeSendSchema)
+const UsedEmailProof = mongoose.models.UsedEmailProof || mongoose.model('UsedEmailProof', usedEmailProofSchema)
 
 async function findUserByEmail(email) {
   if (!email) return null
@@ -325,6 +359,9 @@ export {
   HireReport,
   Rating,
   DocumentFile,
+  EmailCode,
+  EmailCodeSend,
+  UsedEmailProof,
   findUserByEmail,
   emailTakenAcrossRoles,
   createUserInRole,

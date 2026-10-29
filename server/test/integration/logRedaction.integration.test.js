@@ -7,6 +7,13 @@ import request from 'supertest'
 import jwt from 'jsonwebtoken'
 import { startTestDb, stopTestDb } from './helpers.js'
 
+// Force the log-only email fallback regardless of any local .env (dotenv does
+// not override variables that are already set, even to an empty string).
+process.env.EMAIL_DEV_MODE = ''
+process.env.SMTP_HOST = ''
+process.env.SMTP_USER = ''
+process.env.SMTP_PASS = ''
+
 const { app } = await import('../../index.js')
 const { sendVerificationEmail } = await import('../../mailer.js')
 

@@ -36,6 +36,7 @@ const { migrateDocumentFiles } = await import('../../utils/migrateDocumentFiles.
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret'
 const applicantToken = (email) => jwt.sign({ email, role: 'Applicant' }, JWT_SECRET)
+const adminToken = () => jwt.sign({ email: 'admin@example.com', role: 'Admin' }, JWT_SECRET)
 
 const applicantCount = () => mongoose.connection.db.collection('applicants').countDocuments()
 const documentFileCount = () => mongoose.connection.db.collection('document_files').countDocuments()
@@ -75,6 +76,45 @@ afterEach(() => {
 })
 
 describe('POST /api/signup (real database)', () => {
+  it('maps saved NSRP phone and location into the admin list and review details', async () => {
+    const applicant = await Applicant.create({
+      email: 'mapped-details@example.com',
+      passwordHash: 'unused',
+      emailVerified: true,
+      profile: {
+        firstName: 'Maria',
+        lastName: 'Santos',
+        nsrp: {
+          firstName: 'Maria',
+          surname: 'Santos',
+          dob: '1998-04-12',
+          cellphone: '09171234567',
+          addressCity: 'Quezon City',
+          addressProvince: 'Metro Manila',
+        },
+      },
+    })
+    const headers = { Authorization: `Bearer ${adminToken()}` }
+
+    const list = await request(app).get('/api/admin/users?role=Applicant').set(headers)
+    expect(list.status).toBe(200)
+    expect(list.body.items[0].phone).toBe('09171234567')
+    expect(list.body.items[0].profile.location).toContain('Quezon City')
+
+    const details = await request(app)
+      .get(`/api/applicants/${applicant._id}/verification-documents`)
+      .set(headers)
+    expect(details.status).toBe(200)
+    expect(details.body.basic).toMatchObject({
+      firstName: 'Maria',
+      lastName: 'Santos',
+      dob: '1998-04-12',
+      phone: '09171234567',
+      addressCity: 'Quezon City',
+      addressProvince: 'Metro Manila',
+    })
+  })
+
   it('creates the applicant, the generated NSRP (v1, pending), and the other documents in one request', async () => {
     const res = await signup('juan.cruz@gmail.com')
     expect(res.status).toBe(200)
@@ -144,8 +184,33 @@ describe('POST /api/signup (real database)', () => {
     failure.createUser = true
     const res = await signup('db-fail@example.com')
     expect(res.status).toBe(500)
+    expect(res.body.error).toBe('Server error')
+    expect(res.body.errorId).toMatch(/^[0-9a-f]{12}$/) // matches the redacted server log line
     expect(await applicantCount()).toBe(0)
     expect(await documentFileCount()).toBe(0)
+  }, 60000)
+
+  it('rejects a free-text suffix with a 422 field error instead of a 500 (profile.suffix is an enum)', async () => {
+    const res = await signup('bad-suffix@example.com', { answers: validNsrpAnswers({ suffix: 'asdsa' }) })
+    expect(res.status).toBe(422)
+    expect(res.body.fieldErrors?.suffix).toBeTruthy()
+    expect(await applicantCount()).toBe(0)
+    expect(await documentFileCount()).toBe(0)
+  }, 60000)
+
+  it('the per-step validator also rejects a free-text suffix', async () => {
+    const res = await request(app)
+      .post('/api/nsrp/validate-signup')
+      .send({ step: 0, answers: validNsrpAnswers({ suffix: 'The Third' }) })
+    expect(res.status).toBe(422)
+    expect(res.body.fieldErrors?.suffix).toBeTruthy()
+  })
+
+  it('accepts a listed suffix and creates the account', async () => {
+    const res = await signup('good-suffix@example.com', { answers: validNsrpAnswers({ suffix: 'Jr.' }) })
+    expect(res.status).toBe(200)
+    const applicant = await Applicant.findOne({ email: 'good-suffix@example.com' }).lean()
+    expect(applicant.profile.suffix).toBe('Jr.')
   }, 60000)
 
   it('rejects duplicate emails including Gmail dot and plus variants', async () => {
@@ -405,6 +470,7 @@ describe('document storage size', () => {
       .get(`/api/applicants/${insertedId}/verification-documents`)
       .set('Authorization', `Bearer ${token}`)
     const url = list.body.documents.find((d) => d.docKey === 'birthCertificate').latest.url
+    expect(list.body.documents.find((d) => d.docKey === 'birthCertificate').latest.back).toBeUndefined()
 
     // Backward compatibility: embedded bytes stream before migration.
     const before = await streamBinary(url)

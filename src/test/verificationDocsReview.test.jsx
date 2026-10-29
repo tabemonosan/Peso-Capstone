@@ -45,6 +45,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
 })
 
 async function renderModal(props = {}) {
@@ -53,6 +54,139 @@ async function renderModal(props = {}) {
 }
 
 describe('VerificationDocsReviewModal confirm step', () => {
+  it('shows front/back controls only for uploaded Valid ID sides and opens the corresponding signed URLs', async () => {
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+    const docs = [
+      {
+        docKey: 'validId1',
+        label: 'Valid ID #1',
+        idType: 'SSS',
+        status: 'pending',
+        latest: { version: 1, originalName: 'id.pdf', url: '/signed/id1-front', back: { url: '/signed/id1-back' } },
+        history: [
+          { version: 1, originalName: 'older-id.pdf', url: '/signed/id1-v1-front', back: { url: '/signed/id1-v1-back' } },
+          { version: 2, originalName: 'id.pdf', url: '/signed/id1-front', back: { url: '/signed/id1-back' } },
+        ],
+      },
+      {
+        docKey: 'validId2',
+        label: 'Valid ID #2',
+        idType: 'Passport',
+        status: 'pending',
+        latest: { version: 1, originalName: 'passport.pdf', url: '/signed/id2-front' },
+      },
+      {
+        docKey: 'nsrpForm',
+        label: 'NSRP Registration Form',
+        status: 'pending',
+        latest: { version: 1, originalName: 'nsrp.pdf', url: '/signed/nsrp-front', back: { url: '/signed/nsrp-back' } },
+      },
+      {
+        docKey: 'birthCertificate',
+        label: 'Birth Certificate',
+        status: 'pending',
+        latest: { version: 1, originalName: 'birth.pdf', url: '/signed/birth-front', back: { url: '/signed/birth-back' } },
+      },
+    ]
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ ...docsResponse, documents: docs }) })
+    render(<VerificationDocsReviewModal applicant={applicant} token="token" onClose={() => {}} onReviewed={() => {}} />)
+
+    await screen.findByText(/Valid ID #1/)
+    for (const label of ['NSRP Registration Form', 'Birth Certificate']) {
+      const row = screen.getByText(new RegExp(label)).closest('li')
+      expect(within(row).getByRole('button', { name: 'View' })).toBeInTheDocument()
+      expect(within(row).queryByRole('button', { name: 'View back' })).not.toBeInTheDocument()
+      expect(within(row).queryByRole('button', { name: 'View front' })).not.toBeInTheDocument()
+    }
+
+    const id1Row = screen.getByText(/Valid ID #1/).closest('li')
+    const id1Group = within(id1Row).getByRole('group', { name: 'Valid ID #1 file views' })
+    fireEvent.click(within(id1Group).getByRole('button', { name: 'View front' }))
+    fireEvent.click(within(id1Group).getByRole('button', { name: 'View back' }))
+    expect(open).toHaveBeenNthCalledWith(1, 'http://localhost:4000/signed/id1-front', '_blank')
+    expect(open).toHaveBeenNthCalledWith(2, 'http://localhost:4000/signed/id1-back', '_blank')
+
+    const id2Row = screen.getByText(/Valid ID #2/).closest('li')
+    expect(within(id2Row).getByRole('button', { name: 'View front' })).toBeInTheDocument()
+    expect(within(id2Row).queryByRole('button', { name: 'View back' })).not.toBeInTheDocument()
+
+    fireEvent.click(within(id1Row).getByRole('button', { name: 'History (2)' }))
+    const historyGroup = within(id1Row).getByRole('group', { name: 'Valid ID #1 version 1 file views' })
+    expect(within(historyGroup).getByRole('button', { name: 'View front' })).toBeInTheDocument()
+    fireEvent.click(within(historyGroup).getByRole('button', { name: 'View back' }))
+    expect(open).toHaveBeenNthCalledWith(3, 'http://localhost:4000/signed/id1-v1-back', '_blank')
+  })
+
+  it('shows saved applicant details and NSRP source without claiming an existing NSRP is not submitted', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        verificationStatus: 'under_review',
+        basic: {
+          firstName: 'Maria',
+          middleName: 'Santos',
+          lastName: 'Dela Cruz',
+          suffix: 'Jr.',
+          phone: '09171234567',
+          addressCity: 'Quezon City',
+          addressProvince: 'Metro Manila',
+          dob: '1998-04-12',
+          location: 'Quezon City, Metro Manila',
+        },
+        nsrpData: { firstName: 'Maria', cellphone: '09171234567', addressCity: 'Quezon City' },
+        documents: [{
+          docKey: 'nsrpForm',
+          label: 'NSRP Registration Form',
+          status: 'pending',
+          sourceType: 'generated',
+          latest: { version: 1, originalName: 'nsrp.pdf', url: '/signed/nsrp' },
+        }],
+      }),
+    })
+    render(
+      <VerificationDocsReviewModal
+        applicant={{
+          ...applicant,
+          emailVerified: true,
+          createdAt: '2026-10-01T00:00:00Z',
+          profile: { skills: ['Accounting'] },
+        }}
+        token="token"
+        onClose={() => {}}
+        onReviewed={() => {}}
+      />,
+    )
+
+    expect(await screen.findByText('Maria Santos Dela Cruz Jr.')).toBeInTheDocument()
+    expect(screen.getByText('09171234567')).toBeInTheDocument()
+    expect(screen.getByText('Quezon City, Metro Manila')).toBeInTheDocument()
+    expect(screen.getByText('1998-04-12')).toBeInTheDocument()
+    expect(screen.getByText('Generated from online answers')).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'View' })).toHaveLength(2)
+    expect(screen.queryByText('Not submitted')).not.toBeInTheDocument()
+    expect(screen.getByText('Accounting')).toBeInTheDocument()
+  })
+
+  it('renders applicants with missing optional data without errors', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ documents: [], basic: {}, nsrpData: null }),
+    })
+    render(
+      <VerificationDocsReviewModal
+        applicant={{ id: 'legacy', email: 'legacy@example.com' }}
+        token="token"
+        onClose={() => {}}
+        onReviewed={() => {}}
+      />,
+    )
+
+    expect(await screen.findByText('Applicant details')).toBeInTheDocument()
+    expect(screen.getAllByText('Not provided').length).toBeGreaterThanOrEqual(5)
+    expect(screen.getByText('Not submitted')).toBeInTheDocument()
+    expect(screen.getByText('No verification documents found.')).toBeInTheDocument()
+  })
+
   it('does not call the API until the confirm dialog is confirmed', async () => {
     await renderModal()
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
@@ -192,5 +326,3 @@ describe('VerificationDocsReviewModal confirm step', () => {
     })
   })
 })
-
-

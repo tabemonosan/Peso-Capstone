@@ -1,6 +1,7 @@
 // Registration completeness rules (computed, never stored so they can't go stale).
-// Applicant completeness is computed from the NSRP profile and required documents.
-// Skills remain optional.
+// Applicant completeness: name + location + the three required documents.
+// The resume and skills are optional; upload-path applicants have no structured
+// NSRP answers, so the NSRP step is done when the NSRP document exists.
 // Employer complete = company name, contact name, phone, location + NSRP registration PDF on file.
 // The server is the source of truth: the UI renders whatever this returns.
 import fs from 'fs'
@@ -15,11 +16,9 @@ export function registrationChecklist(user, type, extras = {}) {
     return [
       { key: 'name', label: 'Full name', done: (hasText(user.profile?.firstName) && hasText(user.profile?.lastName)) || hasText(user.profile?.name) || hasText(user.profile?.nsrp?.firstName) && hasText(user.profile?.nsrp?.surname), link: 'profile' },
       { key: 'location', label: 'Location', done: hasText(user.profile?.location) || hasText(user.profile?.nsrp?.addressCity), link: 'profile' },
-      { key: 'summary', label: 'Short bio / about me', done: hasText(user.profile?.summary) || hasText(user.profile?.nsrp?.occupation1) || (Array.isArray(user.profile?.nsrp?.skills) && user.profile.nsrp.skills.length > 0), link: 'profile' },
       { key: 'nsrpForm', label: 'NSRP Registration Form', done: hasDoc('nsrpForm'), link: 'documents' },
       { key: 'birthCertificate', label: 'Birth Certificate', done: hasDoc('birthCertificate'), link: 'documents' },
       { key: 'validId1', label: 'Valid ID', done: hasDoc('validId1'), link: 'documents' },
-      { key: 'resume', label: 'Resume (PDF, DOCX, JPG, or PNG)', done: hasDoc('resume'), link: 'documents' },
     ]
   }
   if (type === 'Employer') {

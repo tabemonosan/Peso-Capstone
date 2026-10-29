@@ -11,8 +11,9 @@ import fs from 'fs'
 import path from 'path'
 import { createReport } from 'docx-templates'
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
-import { Applicant, Employer, Admin, JobTitle, Notification, Referral, HireReport, Rating, DocumentFile, findUserByEmail, emailTakenAcrossRoles, createUserInRole, updateUserProfileByEmail, applicantFullName, applicantDisplayName } from './models/collections.js'
-import { sendVerificationEmail } from './mailer.js'
+import { Applicant, Employer, Admin, JobTitle, Notification, Referral, HireReport, Rating, DocumentFile, EmailCode, EmailCodeSend, UsedEmailProof, findUserByEmail, emailTakenAcrossRoles, createUserInRole, updateUserProfileByEmail, applicantFullName, applicantDisplayName } from './models/collections.js'
+import { sendEmail, sendVerificationEmail, initMailer } from './mailer.js'
+import { EMAIL_CODE_TTL_MS, EMAIL_CODE_MAX_ATTEMPTS, EMAIL_CODE_RESEND_COOLDOWN_MS, EMAIL_CODE_HOURLY_LIMIT, EMAIL_CODE_IP_HOURLY_LIMIT, generateEmailCode, hashEmailCode, emailCodeMatches, signEmailProof, verifyEmailProof } from './utils/emailCode.js'
 import { notify, notifyAdmins } from './services/notify.js'
 import { startHireReportReminders } from './services/hireReminders.js'
 import { createNotificationsRouter } from './routes/notifications.js'
@@ -22,12 +23,22 @@ import { createDashboardService } from './services/dashboard.js'
 import { normalizeEmail, generateVerifyToken, hashVerifyToken, VERIFY_TOKEN_TTL_MS, RESEND_COOLDOWN_MS } from './utils/emailVerification.js'
 import { passwordErrorMessage } from './utils/passwordPolicy.js'
 import { validateNameFields, sanitizeName } from '../shared/nameFields.js'
+import {
+  NSRP_TEXT_LIMITS, NSRP_REQUIRED_FIELDS, NSRP_ALLOWED_VALUES, NSRP_SECTION_MAX_ROWS,
+  NSRP_NUMERIC_SPECS, NSRP_FIELD_VALIDATORS, EDUCATION_LEVELS, WORK_STATUS_OPTIONS,
+  digitsOnly, trimCollapse, normalizePhMobile, normalizePassportNo,
+  isValidCalendarDate, isValidYear, ageFromDob, validateNumericId, validateNsrpBasicInfo,
+  EMPLOYED_TYPES, UNEMPLOYED_TYPES, MIN_YEAR, todayInManila,
+} from '../shared/nsrpValidation.js'
 import { NSRP_SKILL_LABELS, normalizeSkillLabel } from '../shared/nsrpSkills.js'
 import { NSRP_ROW_LIMITS } from '../shared/nsrpTableLimits.js'
 import { registrationProgress } from './utils/registration.js'
 import { validateReviewTransition } from './utils/docReview.js'
 import { storeDocumentFile, loadDocumentFile, deleteApplicantDocumentFiles } from './utils/documentFiles.js'
-import { redactPath } from './utils/redact.js'
+import { redactPath, redactString } from './utils/redact.js'
+// Document slot keys/labels are shared with the frontend; the resume is
+// optional and not part of REQUIRED_DOC_KEYS.
+import { VERIFICATION_DOC_KEYS, REQUIRED_DOC_KEYS, VERIFICATION_DOC_LABELS } from '../shared/verificationDocs.js'
 import { baseApprovedJobFilter, buildJobFilter, countJobFacets } from './utils/jobFilters.js'
 
 const LOCATION_TYPE_OPTIONS = ['On-site', 'Remote', 'Hybrid']
@@ -225,8 +236,8 @@ const FILE_SIGNATURES = {
   'image/jpeg': [[0xff, 0xd8, 0xff]],
 }
 const DOCX_MIME_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-const RESUME_MIME_TYPES = [...VERIFICATION_DOC_TYPES, DOCX_MIME_TYPE]
-const RESUME_MAX_BYTES = 5 * 1024 * 1024
+// Generic upload filter: verification docs plus DOCX (employer requirements).
+const UPLOAD_MIME_TYPES = [...VERIFICATION_DOC_TYPES, DOCX_MIME_TYPE]
 
 function bufferMatchesDeclaredType(buffer, mimetype) {
   if (mimetype === DOCX_MIME_TYPE) {
@@ -256,24 +267,8 @@ const verificationUpload = multer({
   storage: multer.memoryStorage(), // kept in DB, never on a public path
   limits: { fileSize: VERIFICATION_MAX_BYTES },
   fileFilter: (_req, file, callback) => {
-    if (!RESUME_MIME_TYPES.includes(file.mimetype)) {
+    if (!UPLOAD_MIME_TYPES.includes(file.mimetype)) {
       return callback(new Error('Only JPG, PNG, PDF, or DOCX files are accepted'))
-    }
-    callback(null, true)
-  },
-})
-const resumeUpload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: RESUME_MAX_BYTES },
-  fileFilter: (_req, file, callback) => {
-    const extensions = {
-      'application/pdf': ['.pdf'],
-      'image/jpeg': ['.jpg', '.jpeg'],
-      'image/png': ['.png'],
-      [DOCX_MIME_TYPE]: ['.docx'],
-    }[file.mimetype]
-    if (!extensions?.includes(path.extname(file.originalname).toLowerCase())) {
-      return callback(new Error('Upload a PDF, DOCX, JPG, or PNG resume with a matching extension'))
     }
     callback(null, true)
   },
@@ -298,17 +293,8 @@ const applicantSignupUpload = multer({
   },
 })
 
-const VERIFICATION_DOC_KEYS = ['nsrpForm', 'birthCertificate', 'validId1', 'validId2', 'resume']
-const REQUIRED_DOC_KEYS = ['nsrpForm', 'birthCertificate', 'validId1', 'resume']
 const VALID_ID_TYPES = ['SSS', 'Passport', 'PRC', 'Pag-IBIG', "Voter's ID", 'Philippine Postal ID', 'UMID']
 const MAX_UPLOADS_PER_DOC = 5
-const VERIFICATION_DOC_LABELS = {
-  nsrpForm: 'NSRP Registration Form',
-  birthCertificate: 'Birth Certificate',
-  validId1: 'Valid ID #1',
-  validId2: 'Valid ID #2',
-  resume: 'Resume',
-}
 // Projection to re-include the select:false buffers when streaming
 const VERIFICATION_DATA_SELECT = VERIFICATION_DOC_KEYS.flatMap((key) => [
   `+verificationDocuments.${key}.versions.data`,
@@ -334,41 +320,6 @@ function signDocumentUrl(applicantId, docKey, versionIndex, side = 'front') {
 const latestVersion = (slot) => (slot?.versions?.length ? slot.versions[slot.versions.length - 1] : null)
 const currentDocStatus = (slot) => latestVersion(slot)?.status || 'missing'
 
-function resumeMetadata(applicant) {
-  const resume = latestVersion(applicant?.verificationDocuments?.resume)
-  if (resume) {
-    return { originalName: resume.originalName, mimetype: resume.mimetype, size: resume.size, uploadedAt: resume.uploadedAt, status: resume.status }
-  }
-  const legacy = applicant?.resumeFile
-  return legacy?.originalName
-    ? { originalName: legacy.originalName, mimetype: legacy.mimetype, size: legacy.size, uploadedAt: legacy.uploadedAt, status: 'pending' }
-    : undefined
-}
-
-async function migrateLegacyResume(applicant) {
-  const slot = applicant.verificationDocuments?.resume
-  if (latestVersion(slot) || !applicant.resumeFile?.data || !applicant.resumeFile?.originalName) return false
-  const uploadedAt = applicant.resumeFile.uploadedAt || applicant.updatedAt || new Date()
-  await storeDocumentFile(applicant._id, 'resume', 1, 'front', {
-    mimetype: applicant.resumeFile.mimetype || 'application/pdf',
-    size: applicant.resumeFile.size || applicant.resumeFile.data.length,
-    buffer: applicant.resumeFile.data,
-  })
-  applicant.set('verificationDocuments.resume', {
-    uploads: 1,
-    versions: [{
-      originalName: applicant.resumeFile.originalName,
-      storedName: crypto.randomBytes(16).toString('hex'),
-      mimetype: applicant.resumeFile.mimetype || 'application/pdf',
-      size: applicant.resumeFile.size || applicant.resumeFile.data.length,
-      uploadedAt,
-      version: 1,
-      status: 'pending',
-    }],
-  })
-  return true
-}
-
 async function migrateLegacyNsrp(applicant) {
   const slot = applicant.verificationDocuments?.nsrpForm
   const legacy = applicant.nsrpVerificationFile
@@ -393,14 +344,16 @@ async function migrateLegacyNsrp(applicant) {
   return true
 }
 
+// Loads an applicant and migrates legacy embedded NSRP files into versioned
+// slots. Legacy resume data is intentionally NOT migrated: resumes are no
+// longer part of the applicant document system.
 async function loadApplicantWithCurrentResume(email) {
-  const applicant = await Applicant.findOne({ email }).select('+resumeFile.data +nsrpVerificationFile.data')
+  const applicant = await Applicant.findOne({ email }).select('+nsrpVerificationFile.data')
   if (!applicant) return null
-  const migratedResume = await migrateLegacyResume(applicant)
   const migratedNsrp = await migrateLegacyNsrp(applicant)
   const previousStatus = applicant.verificationStatus
   recomputeVerificationStatus(applicant)
-  if (migratedResume || migratedNsrp || applicant.verificationStatus !== previousStatus) await applicant.save()
+  if (migratedNsrp || applicant.verificationStatus !== previousStatus) await applicant.save()
   return applicant
 }
 
@@ -408,6 +361,7 @@ function summarizeVerificationDocuments(applicant, { withUrls = false, includeHi
   const docs = applicant?.verificationDocuments || {}
   return VERIFICATION_DOC_KEYS.map((key) => {
     const slot = docs[key]
+    // Optional slots (Valid ID #2) are hidden when never used.
     if (!slot && !REQUIRED_DOC_KEYS.includes(key)) return null
     const latest = latestVersion(slot)
     const history = includeHistory
@@ -421,12 +375,20 @@ function summarizeVerificationDocuments(applicant, { withUrls = false, includeHi
           uploadedAt: version.uploadedAt,
           reviewedAt: version.reviewedAt,
           url: withUrls ? signDocumentUrl(applicant._id, key, index) : undefined,
+          back: key.startsWith('validId') && version.back ? {
+            originalName: version.back.originalName,
+            mimetype: version.back.mimetype,
+            size: version.back.size,
+            uploadedAt: version.back.uploadedAt,
+            url: withUrls ? signDocumentUrl(applicant._id, key, index, 'back') : undefined,
+          } : undefined,
         }))
       : undefined
     return {
       docKey: key,
       label: VERIFICATION_DOC_LABELS[key],
       required: REQUIRED_DOC_KEYS.includes(key),
+      sourceType: key === 'nsrpForm' ? latest?.sourceType || undefined : undefined,
       idType: slot?.idType || undefined,
       status: currentDocStatus(slot), // missing | pending | approved | rejected
       uploadsUsed: slot?.uploads || 0,
@@ -441,7 +403,7 @@ function summarizeVerificationDocuments(applicant, { withUrls = false, includeHi
             uploadedAt: latest.uploadedAt,
             reviewReason: latest.reviewReason || undefined,
             url: withUrls ? signDocumentUrl(applicant._id, key, slot.versions.length - 1) : undefined,
-            back: latest.back ? {
+            back: key.startsWith('validId') && latest.back ? {
               originalName: latest.back.originalName,
               mimetype: latest.back.mimetype,
               size: latest.back.size,
@@ -571,8 +533,113 @@ app.get('/ping', (req, res) => {
   res.json({ ok: true })
 })
 
+// --- Signup email verification codes (6-digit) ---
+// Public endpoints; defined before the complete-registration gate. Never log
+// the code, proof token, or recipient email.
+
+// Per-IP hourly limit (per-email limits are enforced via EmailCodeSend below).
+// The store is exported so tests can reset the bucket between cases.
+export const emailCodeIpStore = new MemoryStore()
+const emailCodeIpLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: EMAIL_CODE_IP_HOURLY_LIMIT,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  store: emailCodeIpStore,
+  handler: (req, res) => {
+    const resetAt = req.rateLimit?.resetTime
+    const retryAfter = resetAt ? Math.max(1, Math.ceil((resetAt.getTime() - Date.now()) / 1000)) : 3600
+    console.log('[email-code] skipped (IP rate limit)')
+    res.set('Retry-After', String(retryAfter))
+    res.status(429).json({ code: 'EMAIL_CODE_RATE_LIMITED', error: 'Too many requests. Please try again later.', retryAfter })
+  },
+})
+
+app.post('/api/signup/email-code', emailCodeIpLimiter, async (req, res) => {
+  try {
+    const email = typeof req.body?.email === 'string' ? req.body.email : ''
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      return res.status(422).json({ error: 'Enter a valid email address.', fieldErrors: { email: 'Enter a valid email address.' } })
+    }
+    const normalized = normalizeEmail(email)
+    // Never reveal whether the email is registered: identical generic response.
+    // Outcome logs are redacted: never the email address, the code, or credentials.
+    if (await emailTakenAcrossRoles(normalized)) {
+      console.log('[email-code] skipped (existing account)')
+      return res.json({ ok: true })
+    }
+
+    const existing = await EmailCode.findOne({ email: normalized }).lean()
+    if (existing) {
+      const elapsed = Date.now() - new Date(existing.sentAt).getTime()
+      if (elapsed < EMAIL_CODE_RESEND_COOLDOWN_MS) {
+        const retryAfter = Math.max(1, Math.ceil((EMAIL_CODE_RESEND_COOLDOWN_MS - elapsed) / 1000))
+        console.log('[email-code] skipped (cooldown)')
+        res.set('Retry-After', String(retryAfter))
+        return res.status(429).json({ code: 'EMAIL_CODE_COOLDOWN', error: 'Please wait before requesting another code.', retryAfter })
+      }
+    }
+    const sentLastHour = await EmailCodeSend.countDocuments({ key: `email:${normalized}` })
+    if (sentLastHour >= EMAIL_CODE_HOURLY_LIMIT) {
+      console.log('[email-code] skipped (hourly limit)')
+      res.set('Retry-After', '3600')
+      return res.status(429).json({ code: 'EMAIL_CODE_RATE_LIMITED', error: 'Too many codes requested for this email. Please try again later.', retryAfter: 3600 })
+    }
+
+    const code = generateEmailCode()
+    // A new request invalidates the previous code for this email.
+    await EmailCode.deleteMany({ email: normalized })
+    await EmailCode.create({ email: normalized, codeHash: hashEmailCode(normalized, code), sentAt: new Date(), createdAt: new Date() })
+    await EmailCodeSend.create({ key: `email:${normalized}` })
+    // Best-effort delivery; in Ethereal dev mode the mailer prints a [DEV ONLY] preview URL.
+    const result = await sendEmail(
+      normalized,
+      'Your PESO Portal verification code',
+      `Your PESO Portal verification code is:\n\n${code}\n\nIt expires in 10 minutes. If you did not request this code, you can ignore this message.`,
+    )
+    console.log(result.delivered ? '[email-code] sent' : `[email-code] send failed (${redactString(String(result.error || 'not configured'))})`)
+    res.json({ ok: true })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Server error' })
+  }
+})
+
+app.post('/api/signup/email-code/verify', async (req, res) => {
+  try {
+    const email = typeof req.body?.email === 'string' ? req.body.email : ''
+    const code = typeof req.body?.code === 'string' ? req.body.code : ''
+    const normalized = normalizeEmail(email)
+    const record = await EmailCode.findOne({ email: normalized })
+    if (!record) {
+      return res.status(400).json({ code: 'EMAIL_CODE_EXPIRED', error: 'This code has expired or was replaced. Request a new code.' })
+    }
+    if (Date.now() - new Date(record.createdAt).getTime() > EMAIL_CODE_TTL_MS) {
+      await record.deleteOne()
+      return res.status(400).json({ code: 'EMAIL_CODE_EXPIRED', error: 'This code has expired. Request a new code.' })
+    }
+    if (record.attempts >= EMAIL_CODE_MAX_ATTEMPTS || !/^\d{6}$/.test(code) || !emailCodeMatches(normalized, code, record.codeHash)) {
+      record.attempts += 1
+      if (record.attempts >= EMAIL_CODE_MAX_ATTEMPTS) {
+        // Too many wrong attempts: invalidate the code.
+        await record.deleteOne()
+        return res.status(400).json({ code: 'EMAIL_CODE_LOCKED', error: 'Too many wrong attempts. The code was invalidated — request a new one.' })
+      }
+      await record.save()
+      const attemptsLeft = EMAIL_CODE_MAX_ATTEMPTS - record.attempts
+      return res.status(400).json({ code: 'EMAIL_CODE_INVALID', error: `Incorrect code. ${attemptsLeft} attempt${attemptsLeft === 1 ? '' : 's'} left.`, attemptsLeft })
+    }
+    await record.deleteOne()
+    res.json({ ok: true, proofToken: signEmailProof(normalized) })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Server error' })
+  }
+})
+
 app.post('/api/signup', applicantSignupUpload.fields([
   { name: 'nsrpAnswers', maxCount: 1 },
+  { name: 'nsrpFile', maxCount: 1 },
   { name: 'birthCertificate', maxCount: 1 },
   { name: 'validId1Front', maxCount: 1 },
   { name: 'validId1Back', maxCount: 1 },
@@ -580,77 +647,125 @@ app.post('/api/signup', applicantSignupUpload.fields([
   { name: 'validId2Back', maxCount: 1 },
   { name: 'resume', maxCount: 1 },
 ]), async (req, res) => {
+  let stage = 'validation'
   try {
     const { email, password, consent, id1Type, id2Type } = req.body || {}
     const fieldErrors = {}
+    // Two NSRP paths: fill out online (structured answers, generated PDF) or
+    // upload a pre-filled form. Anything else is rejected.
+    const nsrpMode = req.body?.nsrpMode || 'online'
+    if (!['online', 'upload'].includes(nsrpMode)) {
+      return res.status(422).json({ error: 'Check the highlighted fields.', fieldErrors: { nsrpMode: 'Choose how you want to provide your NSRP.' } })
+    }
     const validAccountEmail = typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
     if (!validAccountEmail) fieldErrors.accountEmail = 'Enter a valid email address.'
     if (typeof password !== 'string' || !password) fieldErrors.password = 'Password is required.'
     if (consent !== true && consent !== 'true') fieldErrors.consent = 'Data privacy consent is required (RA 10173).'
-    let submittedAnswers
-    try {
-      submittedAnswers = typeof req.body?.nsrpAnswers === 'string'
-        ? JSON.parse(req.body.nsrpAnswers)
-        : req.body?.nsrpAnswers
-    } catch {
-      submittedAnswers = null
-      fieldErrors.nsrpAnswers = 'The NSRP answers could not be read.'
+
+    let answers = null
+    let basicInfo = null
+    let submittedAnswers = null
+    if (nsrpMode === 'online') {
+      try {
+        submittedAnswers = typeof req.body?.nsrpAnswers === 'string'
+          ? JSON.parse(req.body.nsrpAnswers)
+          : req.body?.nsrpAnswers
+      } catch {
+        submittedAnswers = null
+        fieldErrors.nsrpAnswers = 'The NSRP answers could not be read.'
+      }
+      if (!submittedAnswers || typeof submittedAnswers !== 'object' || Array.isArray(submittedAnswers)) {
+        fieldErrors.nsrpAnswers = 'Complete the NSRP form before creating your account.'
+        submittedAnswers = {}
+      }
+      submittedAnswers.email = typeof email === 'string' ? email.trim() : ''
+      const validated = validateNsrpAnswers(submittedAnswers)
+      answers = validated.answers
+      if (!validAccountEmail && validated.fieldErrors.email) delete validated.fieldErrors.email
+      Object.assign(fieldErrors, validated.fieldErrors)
+    } else {
+      // Upload path: nsrpAnswers are not required and ignored if sent.
+      const basicRaw = {
+        firstName: req.body?.firstName,
+        middleName: req.body?.middleName,
+        noMiddleName: req.body?.noMiddleName,
+        lastName: req.body?.lastName,
+        suffix: req.body?.suffix,
+        dob: req.body?.dob,
+        cellphone: req.body?.cellphone,
+        addressCity: req.body?.addressCity,
+        addressProvince: req.body?.addressProvince,
+      }
+      const validated = validateNsrpBasicInfo(basicRaw)
+      basicInfo = validated.values
+      Object.assign(fieldErrors, validated.fieldErrors)
     }
-    if (!submittedAnswers || typeof submittedAnswers !== 'object' || Array.isArray(submittedAnswers)) {
-      fieldErrors.nsrpAnswers = 'Complete the NSRP form before creating your account.'
-      submittedAnswers = {}
-    }
-    submittedAnswers.email = typeof email === 'string' ? email.trim() : ''
-    const { answers, fieldErrors: nsrpFieldErrors } = validateNsrpAnswers(submittedAnswers)
-    if (!validAccountEmail && nsrpFieldErrors.email) delete nsrpFieldErrors.email
-    Object.assign(fieldErrors, nsrpFieldErrors)
     const passwordError = passwordErrorMessage(password)
     if (passwordError) fieldErrors.password = passwordError
 
     const files = req.files || {}
     const fileFor = (key) => files[key]?.[0]
     if (!fileFor('birthCertificate')) fieldErrors.birthCertificate = 'Birth certificate is required.'
-    if (!fileFor('resume')) fieldErrors.resume = 'Resume is required.'
     if (!VALID_ID_TYPES.includes(id1Type) || !fileFor('validId1Front')) fieldErrors.validId1 = 'Choose a valid type and upload the front of Valid ID #1.'
+    if (nsrpMode === 'upload') {
+      if (!fileFor('nsrpFile')) fieldErrors.nsrpFile = 'Upload your filled NSRP form (PDF, JPG, or PNG).'
+      else if (fileFor('nsrpFile').size > VERIFICATION_MAX_BYTES) fieldErrors.nsrpFile = 'The NSRP form must be 5 MB or smaller.'
+      else if (!['application/pdf', 'image/jpeg', 'image/png'].includes(fileFor('nsrpFile').mimetype) || !fileMatchesDeclaredType(fileFor('nsrpFile'))) {
+        fieldErrors.nsrpFile = 'The NSRP form must be a PDF, JPG, or PNG file.'
+      }
+    }
+    // The resume is no longer part of the application — reject it explicitly.
+    if (fileFor('resume')) fieldErrors.resume = 'The resume is no longer collected. Remove it and try again.'
     const documentFiles = ['birthCertificate', 'validId1Front', 'validId1Back', 'validId2Front', 'validId2Back']
     if (documentFiles.some((key) => fileFor(key) && fileFor(key).size > VERIFICATION_MAX_BYTES)) {
       fieldErrors.verificationDocuments = 'Verification documents must be 5 MB or smaller.'
     }
-    if (fileFor('resume') && fileFor('resume').size > RESUME_MAX_BYTES) fieldErrors.resume = 'Resume must be 5 MB or smaller.'
     const id2Used = Boolean(fileFor('validId2Front') || fileFor('validId2Back') || id2Type)
     if (id2Used && (!VALID_ID_TYPES.includes(id2Type) || !fileFor('validId2Front'))) fieldErrors.validId2 = 'Choose a valid type and upload the front of Valid ID #2.'
     if (id2Used && id1Type === id2Type) fieldErrors.validId2 = 'Choose a different type for Valid ID #2.'
-    if ([...documentFiles, 'resume'].some((key) => fileFor(key) && !fileMatchesDeclaredType(fileFor(key)))) {
+    if (documentFiles.some((key) => fileFor(key) && !fileMatchesDeclaredType(fileFor(key)))) {
       fieldErrors.verificationDocuments = 'One or more uploaded files do not match their declared file type.'
     }
-    if (fileFor('resume') && !RESUME_MIME_TYPES.includes(fileFor('resume').mimetype)) {
-      fieldErrors.resume = 'Resume must be a PDF, DOCX, JPG, or PNG file.'
-    }
     if (Object.keys(fieldErrors).length) return res.status(422).json({ error: 'Check the highlighted fields.', fieldErrors })
+
+    // The 6-digit email code must have been verified: the proof token must be
+    // valid, bound to this (normalized) email, unexpired, and unused.
+    const signupEmailProofError = () => res.status(400).json({
+      code: 'EMAIL_NOT_VERIFIED',
+      error: 'Verify your email address with the 6-digit code before creating the account.',
+      fieldErrors: { accountEmail: 'Email verification is required. Go back to step 1 and verify your email.' },
+    })
+    const emailProof = verifyEmailProof(req.body?.emailProof)
+    if (!emailProof || emailProof.email !== normalizeEmail(email)) return signupEmailProofError()
+    if (await UsedEmailProof.findOne({ jti: emailProof.jti }).select('_id').lean()) return signupEmailProofError()
 
     // Uniqueness is enforced on the normalized email across all role collections
     if (await emailTakenAcrossRoles(email)) return res.status(409).json({ error: 'Account exists', fieldErrors: { accountEmail: 'An account already uses this email address.' } })
 
+    // Certification/signature and PDF generation apply only to the online path.
     let signatureImage = null
-    let certification
-    try {
-      signatureImage = parseSignatureImage(submittedAnswers.signatureDataUrl)
-      certification = resolveCertification({ certified: submittedAnswers.certified, signature: signatureImage })
-    } catch (err) {
-      if (err instanceof SignatureValidationError) {
-        return res.status(422).json({ error: err.message, fieldErrors: { certified: err.message } })
+    let certification = { certified: false, certificationDate: '' }
+    let pdfBuffer = null
+    if (nsrpMode === 'online') {
+      try {
+        signatureImage = parseSignatureImage(submittedAnswers.signatureDataUrl)
+        certification = resolveCertification({ certified: submittedAnswers.certified, signature: signatureImage })
+      } catch (err) {
+        if (err instanceof SignatureValidationError) {
+          return res.status(422).json({ error: err.message, fieldErrors: { certified: err.message } })
+        }
+        throw err
       }
-      throw err
-    }
-    let pdfBuffer
-    try {
-      pdfBuffer = await generateNsrpPdf(answers, {
-        signatureImage,
-        certificationDate: certification.certificationDate,
-      })
-    } catch (err) {
-      console.error('Signup NSRP PDF generation failed:', err)
-      return res.status(500).json({ code: 'NSRP_GENERATION_FAILED', error: 'The NSRP PDF could not be generated. Please try again.' })
+      stage = 'nsrp-pdf'
+      try {
+        pdfBuffer = await generateNsrpPdf(answers, {
+          signatureImage,
+          certificationDate: certification.certificationDate,
+        })
+      } catch (err) {
+        console.error('Signup NSRP PDF generation failed:', redactString(String(err?.message || err)))
+        return res.status(500).json({ code: 'NSRP_GENERATION_FAILED', error: 'The NSRP PDF could not be generated. Please try again.' })
+      }
     }
 
     const passwordHash = await bcrypt.hash(password, 10)
@@ -658,7 +773,7 @@ app.post('/api/signup', applicantSignupUpload.fields([
     // File bytes are stored in the document_files collection after the applicant
     // is created; the applicant document holds metadata only (16 MB BSON limit).
     const filesToStore = []
-    const versionFor = (slot) => (file) => {
+    const versionFor = (slot, sourceType) => (file) => {
       filesToStore.push({ slot, version: 1, side: 'front', file })
       return {
         originalName: file.originalname,
@@ -668,24 +783,27 @@ app.post('/api/signup', applicantSignupUpload.fields([
         uploadedAt,
         version: 1,
         status: 'pending',
+        sourceType,
       }
     }
-    const slotFor = (slot) => (file, idType) => ({
+    const slotFor = (slot, sourceType) => (file, idType) => ({
       idType,
       uploads: 1,
-      versions: [versionFor(slot)(file)],
+      versions: [versionFor(slot, sourceType)(file)],
     })
-    const generatedNsrpFile = {
-      originalname: `NSRP-${answers.surname.replace(/\s+/g, '_')}.pdf`,
-      mimetype: 'application/pdf',
-      size: pdfBuffer.length,
-      buffer: pdfBuffer,
-    }
+    // Exactly one NSRP document per account, from the chosen path.
+    const nsrpFileMeta = nsrpMode === 'online'
+      ? {
+          originalname: `NSRP-${answers.surname.replace(/\s+/g, '_')}.pdf`,
+          mimetype: 'application/pdf',
+          size: pdfBuffer.length,
+          buffer: pdfBuffer,
+        }
+      : fileFor('nsrpFile')
     const verificationDocuments = {
-      nsrpForm: slotFor('nsrpForm')(generatedNsrpFile),
+      nsrpForm: slotFor('nsrpForm', nsrpMode === 'online' ? 'generated' : 'uploaded')(nsrpFileMeta),
       birthCertificate: slotFor('birthCertificate')(fileFor('birthCertificate')),
       validId1: slotFor('validId1')(fileFor('validId1Front'), id1Type),
-      resume: slotFor('resume')(fileFor('resume')),
     }
     const setBackFile = (slotName, file) => {
       if (!file) return
@@ -704,30 +822,60 @@ app.post('/api/signup', applicantSignupUpload.fields([
       verificationDocuments.validId2 = slotFor('validId2')(fileFor('validId2Front'), id2Type)
       setBackFile('validId2', fileFor('validId2Back'))
     }
-    const fullName = [answers.firstName, answers.middleName, answers.surname, answers.suffix].filter(Boolean).join(' ')
-    const profileLocation = [answers.addressStreet, answers.addressBarangay, answers.addressCity, answers.addressProvince].filter(Boolean).join(', ')
-    const profileSummary = [answers.occupation1, ...(answers.skills || [])].filter(Boolean).join(' · ')
-    const storedAnswers = { ...answers, certified: Boolean(submittedAnswers.certified) }
-    delete storedAnswers.signatureDataUrl
+    // Display name and location come from the NSRP answers (online) or the
+    // basic-information step (upload).
+    const fullName = nsrpMode === 'online'
+      ? [answers.firstName, answers.middleName, answers.surname, answers.suffix].filter(Boolean).join(' ')
+      : [basicInfo.firstName, basicInfo.middleName, basicInfo.lastName, basicInfo.suffix].filter(Boolean).join(' ')
+    const profileLocation = nsrpMode === 'online'
+      ? [answers.addressStreet, answers.addressBarangay, answers.addressCity, answers.addressProvince].filter(Boolean).join(', ')
+      : [basicInfo.addressCity, basicInfo.addressProvince].filter(Boolean).join(', ')
+    const profile = nsrpMode === 'online'
+      ? (() => {
+          const storedAnswers = { ...answers, certified: Boolean(submittedAnswers.certified) }
+          delete storedAnswers.signatureDataUrl
+          return {
+            name: fullName,
+            firstName: answers.firstName,
+            middleName: answers.middleName,
+            lastName: answers.surname,
+            suffix: answers.suffix,
+            dob: answers.dob,
+            location: profileLocation,
+            phone: answers.cellphone,
+            addressCity: answers.addressCity,
+            addressProvince: answers.addressProvince,
+            skills: answers.skills || [],
+            education: answers.education || [],
+            technicalTraining: answers.technicalTraining || [],
+            workExperience: answers.workExperience || [],
+            summary: [answers.occupation1, ...(answers.skills || [])].filter(Boolean).join(' · '),
+            nsrp: storedAnswers,
+          }
+        })()
+      : {
+          name: fullName,
+          firstName: basicInfo.firstName,
+          middleName: basicInfo.middleName,
+          lastName: basicInfo.lastName,
+          suffix: basicInfo.suffix,
+          dob: basicInfo.dob,
+          location: profileLocation,
+          phone: basicInfo.cellphone,
+          addressCity: basicInfo.addressCity,
+          addressProvince: basicInfo.addressProvince,
+          skills: [],
+          summary: '',
+        }
+    stage = 'create-account'
     let user
     try {
       user = await createUserInRole('Applicant', {
         email: email.trim(),
         passwordHash,
-        profile: {
-          name: fullName,
-          firstName: answers.firstName,
-          middleName: answers.middleName,
-          lastName: answers.surname,
-          suffix: answers.suffix,
-          location: profileLocation,
-          skills: answers.skills || [],
-          education: answers.education || [],
-          technicalTraining: answers.technicalTraining || [],
-          workExperience: answers.workExperience || [],
-          summary: profileSummary,
-          nsrp: storedAnswers,
-        },
+        emailVerified: true, // proven by the 6-digit code before account creation
+        phone: nsrpMode === 'online' ? answers.cellphone : basicInfo.cellphone,
+        profile,
         verificationDocuments,
         consentGivenAt: new Date(),
         ...(signatureImage && certification.certified ? {
@@ -740,6 +888,7 @@ app.post('/api/signup', applicantSignupUpload.fields([
           },
         } : {}),
       })
+      stage = 'store-files'
       for (const { slot, version, side, file } of filesToStore) {
         await storeDocumentFile(user._id, slot, version, side, file)
       }
@@ -750,8 +899,11 @@ app.post('/api/signup', applicantSignupUpload.fields([
       throw err
     }
 
-    // Email verification is best-effort: registration succeeds even if sending fails (user can Resend)
-    issueEmailVerification(user).catch((err) => console.error('Verification email failed:', err.message))
+    // Consume the single-use proof token only after the account exists.
+    await UsedEmailProof.create({ jti: emailProof.jti, expiresAt: new Date(emailProof.exp * 1000) })
+
+    // No link-verification email is sent: these accounts are verified by code.
+    // The link-based flow (verify-email / resend) stays for older accounts.
 
     notify({
       recipient: { id: user._id, role: 'Applicant', email: user.email },
@@ -769,12 +921,15 @@ app.post('/api/signup', applicantSignupUpload.fields([
       metadata: { applicantId: String(user._id) },
     })
 
-    const safe = { id: String(user._id), email: user.email, role: 'Applicant', emailVerified: false, registration: registrationProgress(user, 'Applicant'), profile: user.profile, verificationDocuments: summarizeVerificationDocuments(user), attentionCount: attentionCount(user), resumeFile: resumeMetadata(user) }
+    const safe = { id: String(user._id), email: user.email, role: 'Applicant', emailVerified: true, registration: registrationProgress(user, 'Applicant'), profile: user.profile, verificationDocuments: summarizeVerificationDocuments(user), attentionCount: attentionCount(user) }
     const token = jwt.sign({ email: user.email, role: 'Applicant' }, jwtSecret, { expiresIn: '7d' })
     res.json({ user: safe, token })
   } catch (err) {
-    console.error(err)
-    res.status(500).json({ error: 'Server error' })
+    // One redacted line, matchable by the client-visible errorId. Never log the
+    // email, password, code, token, or file contents.
+    const errorId = crypto.randomBytes(6).toString('hex')
+    console.error(`signup: failed at ${stage} (errorId=${errorId}) ${err?.name || 'Error'}: ${redactString(String(err?.message || err))}`)
+    res.status(500).json({ error: 'Server error', errorId })
   }
 })
 
@@ -851,7 +1006,7 @@ app.post('/api/login', async (req, res) => {
     if (user.verificationStatus === 'restricted') return res.status(403).json({ error: 'Your account has been restricted. Please contact PESO support.' })
 
     const registration = ['Applicant', 'Employer'].includes(type) ? registrationProgress(user, type, { requirementsFile: requirements?.requirementsFile, requestLocation: requirements?.location }) : undefined
-    const safe = { id: String(user._id), email: user.email, role: type, emailVerified: ['Applicant', 'Employer'].includes(type) ? Boolean(user.emailVerified) : undefined, needsNameConfirmation: type === 'Applicant' ? Boolean(user.needsNameConfirmation) : undefined, registration, verificationDocuments: type === 'Applicant' ? summarizeVerificationDocuments(user) : undefined, attentionCount: type === 'Applicant' ? attentionCount(user) : undefined, companyName: type === 'Employer' ? (user.companyName || requirements?.companyName) : undefined, contactName: type === 'Employer' ? (user.contactName || requirements?.contactName) : undefined, phone: type === 'Employer' ? (user.phone || requirements?.phone) : undefined, profile: user.profile, verificationStatus: ['Employer', 'Applicant'].includes(type) ? (user.verificationStatus || 'approved') : undefined, verificationReason: ['Employer', 'Applicant'].includes(type) ? user.verificationReason : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size } : undefined, resumeFile: type === 'Applicant' ? resumeMetadata(user) : undefined, nsrpVerificationFile: type === 'Applicant' && user.nsrpVerificationFile?.originalName ? { originalName: user.nsrpVerificationFile.originalName, size: user.nsrpVerificationFile.size, uploadedAt: user.nsrpVerificationFile.uploadedAt } : undefined }
+    const safe = { id: String(user._id), email: user.email, role: type, emailVerified: ['Applicant', 'Employer'].includes(type) ? Boolean(user.emailVerified) : undefined, needsNameConfirmation: type === 'Applicant' ? Boolean(user.needsNameConfirmation) : undefined, registration, verificationDocuments: type === 'Applicant' ? summarizeVerificationDocuments(user) : undefined, attentionCount: type === 'Applicant' ? attentionCount(user) : undefined, companyName: type === 'Employer' ? (user.companyName || requirements?.companyName) : undefined, contactName: type === 'Employer' ? (user.contactName || requirements?.contactName) : undefined, phone: type === 'Employer' ? (user.phone || requirements?.phone) : undefined, profile: user.profile, verificationStatus: ['Employer', 'Applicant'].includes(type) ? (user.verificationStatus || 'approved') : undefined, verificationReason: ['Employer', 'Applicant'].includes(type) ? user.verificationReason : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size } : undefined, nsrpVerificationFile: type === 'Applicant' && user.nsrpVerificationFile?.originalName ? { originalName: user.nsrpVerificationFile.originalName, size: user.nsrpVerificationFile.size, uploadedAt: user.nsrpVerificationFile.uploadedAt } : undefined }
     const token = jwt.sign({ email: user.email, role: type }, jwtSecret, { expiresIn: '7d' })
     res.json({ user: safe, token })
   } catch (err) {
@@ -873,7 +1028,7 @@ app.get('/api/profile', async (req, res) => {
     if (type === 'Applicant') user = await loadApplicantWithCurrentResume(user.email)
     const requirements = type === 'Employer' ? await EmployerRequest.findOne({ email: user.email }).select('+requirementsFile.data').lean() : null
     const registration = ['Applicant', 'Employer'].includes(type) ? registrationProgress(user, type, { requirementsFile: requirements?.requirementsFile, requestLocation: requirements?.location }) : undefined
-    res.json({ id: String(user._id), email: user.email, role: type, emailVerified: ['Applicant', 'Employer'].includes(type) ? Boolean(user.emailVerified) : undefined, needsNameConfirmation: type === 'Applicant' ? Boolean(user.needsNameConfirmation) : undefined, registration, companyName: type === 'Employer' ? (user.companyName || requirements?.companyName) : undefined, contactName: type === 'Employer' ? (user.contactName || requirements?.contactName) : undefined, phone: type === 'Employer' ? (user.phone || requirements?.phone) : undefined, profile: user.profile, verificationStatus: ['Employer', 'Applicant'].includes(type) ? (user.verificationStatus || 'approved') : undefined, verificationReason: ['Employer', 'Applicant'].includes(type) ? user.verificationReason : undefined, verificationDocuments: type === 'Applicant' ? summarizeVerificationDocuments(user) : undefined, attentionCount: type === 'Applicant' ? attentionCount(user) : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size } : undefined, hasResume: type === 'Applicant' ? Boolean(resumeMetadata(user)) : undefined, resumeFile: type === 'Applicant' ? resumeMetadata(user) : undefined, nsrpVerificationFile: type === 'Applicant' && user.nsrpVerificationFile?.originalName ? { originalName: user.nsrpVerificationFile.originalName, size: user.nsrpVerificationFile.size, uploadedAt: user.nsrpVerificationFile.uploadedAt } : undefined })
+    res.json({ id: String(user._id), email: user.email, role: type, emailVerified: ['Applicant', 'Employer'].includes(type) ? Boolean(user.emailVerified) : undefined, needsNameConfirmation: type === 'Applicant' ? Boolean(user.needsNameConfirmation) : undefined, registration, companyName: type === 'Employer' ? (user.companyName || requirements?.companyName) : undefined, contactName: type === 'Employer' ? (user.contactName || requirements?.contactName) : undefined, phone: type === 'Employer' ? (user.phone || requirements?.phone) : undefined, profile: user.profile, verificationStatus: ['Employer', 'Applicant'].includes(type) ? (user.verificationStatus || 'approved') : undefined, verificationReason: ['Employer', 'Applicant'].includes(type) ? user.verificationReason : undefined, verificationDocuments: type === 'Applicant' ? summarizeVerificationDocuments(user) : undefined, attentionCount: type === 'Applicant' ? attentionCount(user) : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size } : undefined, nsrpVerificationFile: type === 'Applicant' && user.nsrpVerificationFile?.originalName ? { originalName: user.nsrpVerificationFile.originalName, size: user.nsrpVerificationFile.size, uploadedAt: user.nsrpVerificationFile.uploadedAt } : undefined })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Server error' })
@@ -884,7 +1039,7 @@ app.get('/api/profile', async (req, res) => {
 // the document_files collection (see utils/documentFiles.js); only metadata is
 // embedded. Returns a `cleanup` that removes the stored bytes if the caller's
 // save fails, so a failed write never leaves orphaned files behind.
-async function appendVerificationVersion(applicant, docKey, file, idType = '') {
+async function appendVerificationVersion(applicant, docKey, file, idType = '', sourceType) {
   applicant.verificationDocuments = applicant.verificationDocuments || {}
   const slot = applicant.verificationDocuments[docKey] || { uploads: 0, versions: [] }
   const current = latestVersion(slot)
@@ -910,6 +1065,7 @@ async function appendVerificationVersion(applicant, docKey, file, idType = '') {
     uploadedAt: new Date(),
     version: versionNumber,
     status: 'pending',
+    sourceType,
   }
   slot.uploads = (slot.uploads || 0) + 1
   slot.versions = [...(slot.versions || []), version]
@@ -919,32 +1075,11 @@ async function appendVerificationVersion(applicant, docKey, file, idType = '') {
   return { slot, version, cleanup }
 }
 
-// Compatibility endpoint; resumes are stored in the versioned verification document system.
-app.post('/api/profile/resume', resumeUpload.single('resume'), async (req, res) => {
-  try {
-    const auth = req.headers.authorization
-    if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
-    const token = auth.split(' ')[1]
-    const decoded = jwt.verify(token, jwtSecret)
-    if (decoded.role !== 'Applicant') return res.status(403).json({ error: 'Only applicants can upload a resume' })
-    if (!req.file) return res.status(400).json({ error: 'A PDF, DOCX, JPG, or PNG resume is required' })
-    if (!fileMatchesDeclaredType(req.file)) return res.status(400).json({ error: 'File content does not match the declared resume type' })
-    const applicant = await Applicant.findOne({ email: decoded.email }).select('+resumeFile.data')
-    if (!applicant) return res.status(404).json({ error: 'Applicant not found' })
-    await migrateLegacyResume(applicant)
-    const { version, cleanup } = await appendVerificationVersion(applicant, 'resume', req.file)
-    try {
-      await applicant.save()
-    } catch (err) {
-      await cleanup()
-      throw err
-    }
-    res.json({ ok: true, resumeFile: { originalName: version.originalName, size: version.size, uploadedAt: version.uploadedAt, status: version.status } })
-  } catch (err) {
-    if (err.status) return res.status(err.status).json({ error: err.message })
-    console.error(err)
-    res.status(500).json({ error: 'Server error' })
-  }
+// Resumes are no longer part of the applicant document system. Stored legacy
+// resume data is kept in the database but unreachable; see
+// server/scripts/cleanup-resumes.js for optional removal.
+app.post('/api/profile/resume', (_req, res) => {
+  res.status(410).json({ code: 'RESUME_REMOVED', error: 'Resumes are no longer part of this system.' })
 })
 
 // Applicant NSRP verification document upload (separate from jobseeker resume)
@@ -1045,23 +1180,21 @@ app.post('/api/profile/verification-documents/:docKey', verificationUpload.singl
     if (decoded.role !== 'Applicant') return res.status(403).json({ error: 'Only applicants can upload verification documents' })
     const { docKey } = req.params
     if (!VERIFICATION_DOC_KEYS.includes(docKey)) return res.status(400).json({ error: 'Unknown document type' })
-    if (!req.file) return res.status(400).json({ error: docKey === 'resume' ? 'A PDF, DOCX, JPG, or PNG resume is required' : 'A JPG, PNG, or PDF file is required' })
-    const allowedTypes = docKey === 'resume' ? RESUME_MIME_TYPES : VERIFICATION_DOC_TYPES
-    if (!allowedTypes.includes(req.file.mimetype) || !fileMatchesDeclaredType(req.file)) {
-      return res.status(400).json({ error: docKey === 'resume' ? 'Upload a genuine PDF, DOCX, JPG, or PNG resume' : 'Upload a genuine JPG, PNG, or PDF document' })
+    if (!req.file) return res.status(400).json({ error: 'A JPG, PNG, or PDF file is required' })
+    if (!VERIFICATION_DOC_TYPES.includes(req.file.mimetype) || !fileMatchesDeclaredType(req.file)) {
+      return res.status(400).json({ error: 'Upload a genuine JPG, PNG, or PDF document' })
     }
 
     const idType = typeof req.body.idType === 'string' ? req.body.idType.trim() : ''
     if (docKey.startsWith('validId') && !idType) return res.status(400).json({ error: 'ID type is required' })
 
-    const applicant = await Applicant.findOne({ email: decoded.email }).select('+resumeFile.data')
+    const applicant = await Applicant.findOne({ email: decoded.email })
     if (!applicant) return res.status(404).json({ error: 'Applicant not found' })
 
     // Ownership + account state checks: restricted accounts cannot upload
     if (applicant.verificationStatus === 'restricted') return res.status(403).json({ error: 'This account is restricted. Please contact PESO support.' })
 
-    if (docKey === 'resume') await migrateLegacyResume(applicant)
-    const { slot, version, cleanup } = await appendVerificationVersion(applicant, docKey, req.file, idType)
+    const { slot, version, cleanup } = await appendVerificationVersion(applicant, docKey, req.file, idType, docKey === 'nsrpForm' ? 'uploaded' : undefined)
     try {
       await applicant.save()
     } catch (err) {
@@ -1127,7 +1260,12 @@ app.put('/api/profile/nsrp', async (req, res) => {
     applicant.set('profile.lastName', answers.surname)
     applicant.set('profile.suffix', answers.suffix)
     applicant.set('profile.name', fullName)
+    applicant.set('profile.dob', answers.dob)
     applicant.set('profile.location', [answers.addressStreet, answers.addressBarangay, answers.addressCity, answers.addressProvince].filter(Boolean).join(', '))
+    applicant.set('profile.phone', answers.cellphone)
+    applicant.set('profile.addressCity', answers.addressCity)
+    applicant.set('profile.addressProvince', answers.addressProvince)
+    applicant.set('phone', answers.cellphone)
     applicant.set('profile.summary', [answers.occupation1, ...(answers.skills || [])].filter(Boolean).join(' · '))
     applicant.set('profile.skills', answers.skills || [])
     applicant.set('profile.education', answers.education || [])
@@ -1149,7 +1287,7 @@ app.put('/api/profile/nsrp', async (req, res) => {
       size: pdfBuffer.length,
       buffer: pdfBuffer,
     }
-    const { version, cleanup } = await appendVerificationVersion(applicant, 'nsrpForm', nsrpFile)
+    const { version, cleanup } = await appendVerificationVersion(applicant, 'nsrpForm', nsrpFile, '', 'generated')
     try {
       await applicant.save()
     } catch (err) {
@@ -1177,16 +1315,41 @@ app.get('/api/applicants/:id/verification-documents', async (req, res) => {
     const decoded = authenticateRequest(req)
     if (!decoded) return res.status(401).json({ error: 'Missing token' })
     if (!['Admin', 'Applicant'].includes(decoded.role)) return res.status(403).json({ error: 'Forbidden' })
-    const applicant = await Applicant.findById(req.params.id).select('+resumeFile.data +nsrpVerificationFile.data')
+    const applicant = await Applicant.findById(req.params.id).select('+nsrpVerificationFile.data')
     if (!applicant) return res.status(404).json({ error: 'Applicant not found' })
     if (decoded.role === 'Applicant' && applicant.email !== decoded.email) return res.status(403).json({ error: 'Forbidden' })
-    const migratedResume = await migrateLegacyResume(applicant)
     const migratedNsrp = await migrateLegacyNsrp(applicant)
-    if (migratedResume || migratedNsrp) {
+    if (migratedNsrp) {
       recomputeVerificationStatus(applicant)
       await applicant.save()
     }
-    res.json({ documents: summarizeVerificationDocuments(applicant, { withUrls: true, includeHistory: decoded.role === 'Admin' }), verificationStatus: applicant.verificationStatus, verificationReason: applicant.verificationReason, attentionCount: attentionCount(applicant), consentGivenAt: applicant.consentGivenAt, documentsPurgedAt: applicant.documentsPurgedAt, nsrpData: applicant.profile?.nsrp || null })
+    const nsrp = applicant.profile?.nsrp || {}
+    res.json({
+      documents: summarizeVerificationDocuments(applicant, { withUrls: true, includeHistory: decoded.role === 'Admin' }),
+      verificationStatus: applicant.verificationStatus,
+      verificationReason: applicant.verificationReason,
+      attentionCount: attentionCount(applicant),
+      consentGivenAt: applicant.consentGivenAt,
+      documentsPurgedAt: applicant.documentsPurgedAt,
+      nsrpData: Object.keys(nsrp).length ? nsrp : null,
+      basic: {
+        firstName: applicant.profile?.firstName || nsrp.firstName || '',
+        middleName: applicant.profile?.middleName || nsrp.middleName || '',
+        lastName: applicant.profile?.lastName || nsrp.surname || '',
+        suffix: applicant.profile?.suffix || nsrp.suffix || '',
+        dob: applicant.profile?.dob || nsrp.dob || '',
+        phone: applicant.phone || applicant.profile?.phone || nsrp.cellphone || '',
+        cellphone: applicant.phone || applicant.profile?.phone || nsrp.cellphone || '',
+        addressCity: applicant.profile?.addressCity || nsrp.addressCity || '',
+        addressProvince: applicant.profile?.addressProvince || nsrp.addressProvince || '',
+        location: applicant.profile?.location || [
+          nsrp.addressStreet,
+          nsrp.addressBarangay,
+          applicant.profile?.addressCity || nsrp.addressCity,
+          applicant.profile?.addressProvince || nsrp.addressProvince,
+        ].filter(Boolean).join(', '),
+      },
+    })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Server error' })
@@ -1311,35 +1474,10 @@ app.put('/api/applicants/:id/verification-documents/:docKey', async (req, res) =
   }
 })
 
-// View an applicant's resume (self, employer, or admin)
-app.get('/api/applicants/:id/resume', async (req, res) => {
-  try {
-    const auth = req.headers.authorization
-    if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
-    const token = auth.split(' ')[1]
-    const decoded = jwt.verify(token, jwtSecret)
-    if (!['Employer', 'Admin', 'Applicant'].includes(decoded.role)) return res.status(403).json({ error: 'Forbidden' })
-
-    const applicant = await Applicant.findById(req.params.id).select('+verificationDocuments.resume.versions.data +resumeFile.data').lean()
-    if (!applicant) return res.status(404).json({ error: 'Applicant not found' })
-    if (decoded.role === 'Applicant' && applicant.email !== decoded.email) return res.status(403).json({ error: 'Forbidden' })
-    const versioned = latestVersion(applicant.verificationDocuments?.resume)
-    const storedResume = versioned?.version
-      ? await loadDocumentFile(applicant._id, 'resume', versioned.version, 'front')
-      : null
-    const versionedData = storedResume?.data ?? versioned?.data
-    const resume = versionedData ? { ...versioned, data: versionedData } : applicant.resumeFile
-    if (!resume?.data) return res.status(404).json({ error: 'No resume uploaded' })
-
-    const raw = resume.data
-    const buffer = Buffer.isBuffer(raw) ? raw : (raw?.buffer ? Buffer.from(raw.buffer) : Buffer.from(raw))
-    res.type(resume.mimetype || 'application/pdf')
-    res.set('Content-Disposition', `inline; filename="${resume.originalName || 'resume.pdf'}"`)
-    res.send(buffer)
-  } catch (err) {
-    console.error(err)
-    res.status(500).json({ error: 'Server error' })
-  }
+// Resumes were removed from the applicant document system; stored legacy data
+// is kept but unreachable (see server/scripts/cleanup-resumes.js).
+app.get('/api/applicants/:id/resume', (_req, res) => {
+  res.status(410).json({ code: 'RESUME_REMOVED', error: 'Resumes are no longer part of this system.' })
 })
 
 // Protected profile update: require valid JWT
@@ -1395,10 +1533,12 @@ app.put('/api/profile', async (req, res) => {
 const registrationSetupRoutes = [
   // Pre-account NSRP endpoints used by the sign-up wizard (rate-limited)
   { method: 'POST', path: /^\/api\/nsrp\/(preview-signup|validate-signup)$/ },
+  // Public signup email-code endpoints (also defined before this gate)
+  { method: 'POST', path: /^\/api\/signup\/email-code(\/verify)?$/ },
   { method: 'POST', path: /^\/api\/employer-requests$/ },
-  { method: 'POST', path: /^\/api\/profile\/(resume|nsrp-verification)$/ },
+  { method: 'POST', path: /^\/api\/profile\/nsrp-verification$/ },
   { method: 'POST', path: /^\/api\/profile\/verification-documents\/[^/]+$/ },
-  { method: 'GET', path: /^\/api\/applicants\/[^/]+\/(resume|nsrp-verification|verification-documents)$/ },
+  { method: 'GET', path: /^\/api\/applicants\/[^/]+\/(nsrp-verification|verification-documents)$/ },
   { method: 'GET', path: /^\/api\/documents\/view\/[^/]+$/ },
   { method: 'POST', path: /^\/api\/employer-requirements$/ },
   { method: 'GET', path: /^\/api\/employer-requirements\/current\/view$/ },
@@ -1819,75 +1959,16 @@ const nsrpOfficialPdfPath = path.join(process.cwd(), 'public', 'NSRP-Form-1-Jobs
 // The NSRP overlay generator now lives in ./nsrpPdf.js with coordinates
 // centralized in ./nsrpLayout.js. Debug overlay: NSRP_DEBUG=1 or ?debug=1.
 
-const NSRP_TEXT_LIMITS = {
-  surname: 80,
-  firstName: 80,
-  middleName: 80,
-  suffix: 20,
-  dob: 10,
-  placeOfBirth: 120,
-  sex: 10,
-  religion: 80,
-  civilStatus: 20,
-  height: 20,
-  addressStreet: 120,
-  addressBarangay: 80,
-  addressCity: 80,
-  addressProvince: 80,
-  tin: 30,
-  gsisSss: 30,
-  pagibig: 30,
-  philhealth: 30,
-  email: 254,
-  cellphone: 20,
-  landline: 20,
-  disability: 120,
-  disabilityOthers: 60,
-  employmentStatus: 20,
-  employmentTypeDetail: 120,
-  terminatedAbroadCountry: 60,
-  employmentTypeOther: 60,
-  activelyLooking: 5,
-  lookingDuration: 40,
-  willingImmediately: 5,
-  willingWhen: 80,
-  fourPs: 5,
-  fourPsId: 40,
-  occupation1: 80,
-  occupation2: 80,
-  occupation3: 80,
-  occupation4: 80,
-  localPref1: 80,
-  localPref2: 80,
-  localPref3: 80,
-  overseasPref1: 80,
-  overseasPref2: 80,
-  overseasPref3: 80,
-  expectedSalary: 40,
-  passportNo: 30,
-  passportExpiry: 10,
-  othersText: 60,
-}
-const NSRP_REQUIRED_FIELDS = [
-  'surname', 'firstName', 'dob', 'placeOfBirth', 'sex', 'civilStatus',
-  'addressStreet', 'addressBarangay', 'addressCity', 'addressProvince',
-  'email', 'cellphone', 'employmentStatus', 'activelyLooking',
-  'willingImmediately', 'fourPs', 'occupation1',
-]
-const NSRP_ALLOWED_VALUES = {
-  sex: ['Male', 'Female'],
-  civilStatus: ['Single', 'Married', 'Widowed', 'Separated', 'Live-in'],
-  employmentStatus: ['Employed', 'Unemployed'],
-  activelyLooking: ['Yes', 'No'],
-  willingImmediately: ['Yes', 'No'],
-  fourPs: ['Yes', 'No'],
-}
+// NSRP limits, allowed values, sanitizers, and per-field validators live in
+// shared/nsrpValidation.js so the wizard, this validator, and the Mongoose
+// schema share one source of truth.
 const NSRP_MAX_ROWS = 10
 const NSRP_MAX_SKILLS = 18
 const NSRP_MAX_SKILL_LENGTH = 60
 const NSRP_SKILL_OPTIONS = new Set(NSRP_SKILL_LABELS.map((label) => normalizeSkillLabel(label)))
 
-function validateNsrpAnswers(input) {
+// Exported for unit tests (conditional clears are not observable via the API).
+export function validateNsrpAnswers(input) {
   const fieldErrors = {}
   const answers = {}
   for (const [field, maxLength] of Object.entries(NSRP_TEXT_LIMITS)) {
@@ -1901,13 +1982,36 @@ function validateNsrpAnswers(input) {
       fieldErrors[field] = 'Enter text for this field.'
       continue
     }
-    const trimmed = value.trim()
-    answers[field] = trimmed
-    if (!trimmed && NSRP_REQUIRED_FIELDS.includes(field)) fieldErrors[field] = 'This field is required.'
-    else if (trimmed.length > maxLength) fieldErrors[field] = `Use ${maxLength} characters or fewer.`
+    // Sanitize the same way the wizard does (typing and paste share one path):
+    // digits-only fields are stripped, phones normalized, emails lowercased.
+    const trimmed = trimCollapse(value)
+    let cleaned = trimmed
+    if (NSRP_NUMERIC_SPECS[field]) cleaned = digitsOnly(cleaned).slice(0, NSRP_NUMERIC_SPECS[field].maxDigits || 20)
+    else if (field === 'cellphone') cleaned = normalizePhMobile(cleaned)
+    else if (field === 'landline') cleaned = digitsOnly(cleaned)
+    else if (field === 'passportNo') cleaned = normalizePassportNo(cleaned)
+    else if (field === 'email') cleaned = cleaned.replace(/\s+/g, '').toLowerCase()
+    else if (field === 'height' || field === 'expectedSalary') cleaned = digitsOnly(cleaned)
+    answers[field] = cleaned
+    if (!cleaned && NSRP_REQUIRED_FIELDS.includes(field)) fieldErrors[field] = 'This field is required.'
+    else if (trimmed && !cleaned) fieldErrors[field] = NSRP_FIELD_VALIDATORS[field]?.('x') || 'Enter digits only.'
+    else if (cleaned.length > maxLength) fieldErrors[field] = `Use ${maxLength} characters or fewer.`
   }
   for (const [field, allowed] of Object.entries(NSRP_ALLOWED_VALUES)) {
     if (answers[field] && !allowed.includes(answers[field])) fieldErrors[field] = 'Choose one of the listed options.'
+  }
+  // Shared per-field rules (names, addresses, height, salary, phones, passport)
+  for (const [field, validate] of Object.entries(NSRP_FIELD_VALIDATORS)) {
+    if (!fieldErrors[field]) {
+      const problem = validate(answers[field])
+      if (problem) fieldErrors[field] = problem
+    }
+  }
+  for (const field of Object.keys(NSRP_NUMERIC_SPECS)) {
+    if (!fieldErrors[field]) {
+      const problem = validateNumericId(field, answers[field])
+      if (problem) fieldErrors[field] = problem
+    }
   }
   for (const [section, limits] of Object.entries(NSRP_ROW_LIMITS)) {
     if (section === 'languages') continue // handled separately (boolean checkboxes)
@@ -1917,10 +2021,10 @@ function validateNsrpAnswers(input) {
       answers[section] = []
       continue
     }
-    if (rows.length > NSRP_MAX_ROWS) {
-      fieldErrors[section] = `Enter no more than ${NSRP_MAX_ROWS} rows.`
-      answers[section] = []
-      continue
+    const maxRows = NSRP_SECTION_MAX_ROWS[section] || NSRP_MAX_ROWS
+    if (rows.length > maxRows) {
+      // Reject extra rows with a field error — never silently drop them.
+      fieldErrors[section] = `Maximum of ${maxRows} entries.`
     }
     answers[section] = rows.map((row, index) => {
       if (!row || typeof row !== 'object' || Array.isArray(row)) {
@@ -1946,66 +2050,113 @@ function validateNsrpAnswers(input) {
           normalizedRow[field] = ''
           continue
         }
-        normalizedRow[field] = value.trim()
-        if (normalizedRow[field].length > maxLength) {
+        normalizedRow[field] = trimCollapse(value)
+        if (normalizedRow[field] && !/[\p{L}\p{N}]/u.test(normalizedRow[field])) {
+          fieldErrors[key] = 'Enter letters or numbers, not only spaces or symbols.'
+        } else if (normalizedRow[field].length > maxLength) {
           fieldErrors[key] = `Use ${maxLength} characters or fewer.`
         }
       }
       return normalizedRow
     }).filter((row) => row && Object.values(row).some((entry) => typeof entry === 'string' && entry))
-  }
-  const validateDate = (field, value, preventFuture = false) => {
-    if (!value) return
-    const date = new Date(`${value}T00:00:00.000Z`)
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value) {
-      fieldErrors[field] = 'Enter a valid date.'
-    } else if (preventFuture && date > new Date()) {
-      fieldErrors[field] = 'Date of birth cannot be in the future.'
+
+    // Section-specific rules
+    if (section === 'education') {
+      // The wizard sends one fixed row per level; rows with only a level and no
+      // content are dropped, and never validated.
+      const EDUCATION_CONTENT_FIELDS = ['school', 'course', 'year', 'undergradLevel', 'yearLastAttended', 'awards']
+      const hasContent = (row) => EDUCATION_CONTENT_FIELDS.some((field) => row[field])
+      answers.education = answers.education.filter((row) => row.level && hasContent(row))
+      const seenLevels = new Set()
+      answers.education.forEach((row) => {
+        // Keys are level-based (education[Tertiary].course) so the wizard can
+        // map them to its fixed per-level rows regardless of array position.
+        const key = `education[${row.level || '?'}]`
+        if (!row.level) return // a level-less partial row is allowed (form has fixed rows)
+        if (!EDUCATION_LEVELS.includes(row.level)) fieldErrors[`${key}.level`] = 'Choose one of the listed options.'
+        else if (seenLevels.has(row.level)) fieldErrors[`${key}.level`] = 'Only one entry per level.'
+        seenLevels.add(row.level)
+        // Courses apply only to Tertiary and Graduate Studies. For Elementary
+        // and Secondary the value is rejected (never saved or printed).
+        if (['Elementary', 'Secondary'].includes(row.level)) {
+          if (row.course) fieldErrors[`${key}.course`] = 'Course applies only to Tertiary and Graduate Studies.'
+          row.course = ''
+        } else if (row.school && !row.course) {
+          // Course is required only when the Tertiary/Graduate row has a school
+          fieldErrors[`${key}.course`] = 'Course is required for this level.'
+        }
+        for (const yearField of ['year', 'yearLastAttended']) {
+          if (row[yearField] && !isValidYear(row[yearField])) {
+            fieldErrors[`${key}.${yearField}`] = `Enter a 4-digit year between ${MIN_YEAR} and the current year.`
+          }
+        }
+        // "If undergraduate" fields apply only when the level was not finished
+        if (row.year) {
+          row.undergradLevel = ''
+          row.yearLastAttended = ''
+        }
+      })
+    }
+    if (section === 'workExperience') {
+      answers.workExperience.forEach((row, index) => {
+        if (row.status && !WORK_STATUS_OPTIONS.includes(row.status)) {
+          fieldErrors[`workExperience[${index}].status`] = 'Choose one of the listed options.'
+        }
+      })
     }
   }
-  validateDate('dob', answers.dob, true)
-  validateDate('passportExpiry', answers.passportExpiry)
+  // Calendar-date comparisons in Asia/Manila; today is always valid.
+  const today = todayInManila()
+  const validateDate = (field, value, { preventFuture = false, notPast = false } = {}) => {
+    if (!value) return
+    if (!isValidCalendarDate(value)) {
+      fieldErrors[field] = 'Enter a valid date.'
+    } else if (value.slice(0, 4) < String(MIN_YEAR)) {
+      fieldErrors[field] = `Enter a year of ${MIN_YEAR} or later.`
+    } else if (preventFuture && value > today) {
+      fieldErrors[field] = 'Enter a date that is not in the future.'
+    } else if (notPast && value < today) {
+      fieldErrors[field] = 'Enter a date that is today or later.'
+    }
+  }
+  validateDate('dob', answers.dob, { preventFuture: true })
+  if (!fieldErrors.dob && answers.dob) {
+    const age = ageFromDob(answers.dob)
+    if (age !== null && (age < 15 || age > 100)) fieldErrors.dob = 'Applicants must be 15 to 100 years old.'
+  }
+  // Passport expiry is required when a passport number is given, and must be valid
+  if (answers.passportNo && !answers.passportExpiry) fieldErrors.passportExpiry = 'Enter the passport expiry date.'
+  validateDate('passportExpiry', answers.passportExpiry, { notPast: true })
   for (const [index, row] of answers.workExperience.entries()) {
-    validateDate(`workExperience[${index}].fromDate`, row.fromDate)
-    validateDate(`workExperience[${index}].toDate`, row.toDate)
-    if (row.fromDate && row.toDate && row.toDate < row.fromDate) {
+    validateDate(`workExperience[${index}].fromDate`, row.fromDate, { preventFuture: true })
+    const present = row.toDate === 'Present'
+    if (!present) validateDate(`workExperience[${index}].toDate`, row.toDate, { preventFuture: true })
+    if (row.fromDate && row.toDate && !present && row.toDate < row.fromDate) {
       fieldErrors[`workExperience[${index}].toDate`] = 'End date cannot be before the start date.'
     }
   }
   for (const [index, row] of (answers.technicalTraining || []).entries()) {
-    validateDate(`technicalTraining[${index}].fromDate`, row.fromDate)
-    validateDate(`technicalTraining[${index}].toDate`, row.toDate)
+    validateDate(`technicalTraining[${index}].fromDate`, row.fromDate, { preventFuture: true })
+    validateDate(`technicalTraining[${index}].toDate`, row.toDate, { preventFuture: true })
     if (row.fromDate && row.toDate && row.toDate < row.fromDate) {
       fieldErrors[`technicalTraining[${index}].toDate`] = 'End date cannot be before the start date.'
     }
   }
   for (const [index, row] of (answers.eligibility || []).entries()) {
-    validateDate(`eligibility[${index}].examDate`, row.examDate)
+    validateDate(`eligibility[${index}].examDate`, row.examDate, { preventFuture: true })
     validateDate(`eligibility[${index}].validUntil`, row.validUntil)
   }
   if (answers.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(answers.email)) {
     fieldErrors.email = 'Enter a valid email address.'
   }
-  if (answers.cellphone && !/^(09\d{9}|\+639\d{9})$/.test(answers.cellphone.replace(/[\s-]/g, ''))) {
-    fieldErrors.cellphone = 'Enter a valid mobile number (09XXXXXXXXX or +639XXXXXXXXX).'
-  }
-  for (const field of ['landline', 'cellphone']) {
-    const value = answers[field]
-    if (value && !/^[+()\d\s-]+$/.test(value)) {
-      fieldErrors[field] = 'Use only digits, spaces, "+", "-", and parentheses.'
-    } else if (value && (value.replace(/\D/g, '').length < 7 || value.replace(/\D/g, '').length > 15)) {
-      fieldErrors[field] = 'Enter 7 to 15 digits.'
-    }
-  }
   // Employment sub-type must match the chosen status
   if (answers.employmentTypeDetail) {
-    const employedTypes = ['Wage Employed', 'Self Employed']
-    const unemployedTypes = ['New Entrant/Fresh Graduate', 'Finished Contract', 'Resigned', 'Retired', 'Terminated/Laidoff (local)', 'Terminated/Laidoff (abroad)', 'Others']
-    const valid = answers.employmentStatus === 'Employed' ? employedTypes : answers.employmentStatus === 'Unemployed' ? unemployedTypes : []
+    const valid = answers.employmentStatus === 'Employed' ? EMPLOYED_TYPES : answers.employmentStatus === 'Unemployed' ? UNEMPLOYED_TYPES : []
     if (!valid.includes(answers.employmentTypeDetail)) fieldErrors.employmentTypeDetail = 'Choose a type that matches the employment status.'
   }
   if (!/abroad/i.test(answers.employmentTypeDetail || '')) answers.terminatedAbroadCountry = ''
   if (!/^Others/i.test(answers.employmentTypeDetail || '')) answers.employmentTypeOther = ''
+  if (answers.disability !== 'Others') answers.disabilityOthers = ''
   const skills = input?.skills ?? []
   if (!Array.isArray(skills)) {
     fieldErrors.skills = 'Choose skills from the list.'
@@ -2138,6 +2289,15 @@ const NSRP_WIZARD_STEP_FIELDS = [
 ]
 
 app.post('/api/nsrp/validate-signup', (req, res) => {
+  // Upload path: the basic-information step is validated on its own.
+  if (req.body?.mode === 'upload' && req.body?.step === 'basic') {
+    const { fieldErrors } = validateNsrpBasicInfo(req.body?.basic || {})
+    return res.status(Object.keys(fieldErrors).length ? 422 : 200).json({
+      ok: Object.keys(fieldErrors).length === 0,
+      error: Object.keys(fieldErrors).length ? 'Check the highlighted fields.' : undefined,
+      fieldErrors,
+    })
+  }
   const step = Number(req.body?.step)
   if (!Number.isInteger(step) || step < 0 || step >= NSRP_WIZARD_STEP_FIELDS.length) {
     return res.status(400).json({ error: 'Invalid NSRP step.' })
@@ -2310,9 +2470,7 @@ app.post('/api/jobs/:id/apply', requireVerifiedEmail, applicationUpload.single('
 
     const applicant = await loadApplicantWithCurrentResume(decoded.email)
     if (!applicant) return res.status(404).json({ error: 'Applicant not found' })
-    if (!latestVersion(applicant.verificationDocuments?.resume)) {
-      return res.status(403).json({ code: 'RESUME_REQUIRED', error: 'Upload a resume before applying for jobs.' })
-    }
+    // A resume is optional and never blocks applying.
     if (job.applicants.some((existingApplicant) => existingApplicant.email === decoded.email)) {
       return res.status(409).json({ error: 'You have already applied for this job' })
     }
@@ -2351,7 +2509,7 @@ app.post('/api/jobs/:id/apply', requireVerifiedEmail, applicationUpload.single('
         })
       }
       const nsrpFile = { originalname: `NSRP-${answers.surname.replace(/\s+/g, '_')}.pdf`, mimetype: 'application/pdf', size: pdfBuffer.length, buffer: pdfBuffer }
-      const { version, cleanup } = await appendVerificationVersion(applicant, 'nsrpForm', nsrpFile)
+      const { version, cleanup } = await appendVerificationVersion(applicant, 'nsrpForm', nsrpFile, '', 'generated')
       nsrpVersionToSave = version
       nsrpVersionCleanup = cleanup
       nsrpFilePayload = { originalName: nsrpFile.originalname, mimetype: nsrpFile.mimetype, size: nsrpFile.size, data: pdfBuffer }
@@ -2595,28 +2753,21 @@ app.get('/api/referrals/employer/:employerId', async (req, res) => {
       const { page, limit } = parsePagination(req.query)
       const result = await paginateQuery(Referral, { employerId: req.params.employerId }, { page, limit, sort: { createdAt: -1 } })
       await Referral.populate(result.items, [
-        { path: 'applicantId', select: 'email profile resumeFile.originalName resumeFile.size resumeFile.uploadedAt verificationDocuments.resume.versions.originalName verificationDocuments.resume.versions.mimetype verificationDocuments.resume.versions.size verificationDocuments.resume.versions.uploadedAt verificationDocuments.resume.versions.status' },
+        { path: 'applicantId', select: 'email profile' },
         { path: 'jobId', model: JobPosting, select: 'title company location description requirements salary locationType employmentType status createdBy createdAt' },
       ])
-      for (const referral of result.items) {
-        if (referral.applicantId) referral.applicantId.resumeFile = resumeMetadata(referral.applicantId)
-      }
       return res.json(result)
     }
     const referrals = await Referral.find({ employerId: req.params.employerId })
       .sort({ createdAt: -1 })
-      .populate({ path: 'applicantId', select: 'email profile resumeFile.originalName resumeFile.size resumeFile.uploadedAt verificationDocuments.resume.versions.originalName verificationDocuments.resume.versions.mimetype verificationDocuments.resume.versions.size verificationDocuments.resume.versions.uploadedAt verificationDocuments.resume.versions.status' })
+      .populate({ path: 'applicantId', select: 'email profile' })
       .populate({
         path: 'jobId',
         model: JobPosting,
         select: 'title company location description requirements salary locationType employmentType status createdBy createdAt',
       })
 
-    res.json(referrals.map((referral) => {
-      const result = referral.toObject()
-      if (result.applicantId) result.applicantId.resumeFile = resumeMetadata(result.applicantId)
-      return result
-    }))
+    res.json(referrals.map((referral) => referral.toObject()))
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Server error' })
@@ -3230,7 +3381,7 @@ app.put('/api/employer-requests/:id/status', async (req, res) => {
   }
 })
 
-// Admin: review an applicant's NSRP (resume) for account verification
+// Admin: review an applicant's NSRP for account verification
 app.put('/api/applicants/:id/verification', async (req, res) => {
   try {
     const auth = req.headers.authorization
@@ -3310,7 +3461,16 @@ app.get('/api/admin/users', async (req, res) => {
           email: u.email,
           role: 'Applicant',
           emailVerified: Boolean(u.emailVerified),
-          profile: u.profile,
+          phone: u.phone || u.profile?.phone || u.profile?.nsrp?.cellphone || '',
+          profile: {
+            ...u.profile,
+            location: u.profile?.location || [
+              u.profile?.nsrp?.addressStreet,
+              u.profile?.nsrp?.addressBarangay,
+              u.profile?.addressCity || u.profile?.nsrp?.addressCity,
+              u.profile?.addressProvince || u.profile?.nsrp?.addressProvince,
+            ].filter(Boolean).join(', '),
+          },
           displayName: applicantDisplayName(u),
           needsNameConfirmation: Boolean(u.needsNameConfirmation),
           verificationStatus: u.verificationStatus || 'approved',
@@ -3318,7 +3478,7 @@ app.get('/api/admin/users', async (req, res) => {
           verificationDocuments: docs,
           pendingDocCount: docs.filter((d) => d.status === 'pending').length,
           resubmittedDocCount: docs.filter((d) => d.resubmitted).length,
-          hasResume: Boolean(resumeMetadata(u)),
+          hasNsrpForm: Boolean(latestVersion(u.verificationDocuments?.nsrpForm)),
           hasNsrpVerification: Boolean(u.nsrpVerificationFile?.originalName),
           createdAt: u.createdAt,
         }
@@ -3377,11 +3537,11 @@ app.get('/api/admin/users', async (req, res) => {
     const admins = await Admin.find().lean()
     const employers = await Employer.find().lean()
     // Admin queues list all applicants; unverified emails are badged in the UI
-    const applicants = await Applicant.find().select('+resumeFile.data')
+    const applicants = await Applicant.find()
     for (const applicant of applicants) {
       const previousStatus = applicant.verificationStatus
       const previousReason = applicant.verificationReason
-      const migrated = await migrateLegacyResume(applicant)
+      const migrated = await migrateLegacyNsrp(applicant)
       recomputeVerificationStatus(applicant)
       if (migrated || applicant.verificationStatus !== previousStatus || applicant.verificationReason !== previousReason) {
         await applicant.save()
@@ -3418,7 +3578,36 @@ app.get('/api/admin/users', async (req, res) => {
       id: request._id, email: request.email, role: 'Employer', companyName: request.companyName, contactName: request.contactName, phone: request.phone,
       profile: { location: request.location, summary: request.message }, approvalStatus: request.status, createdAt: request.createdAt,
     }))
-    const mapApplicant = applicants.map((u) => { const docs = summarizeVerificationDocuments(u); return { id: u._id, email: u.email, role: 'Applicant', emailVerified: Boolean(u.emailVerified), phone: u.phone || u.profile?.phone, profile: u.profile, displayName: applicantDisplayName(u), needsNameConfirmation: Boolean(u.needsNameConfirmation), verificationStatus: u.verificationStatus || 'approved', verificationReason: u.verificationReason, verificationDocuments: docs, pendingDocCount: docs.filter((d) => d.status === 'pending').length, resubmittedDocCount: docs.filter((d) => d.resubmitted).length, hasResume: Boolean(resumeMetadata(u)), hasNsrpVerification: Boolean(u.nsrpVerificationFile?.data || u.nsrpVerificationFile?.originalName), createdAt: u.createdAt } })
+    const mapApplicant = applicants.map((u) => {
+      const docs = summarizeVerificationDocuments(u)
+      const profile = u.profile?.toObject?.() || u.profile || {}
+      const nsrp = profile.nsrp || {}
+      return {
+        id: u._id,
+        email: u.email,
+        role: 'Applicant',
+        emailVerified: Boolean(u.emailVerified),
+        phone: u.phone || profile.phone || nsrp.cellphone || '',
+        profile: {
+          ...profile,
+          location: profile.location || [
+            nsrp.addressStreet,
+            nsrp.addressBarangay,
+            profile.addressCity || nsrp.addressCity,
+            profile.addressProvince || nsrp.addressProvince,
+          ].filter(Boolean).join(', '),
+        },
+        displayName: applicantDisplayName(u),
+        needsNameConfirmation: Boolean(u.needsNameConfirmation),
+        verificationStatus: u.verificationStatus || 'approved',
+        verificationReason: u.verificationReason,
+        verificationDocuments: docs,
+        pendingDocCount: docs.filter((d) => d.status === 'pending').length,
+        resubmittedDocCount: docs.filter((d) => d.resubmitted).length,
+        hasNsrpVerification: Boolean(u.nsrpVerificationFile?.data || u.nsrpVerificationFile?.originalName),
+        createdAt: u.createdAt,
+      }
+    })
 
     const combined = [...mapAdmin, ...mapEmployer, ...mapEmployerRequests, ...mapApplicant]
     res.json(combined)
@@ -3504,6 +3693,7 @@ if (!isTestEnv) {
   app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`)
     startHireReportReminders()
+    initMailer().catch(() => {}) // startup check is non-fatal
   })
 }
 

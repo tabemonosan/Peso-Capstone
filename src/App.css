@@ -373,11 +373,29 @@
 }
 
 /* Column widths stay consistent across pages (colgroup in the tables) */
-.portal-applicants-table col.col-name { width: 22%; }
-.portal-applicants-table col.col-email { width: 26%; }
-.portal-applicants-table col.col-location { width: 14%; }
-.portal-applicants-table col.col-status { width: 22%; }
-.portal-applicants-table col.col-actions { width: 16%; }
+.portal-applicants-table col.col-name { width: 18%; }
+.portal-applicants-table col.col-email { width: 23%; }
+.portal-applicants-table col.col-location { width: 16%; }
+.portal-applicants-table col.col-phone { width: 14%; }
+.portal-applicants-table col.col-status { width: 17%; }
+.portal-applicants-table col.col-actions { width: 12%; }
+
+.portal-applicant-name-button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.portal-applicant-name-button:hover,
+.portal-applicant-name-button:focus-visible {
+  color: #0891b2;
+  text-decoration: underline;
+}
 
 .portal-employers-table col.col-name { width: 20%; }
 .portal-employers-table col.col-email { width: 24%; }
@@ -509,9 +527,12 @@
     text-transform: uppercase;
   }
 
-  .portal-applicants-table .portal-details-row td::before,
-  .portal-employers-table .portal-details-row td::before {
-    content: none;
+}
+
+@media (min-width: 901px) and (max-width: 1100px) {
+  .portal-applicants-table col.col-phone,
+  .portal-applicants-table .applicant-phone-column {
+    display: none;
   }
 }
 

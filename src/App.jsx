@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { API_URL } from "./config"
 import JobsView from "./components/JobsView"
 import VerificationDocumentsForm, { emptyVerificationDocs, validateVerificationDocs } from "./components/VerificationDocumentsForm"
@@ -28,6 +28,14 @@ const initialAccounts = [
   { email: "employer@peso.gov", password: "password123", role: "Employer" },
   { email: "applicant@peso.gov", password: "password123", role: "Applicant" },
 ]
+
+function formatApplicantPhone(phone) {
+  const digits = String(phone || '').replace(/\D/g, '')
+  const localDigits = digits.startsWith('63') && digits.length === 12 ? `0${digits.slice(2)}` : digits
+  return /^09\d{9}$/.test(localDigits)
+    ? `${localDigits.slice(0, 4)} ${localDigits.slice(4, 7)} ${localDigits.slice(7)}`
+    : phone || 'Not provided'
+}
 
 const navigationByRole = {
   Admin: [
@@ -1217,7 +1225,6 @@ const [authView, setAuthView] = useState("login")
   const [selectedNotification, setSelectedNotification] = useState(null)
   const [referralPrefill, setReferralPrefill] = useState({ jobId: '', applicantIds: [] })
   const [appMessage, setAppMessage] = useState(null)
-  const [expandedDirectoryUserId, setExpandedDirectoryUserId] = useState(null)
   // Promise-based confirm dialog (one instance, used by every approve/decline flow)
   const [confirmDialog, setConfirmDialog] = useState(null)
   const [confirmBusy, setConfirmBusy] = useState(false)
@@ -2013,29 +2020,6 @@ const [authView, setAuthView] = useState("login")
     if (preview) preview.location.href = url
     else window.open(url, '_blank')
     setTimeout(() => URL.revokeObjectURL(url), 60_000)
-  }
-
-  const handleViewApplicantResumeAdmin = async (applicantId) => {
-    const token = getToken()
-    if (!token) return alert('Not authenticated')
-    const preview = window.open('', '_blank')
-    try {
-      const response = await fetch(`${API_URL}/api/applicants/${applicantId}/resume`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (!response.ok) {
-        preview?.close()
-        return alert('Resume could not be opened')
-      }
-      const blob = await response.blob()
-      const url = URL.createObjectURL(blob)
-      if (preview) preview.location.href = url
-      else window.open(url, '_blank')
-      setTimeout(() => URL.revokeObjectURL(url), 60_000)
-    } catch (err) {
-      preview?.close()
-      alert('Resume could not be opened')
-    }
   }
 
   const handleViewOwnRequirements = async () => {
@@ -3541,6 +3525,7 @@ const [authView, setAuthView] = useState("login")
                                         <col className="col-name" />
                                         <col className="col-email" />
                                         <col className="col-location" />
+                                        <col className="col-phone" />
                                         <col className="col-status" />
                                         <col className="col-actions" />
                                       </>
@@ -3560,6 +3545,7 @@ const [authView, setAuthView] = useState("login")
                                         <SortableTh label="Location" sortKey="location" activeSortBy={applicantSort.sortBy} order={applicantSort.order} onSort={applicantSort.toggleSort} />
                                       )}
                                       {directory.role === 'Employer' && <th>Phone</th>}
+                                      {directory.role === 'Applicant' && <th className="applicant-phone-column">Phone</th>}
                                       <th>Status</th>
                                       <th>Actions</th>
                                     </tr>
@@ -3568,150 +3554,68 @@ const [authView, setAuthView] = useState("login")
                                     {users.length === 0 && listLoading ? (
                                       Array.from({ length: 5 }).map((_, skeletonIndex) => (
                                         <tr key={`skeleton-${skeletonIndex}`} aria-hidden="true" className="portal-skeleton-row">
-                                          {Array.from({ length: directory.role === 'Employer' ? 6 : 5 }).map((_, cellIndex) => (
+                                          {Array.from({ length: directory.role === 'Employer' ? 6 : 6 }).map((_, cellIndex) => (
                                             <td key={cellIndex}><span className="portal-skeleton-cell" /></td>
                                           ))}
                                         </tr>
                                       ))
                                     ) : users.map((user) => {
-                                      const isExpanded = expandedDirectoryUserId === user.id
-                                      const detailColSpan = directory.role === 'Employer' ? 6 : 5
                                       return (
-                                        <Fragment key={user.id}>
-                                          <tr>
-                                            <td data-label={directory.role === 'Employer' ? 'Company' : 'Name'}><strong>{directory.role === 'Employer' ? user.companyName || 'Unnamed employer' : user.displayName || formatDisplayName(user.profile) || 'Unnamed applicant'}</strong></td>
-                                            <td data-label="Email"><span className="portal-cell-truncate" title={user.email}>{user.email}</span></td>
-                                            <td data-label={directory.role === 'Employer' ? 'Contact' : 'Location'}>{directory.role === 'Employer' ? user.contactName || 'N/A' : user.profile?.location || 'N/A'}</td>
-                                            {directory.role === 'Employer' && <td data-label="Phone">{user.phone || 'N/A'}</td>}
-                                            <td data-label="Status">
-                                              <div className="portal-status-stack">
-                                                <span className={`portal-status status-${(directory.role === 'Employer' ? user.approvalStatus : user.verificationStatus) || 'approved'}`}>{(directory.role === 'Employer' ? user.approvalStatus : user.verificationStatus) || 'approved'}</span>
-                                                {directory.role === 'Applicant' && user.emailVerified === false && (
-                                                  <span className="portal-badge border border-amber-400/60 bg-amber-500/10 text-amber-700">
-                                                    Unverified email
-                                                  </span>
-                                                )}
-                                                {directory.role === 'Applicant' && Array.isArray(user.verificationDocuments) && (
-                                                  <span className="text-xs text-slate-500">
-                                                    {user.verificationDocuments.filter((doc) => doc.status === 'approved').length} of {user.verificationDocuments.length} approved
-                                                  </span>
-                                                )}
-                                              </div>
-                                            </td>
-                                            <td data-label="Actions">
-                                              <div className="portal-actions-row">
-                                                <button
-                                                  type="button"
-                                                  className="portal-table-action"
-                                                  aria-expanded={isExpanded}
-                                                  onClick={() => setExpandedDirectoryUserId(isExpanded ? null : user.id)}
-                                                >
-                                                  {isExpanded ? 'Hide' : 'View'}
-                                                </button>
-                                                {directory.role === 'Applicant' && (
-                                                  <button
-                                                    type="button"
-                                                    className="portal-table-action"
-                                                    onClick={() => setReviewDocsApplicant(user)}
-                                                  >
-                                                    Review
-                                                  </button>
-                                                )}
-                                              </div>
-                                            </td>
-                                          </tr>
-                                          {isExpanded && (
-                                            <tr className="portal-details-row">
-                                              <td colSpan={detailColSpan}>
-                                                <div className="admin-modal-details space-y-2 rounded-2xl border border-slate-800 bg-slate-950/80 p-4 text-sm text-slate-300">
-                                                  {directory.role === 'Employer' ? (
-                                                    <>
-                                                      <p><span className="font-semibold text-white">Company:</span> {user.companyName || 'N/A'}</p>
-                                                      <p><span className="font-semibold text-white">Contact:</span> {user.contactName || 'N/A'}</p>
-                                                      <p><span className="font-semibold text-white">Phone:</span> {user.phone || 'N/A'}</p>
-                                                      <p><span className="font-semibold text-white">Location:</span> {user.profile?.location || 'N/A'}</p>
-                                                      <p><span className="font-semibold text-white">About me:</span> {user.profile?.summary || 'N/A'}</p>
-                                                      <p><span className="font-semibold text-white">Status:</span> {user.approvalStatus || 'approved'}</p>
-                                                      {user.requestId && ['pending', 'under_review'].includes(user.approvalStatus) && (
-                                                        <div className="mt-3 flex flex-wrap gap-2">
-                                                          <button
-                                                            type="button"
-                                                            onClick={() => confirmEmployerRequest(user.requestId, user.companyName, 'approved')}
-                                                            className="rounded-2xl bg-green-500 px-3 py-2 text-sm font-semibold text-white"
-                                                          >
-                                                            Approve
-                                                          </button>
-                                                          <button
-                                                            type="button"
-                                                            onClick={() => confirmEmployerRequest(user.requestId, user.companyName, 'declined')}
-                                                            className="rounded-2xl bg-red-500 px-3 py-2 text-sm font-semibold text-white"
-                                                          >
-                                                            Decline
-                                                          </button>
-                                                        </div>
-                                                      )}
-                                                    </>
-                                                  ) : (
-                                                    <>
-                                                      <p><span className="font-semibold text-white">Name:</span> {formatFullName(user.profile) || 'N/A'}</p>
-                                                      <p><span className="font-semibold text-white">Location:</span> {user.profile?.location || 'N/A'}</p>
-                                                      <p><span className="font-semibold text-white">Phone:</span> {user.phone || user.profile?.phone || 'N/A'}</p>
-                                                      <p><span className="font-semibold text-white">Skills:</span> {Array.isArray(user.profile?.skills) ? user.profile.skills.join(', ') : user.profile?.skills || 'N/A'}</p>
-                                                      <p><span className="font-semibold text-white">Traits:</span> {user.profile?.traits || 'N/A'}</p>
-                                                      <p><span className="font-semibold text-white">About me:</span> {user.profile?.summary || 'N/A'}</p>
-                                                      <p><span className="font-semibold text-white">NSRP / Resume:</span> {user.hasResume ? 'Submitted' : 'Not submitted'}</p>
-                                                      <div className="mt-3 flex flex-wrap items-center gap-2">
-                                                        {user.hasResume && (
-                                                          <button
-                                                            type="button"
-                                                            onClick={() => handleViewApplicantResumeAdmin(user.id)}
-                                                            className="rounded-2xl bg-cyan-500 px-3 py-2 text-sm font-semibold text-slate-950"
-                                                          >
-                                                            View NSRP PDF
-                                                          </button>
-                                                        )}
-                                                        {user.verificationStatus === 'approved' && (
-                                                          <button
-                                                            type="button"
-                                                            onClick={() => handleReviewApplicantVerification(user.id, 'restricted')}
-                                                            className="rounded-2xl bg-slate-700 px-3 py-2 text-sm font-semibold text-white"
-                                                          >
-                                                            Restrict
-                                                          </button>
-                                                        )}
-                                                      </div>
-                                                    </>
-                                                  )}
-                                                </div>
-
-                                                {directory.role === 'Employer' && user.requirementsFile && (
-                                                  <div className="mt-4 rounded-2xl border border-slate-300 bg-slate-50 p-4 text-sm text-black">
-                                                    <p className="font-semibold">Submitted MSRP file</p>
-                                                    <p className="mt-1">File: {user.requirementsFile.originalName || 'MSRP form.pdf'}</p>
-                                                    <p className="mt-1">Size: {user.requirementsFile.size ? `${Math.ceil(user.requirementsFile.size / 1024)} KB` : 'N/A'}</p>
-                                                    <p className="mt-1">Submitted: {user.requirementsFile.submittedAt ? new Date(user.requirementsFile.submittedAt).toLocaleString() : 'N/A'}</p>
-                                                    <div className="mt-3 flex flex-wrap gap-2">
-                                                      <button
-                                                        type="button"
-                                                        onClick={() => handleViewRequirements(user.requirementsFile.requestId)}
-                                                        className="rounded-2xl bg-cyan-500 px-3 py-2 text-sm font-semibold text-slate-950"
-                                                      >
-                                                        View MSRP PDF
-                                                      </button>
-                                                      <button
-                                                        type="button"
-                                                        onClick={() => handleDownloadRequirements(user.requirementsFile.requestId, user.requirementsFile.originalName)}
-                                                        className="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-black"
-                                                      >
-                                                        Download MSRP PDF
-                                                      </button>
-                                                    </div>
-                                                  </div>
-                                                )}
-                                              </td>
-                                            </tr>
+                                        <tr key={user.id}>
+                                          <td data-label={directory.role === 'Employer' ? 'Company' : 'Name'}>
+                                            {directory.role === 'Applicant' ? (
+                                              <button type="button" className="portal-applicant-name-button" onClick={() => setReviewDocsApplicant(user)}>
+                                                {user.displayName || formatDisplayName(user.profile) || 'Unnamed applicant'}
+                                              </button>
+                                            ) : (
+                                              <strong>{user.companyName || 'Unnamed employer'}</strong>
+                                            )}
+                                          </td>
+                                          <td data-label="Email"><span className="portal-cell-truncate" title={user.email}>{user.email}</span></td>
+                                          <td data-label={directory.role === 'Employer' ? 'Contact' : 'Location'}>
+                                            {directory.role === 'Employer' ? user.contactName || 'Not provided' : user.profile?.location || 'Not provided'}
+                                          </td>
+                                          {directory.role === 'Employer' ? (
+                                            <td data-label="Phone">{user.phone || 'Not provided'}</td>
+                                          ) : (
+                                            <td data-label="Phone" className="applicant-phone-column">{formatApplicantPhone(user.phone || user.profile?.phone || user.profile?.nsrp?.cellphone)}</td>
                                           )}
-                                        </Fragment>
+                                          <td data-label="Status">
+                                            <div className="portal-status-stack">
+                                              <span className={`portal-status status-${(directory.role === 'Employer' ? user.approvalStatus : user.verificationStatus) || 'approved'}`}>{(directory.role === 'Employer' ? user.approvalStatus : user.verificationStatus) || 'approved'}</span>
+                                              {directory.role === 'Applicant' && user.emailVerified === false && (
+                                                <span className="portal-badge border border-amber-400/60 bg-amber-500/10 text-amber-700">Unverified email</span>
+                                              )}
+                                              {directory.role === 'Applicant' && Array.isArray(user.verificationDocuments) && (
+                                                <span className="text-xs text-slate-500">
+                                                  {user.verificationDocuments.filter((doc) => doc.required && doc.status === 'approved').length} of 3 approved
+                                                </span>
+                                              )}
+                                            </div>
+                                          </td>
+                                          <td data-label="Actions">
+                                            {directory.role === 'Applicant' ? (
+                                              <button type="button" className="portal-table-action" onClick={() => setReviewDocsApplicant(user)}>
+                                                Review
+                                              </button>
+                                            ) : (
+                                              <div className="portal-actions-row">
+                                                {user.requirementsFile && (
+                                                  <>
+                                                    <button type="button" className="portal-table-action" onClick={() => handleViewRequirements(user.requirementsFile.requestId)}>View MSRP</button>
+                                                    <button type="button" className="portal-table-action" onClick={() => handleDownloadRequirements(user.requirementsFile.requestId, user.requirementsFile.originalName)}>Download</button>
+                                                  </>
+                                                )}
+                                                {user.requestId && ['pending', 'under_review'].includes(user.approvalStatus) && (
+                                                  <>
+                                                    <button type="button" className="portal-table-action" onClick={() => confirmEmployerRequest(user.requestId, user.companyName, 'approved')}>Approve</button>
+                                                    <button type="button" className="portal-table-action" onClick={() => confirmEmployerRequest(user.requestId, user.companyName, 'declined')}>Decline</button>
+                                                  </>
+                                                )}
+                                              </div>
+                                            )}
+                                          </td>
+                                        </tr>
                                       )
                                     })}
                                   </tbody>
@@ -3743,6 +3647,7 @@ const [authView, setAuthView] = useState("login")
               token={getToken()}
               onClose={() => setReviewDocsApplicant(null)}
               onReviewed={() => { fetchAdminUsers(); fetchAdminApplicants() }}
+              onRestrict={(applicantId) => handleReviewApplicantVerification(applicantId, 'restricted')}
             />
           )}
 
@@ -3938,65 +3843,6 @@ const [authView, setAuthView] = useState("login")
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-slate-300">Resume (PDF, DOCX, JPG, or PNG)</label>
-                      <div className="mt-2 rounded-2xl border border-slate-700 bg-slate-900 p-3">
-                        {resumeInfo?.originalName ? (
-                          <p className="text-sm text-slate-300">📄 {resumeInfo.originalName}{resumeInfo.uploadedAt ? ` • uploaded ${new Date(resumeInfo.uploadedAt).toLocaleDateString()}` : ''}{resumeInfo.status ? ` • ${resumeInfo.status}` : ''}</p>
-                        ) : (
-                          <p className="text-sm text-slate-400">No resume uploaded yet.</p>
-                        )}
-                        {resumeInfo?.originalName && (
-                          <button
-                            type="button"
-                            onClick={handleViewResume}
-                            className="mt-3 rounded-2xl border border-cyan-500 bg-transparent px-4 py-2 text-sm font-semibold text-cyan-300"
-                          >
-                            View Resume
-                          </button>
-                        )}
-                        {(isEditingProfile || (activeRole === 'Applicant' && !applicantApproved)) && (
-                          <div className="mt-3 flex flex-wrap items-center gap-2">
-                            <input
-                              type="file"
-                              accept="application/pdf,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx,image/jpeg,.jpg,.jpeg,image/png,.png"
-                              onChange={(e) => setResumeFile(e.target.files?.[0] || null)}
-                              className="text-sm text-slate-300 file:mr-3 file:rounded-xl file:border-0 file:bg-slate-700 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-white"
-                            />
-                            <button
-                              type="button"
-                              disabled={!resumeFile || resumeUploading}
-                              onClick={async () => {
-                                if (!resumeFile) return
-                                const token = getToken()
-                                if (!token) return alert('Not authenticated')
-                                setResumeUploading(true)
-                                try {
-                                  const formData = new FormData()
-                                  formData.append('resume', resumeFile)
-                                  const response = await fetch(`${API_URL}/api/profile/resume`, {
-                                    method: 'POST',
-                                    headers: { Authorization: `Bearer ${token}` },
-                                    body: formData,
-                                  })
-                                  const data = await response.json().catch(() => null)
-                                  if (!response.ok || data?.error) throw new Error(data?.error || 'Upload failed')
-                                  setResumeInfo(data.resumeFile)
-                                  setResumeFile(null)
-                                  alert('Resume uploaded!')
-                                } catch (err) {
-                                  console.error(err)
-                                  alert(err?.message || 'Failed to upload resume')
-                                } finally {
-                                  setResumeUploading(false)
-                                }
-                              }}
-                              className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
-                            >
-                              {resumeUploading ? 'Uploading…' : resumeInfo?.originalName ? 'Replace Resume' : 'Upload Resume'}
-                            </button>
-                          </div>
-                        )}
-                      </div>
                     </div>
                     <div className="flex gap-3">
                       {!isEditingProfile ? (

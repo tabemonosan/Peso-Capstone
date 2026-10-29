@@ -99,6 +99,81 @@ describe('PESO Portal prototype', () => {
     expect(await screen.findByText(/All Dashboard/i)).toBeInTheDocument()
   })
 
+  it('keeps the applicant table compact and opens review from the name or Review action', async () => {
+    const applicant = {
+      id: 'applicant-1',
+      email: 'maria@example.com',
+      role: 'Applicant',
+      displayName: 'Maria Dela Cruz',
+      emailVerified: true,
+      phone: '09171234567',
+      profile: { firstName: 'Maria', lastName: 'Dela Cruz', location: 'Quezon City, Metro Manila' },
+      verificationStatus: 'under_review',
+      verificationDocuments: [
+        { docKey: 'nsrpForm', label: 'NSRP Registration Form', required: true, status: 'pending' },
+        { docKey: 'birthCertificate', label: 'Birth Certificate', required: true, status: 'pending' },
+        { docKey: 'validId1', label: 'Valid ID #1', required: true, status: 'approved' },
+      ],
+      createdAt: '2026-10-01T00:00:00.000Z',
+    }
+    mockFetch.mockImplementation((url) => {
+      if (url === 'http://localhost:4000/api/login') {
+        return Promise.resolve({ ok: true, json: async () => ({ token: 'token-admin', user: { email: 'admin@peso.gov', role: 'Admin', profile: { name: 'Admin' } } }) })
+      }
+      if (url === 'http://localhost:4000/api/profile') {
+        return Promise.resolve({ ok: true, json: async () => ({ email: 'admin@peso.gov', role: 'Admin', profile: { name: 'Admin' } }) })
+      }
+      if (url.startsWith('http://localhost:4000/api/admin/users?role=Applicant')) {
+        return Promise.resolve({ ok: true, json: async () => ({ items: [applicant], total: 1, page: 1, limit: 10, totalPages: 1 }) })
+      }
+      if (url === 'http://localhost:4000/api/admin/users') {
+        return Promise.resolve({ ok: true, json: async () => [applicant] })
+      }
+      if (url === 'http://localhost:4000/api/applicants/applicant-1/verification-documents') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            verificationStatus: 'under_review',
+            basic: { firstName: 'Maria', lastName: 'Dela Cruz', phone: '09171234567', addressCity: 'Quezon City', addressProvince: 'Metro Manila' },
+            nsrpData: { firstName: 'Maria', addressCity: 'Quezon City' },
+            documents: [{
+              docKey: 'nsrpForm',
+              label: 'NSRP Registration Form',
+              status: 'pending',
+              sourceType: 'generated',
+              latest: { version: 1, url: '/signed/nsrp' },
+            }],
+          }),
+        })
+      }
+      if (url.startsWith('http://localhost:4000/api/employer-requests') || url.startsWith('http://localhost:4000/api/notifications')) {
+        return Promise.resolve({ ok: true, json: async () => ({ items: [], total: 0, page: 1, limit: 10, totalPages: 1 }) })
+      }
+      return Promise.resolve({ ok: true, json: async () => [] })
+    })
+
+    render(<App />)
+    fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: 'admin@peso.gov' } })
+    fireEvent.change(screen.getByLabelText(/Password/i), { target: { value: 'password123' } })
+    fireEvent.click(screen.getByRole('button', { name: /Sign in/i }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Applicants' }))
+
+    expect(await screen.findByText('Maria Dela Cruz')).toBeInTheDocument()
+    expect(screen.getByText('0917 123 4567')).toBeInTheDocument()
+    expect(screen.getByText('1 of 3 approved')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'View' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Hide' })).not.toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Review' })).toHaveLength(1)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    expect(await screen.findByText('Applicant details')).toBeInTheDocument()
+    expect(screen.getByText('Generated from online answers')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Close verification documents' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Maria Dela Cruz' }))
+    expect(await screen.findByText('Applicant details')).toBeInTheDocument()
+  })
+
   it('opens an accessible admin job review modal and requires a decline reason', async () => {
     const reviewJob = {
       _id: 'review-job-1',

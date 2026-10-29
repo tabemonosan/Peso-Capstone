@@ -87,28 +87,6 @@ function ReferralList({ token, employerId }) {
     }
   }
 
-  const handleViewResume = async (applicant) => {
-    const applicantId = applicant?._id || applicant?.id
-    if (!token || !applicantId) return
-    const preview = window.open('', '_blank')
-    try {
-      const response = await fetch(`${API_URL}/api/applicants/${applicantId}/resume`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (!response.ok) {
-        preview?.close()
-        return alert('Resume could not be opened')
-      }
-      const blob = await response.blob()
-      const url = URL.createObjectURL(blob)
-      if (preview) preview.location.href = url
-      else window.open(url, '_blank')
-    } catch (err) {
-      preview?.close()
-      alert('Resume could not be opened')
-    }
-  }
-
   const getStatusClasses = (status) => {
     if (status === "accepted") return "bg-cyan-500 text-slate-950"
     if (status === "declined") return "border border-slate-300 bg-slate-100 text-black"
@@ -356,18 +334,6 @@ function ReferralList({ token, employerId }) {
               <p><span className="font-semibold">Skills:</span> {Array.isArray(selectedProfile.profile?.skills) && selectedProfile.profile.skills.length > 0 ? selectedProfile.profile.skills.join(', ') : 'N/A'}</p>
               {selectedProfile.profile?.traits && <p><span className="font-semibold">Traits:</span> {selectedProfile.profile.traits}</p>}
               {selectedProfile.profile?.summary && <p><span className="font-semibold">Summary:</span> {selectedProfile.profile.summary}</p>}
-              {selectedProfile.resumeFile?.originalName && (
-                <div className="pt-2">
-                  <p><span className="font-semibold">Resume:</span> {selectedProfile.resumeFile.originalName}{selectedProfile.resumeFile.uploadedAt ? ` • uploaded ${new Date(selectedProfile.resumeFile.uploadedAt).toLocaleDateString()}` : ''}</p>
-                  <button
-                    type="button"
-                    onClick={() => handleViewResume(selectedProfile)}
-                    className="mt-2 rounded-2xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-500"
-                  >
-                    View Resume
-                  </button>
-                </div>
-              )}
             </div>
           </div>
         </div>
