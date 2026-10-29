@@ -72,7 +72,7 @@ async function loginAsApplicant() {
   fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: 'noskills@peso.gov' } })
   fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'Password123!' } })
   fireEvent.submit(screen.getByRole('button', { name: /Sign in/i }).closest('form'))
-  await screen.findByText(/Welcome back, No Skills/i)
+  await screen.findByRole('heading', { name: 'Dashboard', exact: true })
 }
 
 describe('Job listings for an applicant with no skills', () => {

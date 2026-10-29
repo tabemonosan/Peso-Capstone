@@ -1,3 +1,5 @@
+import { decodeLocationFilters } from '../../shared/phLocations.js'
+import { LEGACY_EMPLOYMENT_TYPES, mapEmploymentType } from '../../shared/jobPosting.js'
 // Job-board filter logic for GET /api/jobs (approved jobs list).
 // Pure functions, unit-tested; the endpoint supplies the values that exist in
 // the data so every filter value is validated against a whitelist before it
@@ -36,7 +38,8 @@ export function buildJobFilter(raw, { skills = [], locations = [], locationTypes
     groups.push({ skills: { $in: selectedSkills.map((v) => new RegExp(`^${escapeRegex(v)}$`, 'i')) } })
   }
 
-  const selectedLocations = canonicalize(splitParam(raw.locations), locations)
+  const exactLocation = typeof raw.locations === 'string' ? canonicalize([raw.locations], locations) : []
+  const selectedLocations = exactLocation.length ? exactLocation : canonicalize(decodeLocationFilters(raw.locations), locations)
   if (selectedLocations.length) {
     applied.locations = selectedLocations
     groups.push({ location: { $in: selectedLocations.map((v) => new RegExp(`^${escapeRegex(v)}$`, 'i')) } })
@@ -51,7 +54,11 @@ export function buildJobFilter(raw, { skills = [], locations = [], locationTypes
   const selectedEmploymentTypes = canonicalize(splitParam(raw.employmentTypes), employmentTypes)
   if (selectedEmploymentTypes.length) {
     applied.employmentTypes = selectedEmploymentTypes
-    groups.push({ employmentType: { $in: selectedEmploymentTypes.map((v) => new RegExp(`^${escapeRegex(v)}$`, 'i')) } })
+    const expanded = [...new Set(selectedEmploymentTypes.flatMap((value) => {
+      const current = mapEmploymentType(value)
+      return [current, ...Object.keys(LEGACY_EMPLOYMENT_TYPES).filter((legacy) => LEGACY_EMPLOYMENT_TYPES[legacy] === current)]
+    }))]
+    groups.push({ employmentType: { $in: expanded.map((v) => new RegExp(`^${escapeRegex(v)}$`, 'i')) } })
   }
 
   const datePosted = DATE_POSTED_OPTIONS.includes(String(raw.datePosted)) ? String(raw.datePosted) : ''
@@ -98,6 +105,6 @@ export function countJobFacets(jobs) {
     skills: count((job) => (Array.isArray(job.skills) ? job.skills : [])),
     locations: count((job) => [job.location]),
     locationTypes: count((job) => [job.locationType]),
-    employmentTypes: count((job) => [job.employmentType]),
+    employmentTypes: count((job) => [mapEmploymentType(job.employmentType)]),
   }
 }

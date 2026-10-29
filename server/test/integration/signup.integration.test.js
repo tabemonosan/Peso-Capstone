@@ -11,6 +11,8 @@ import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { PNG } from 'pngjs'
 import { startTestDb, stopTestDb, clearDb, validNsrpAnswers, pdfBuffer, signupRequest, emailProofFor, FIVE_MB } from './helpers.js'
 
+vi.mock('../../mailer.js', () => ({ sendEmail: vi.fn().mockResolvedValue({ ok: true }), sendVerificationEmail: vi.fn().mockResolvedValue({ ok: true }), initMailer: vi.fn().mockResolvedValue(undefined) }))
+
 // Failure injection switches, flipped by individual tests.
 const failure = vi.hoisted(() => ({ pdf: false, createUser: false }))
 
@@ -306,6 +308,7 @@ describe('POST /api/signup (real database)', () => {
       lineOfBusiness: 'Retail',
       contactPosition: 'HR Manager',
     })
+    expect((await mongoose.model('Employer').findOne({ email })).establishmentAddress.toObject()).toEqual({ city: 'Legazpi City', province: 'Albay' })
     const pdfPath = employerRequest.requirementsFile.path
     try {
       const pdfBytes = fs.readFileSync(pdfPath)
@@ -333,6 +336,8 @@ describe('POST /api/signup (real database)', () => {
       .field('password', 'Password123!')
       .field('consent', 'true')
       .field('mode', 'upload')
+      .field('city', 'Legazpi City')
+      .field('province', 'Albay')
       .field('companyName', 'Uploaded Works')
       .field('contactName', 'Jamie Cruz')
       .field('location', '12 Main Street, Legazpi City, Albay')
@@ -340,6 +345,7 @@ describe('POST /api/signup (real database)', () => {
       .attach('requirements', form2, { filename: 'filled-form-2.pdf', contentType: 'application/pdf' })
     expect(res.status).toBe(200)
     const employerRequest = await mongoose.model('EmployerRequest').findOne({ email }).lean()
+    expect((await mongoose.model('Employer').findOne({ email })).establishmentAddress.toObject()).toEqual({ city: 'Legazpi City', province: 'Albay' })
     expect(employerRequest.requirementsFile.originalName).toBe('filled-form-2.pdf')
     expect(employerRequest.requirementsFile.size).toBe(form2.length)
   }, 60000)

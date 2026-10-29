@@ -1,3 +1,4 @@
+import { encodeLocationFilters, decodeLocationFilters } from '../../shared/phLocations.js'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 // Applicant job-board filter state.
@@ -25,7 +26,7 @@ const readUrlState = () => {
     return {
       filters: {
         skills: list('skills'),
-        locations: list('locations'),
+        locations: decodeLocationFilters(params.get('locations')),
         locationTypes: list('types'),
         employmentTypes: list('employment'),
         datePosted: params.get('posted') || '',
@@ -62,7 +63,7 @@ const writeUrl = (filters, sortId) => {
       else url.searchParams.delete(key)
     }
     set('skills', filters.skills)
-    set('locations', filters.locations)
+    set('locations', encodeLocationFilters(filters.locations))
     set('types', filters.locationTypes)
     set('employment', filters.employmentTypes)
     set('posted', filters.datePosted)
@@ -130,7 +131,7 @@ export function useJobFilters({ onResetPage } = {}) {
     const sortOption = JOB_SORT_OPTIONS.find((option) => option.id === sortId) || JOB_SORT_OPTIONS[0]
     return {
       skills: filters.skills.join(','),
-      locations: filters.locations.join(','),
+      locations: encodeLocationFilters(filters.locations),
       locationTypes: filters.locationTypes.join(','),
       employmentTypes: filters.employmentTypes.join(','),
       datePosted: filters.datePosted,

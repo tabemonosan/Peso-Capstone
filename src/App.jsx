@@ -1,3 +1,4 @@
+import { PH_LOCATIONS as albayLocations, getEmployerAddress } from '../shared/phLocations.js'
 import { useCallback, useEffect, useRef, useState } from "react"
 import { API_URL } from "./config"
 import JobsView from "./components/JobsView"
@@ -7,7 +8,8 @@ import MyDocumentsPage from "./components/MyDocumentsPage"
 import VerifyEmailPage from "./components/VerifyEmailPage"
 import EmailVerificationBanner from "./components/EmailVerificationBanner"
 import CompleteRegistrationPage from "./components/CompleteRegistrationPage"
-import JobTitlePicker from "./components/JobTitlePicker"
+import JobPostingFields from "./components/JobPostingFields"
+import { emptyJobPosting, normalizeJobPosting, validateJobPosting } from "../shared/jobPosting.js"
 import AdminJobTitlesPage from "./components/AdminJobTitlesPage"
 import PasswordChecklist from "./components/PasswordChecklist"
 import ApplicantSignupWizard from "./components/ApplicantSignupWizard"
@@ -23,8 +25,14 @@ import ConfirmDialog from "./components/ConfirmDialog"
 import { usePagination, useDebouncedValue } from "./hooks/usePagination"
 import { useSort } from "./hooks/useSort"
 import { sortItems } from "./utils/sortItems"
-import AllDashboard from "./components/AllDashboard"
+import RoleDashboard from "./components/AllDashboard"
 import PesoReferralPanel from "./components/PesoReferralPanel"
+
+const focusJobError = (form) => requestAnimationFrame(() => {
+  const input = form?.querySelector('[aria-invalid="true"]')
+  input?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
+  input?.focus()
+})
 
 const initialAccounts = [
   { email: "admin@peso.gov", password: "password123", role: "Admin" },
@@ -42,8 +50,8 @@ function formatApplicantPhone(phone) {
 
 const navigationByRole = {
   Admin: [
+    { id: "dashboard", label: "Dashboard" },
     { id: "employers", label: "Employers" },
-    { id: "all-dashboard", label: "All Dashboard" },
     { id: "applicants", label: "Applicants" },
     { id: "requests", label: "Employer Requests" },
     { id: "jobs", label: "Job Postings" },
@@ -53,9 +61,8 @@ const navigationByRole = {
   Employer: [
     { id: "complete", label: "Complete Registration" },
     { id: "verification", label: "Account verification" },
-    { id: "home", label: "Home" },
     { id: "dashboard", label: "Dashboard" },
-    { id: "all-dashboard", label: "All Dashboard" },
+    { id: "home", label: "Home" },
     { id: "employer", label: "Job Postings" },
     { id: "referrals", label: "Reports" },
     { id: "reviews", label: "Reviews" },
@@ -63,8 +70,8 @@ const navigationByRole = {
   ],
   Applicant: [
     { id: "complete", label: "Complete Registration" },
+    { id: "dashboard", label: "Dashboard" },
     { id: "home", label: "Home" },
-    { id: "all-dashboard", label: "All Dashboard" },
     { id: "documents", label: "My Documents" },
     { id: "jobs", label: "Jobs" },
     { id: "reputation", label: "Reviews" },
@@ -150,772 +157,7 @@ const availableSkills = [
   "Farm Worker",
 ]
 
-// Format a salary value as Philippine pesos: digits only, ? prefix, thousand separators
-const formatPesoSalary = (value) => {
-  const digits = String(value).replace(/[^0-9]/g, "")
-  if (!digits) return ""
-  return `\u20B1$1`
-}
-
 // Municipalities/Cities of Albay with their barangays
-const albayLocations = {
-  "Bacacay": [
-    "Baclayon",
-    "Banao",
-    "Barangay 1 (Pob.)",
-    "Barangay 10 (Pob.)",
-    "Barangay 11 (Pob.)",
-    "Barangay 12 (Pob.)",
-    "Barangay 13 (Pob.)",
-    "Barangay 14 (Pob.)",
-    "Barangay 2 (Pob.)",
-    "Barangay 3 (Pob.)",
-    "Barangay 4 (Pob.)",
-    "Barangay 5 (Pob.)",
-    "Barangay 6 (Pob.)",
-    "Barangay 7 (Pob.)",
-    "Barangay 8 (Pob.)",
-    "Barangay 9 (Pob.)",
-    "Bariw",
-    "Basud",
-    "Bayandong",
-    "Bonga",
-    "Buang",
-    "Busdac",
-    "Cabasan",
-    "Cagbulacao",
-    "Cagraray",
-    "Cajogutan",
-    "Cawayan",
-    "Damacan",
-    "Gubat Ilawod",
-    "Gubat Iraya",
-    "Hindi",
-    "Igang",
-    "Langaton",
-    "Manaet",
-    "Mapulang Daga",
-    "Mataas",
-    "Misibis",
-    "Nahapunan",
-    "Namanday",
-    "Namantao",
-    "Napao",
-    "Panarayon",
-    "Pigcobohan",
-    "Pili Ilawod",
-    "Pili Iraya",
-    "Pongco",
-    "San Pablo",
-    "San Pedro",
-    "Sogod",
-    "Sula",
-    "Tambilagao",
-    "Tambongon",
-    "Tanagan",
-    "Uson",
-    "Vinisitahan-Basud",
-    "Vinisitahan-Napao",
-  ],
-  "Camalig": [
-    "Anoling",
-    "Baligang",
-    "Bantonan",
-    "Barangay 1 (Pob.)",
-    "Barangay 2 (Pob.)",
-    "Barangay 3 (Pob.)",
-    "Barangay 4 (Pob.)",
-    "Barangay 5 (Pob.)",
-    "Barangay 6 (Pob.)",
-    "Barangay 7 (Pob.)",
-    "Bariw",
-    "Binanderahan",
-    "Binitayan",
-    "Bongabong",
-    "Cabag\u2022an",
-    "Cabraran Peque\u2022o",
-    "Caguiba",
-    "Calabidongan",
-    "Comun",
-    "Cotmon",
-    "Del Rosario",
-    "Gapo",
-    "Gotob",
-    "Ilawod",
-    "Iluluan",
-    "Libod",
-    "Ligban",
-    "Mabunga",
-    "Magogon",
-    "Manawan",
-    "Maninila",
-    "Mina",
-    "Miti",
-    "Palanog",
-    "Panoypoy",
-    "Pariaan",
-    "Quinartilan",
-    "Quirangay",
-    "Quitinday",
-    "Salugan",
-    "Solong",
-    "Sua",
-    "Sumlang",
-    "Tagaytay",
-    "Tagoytoy",
-    "Taladong",
-    "Taloto",
-    "Taplacon",
-    "Tinago",
-    "Tumpa",
-  ],
-  "Daraga": [
-    "Alcala",
-    "Alobo",
-    "Anislag",
-    "Bagumbayan",
-    "Balinad",
-    "Ba\u2022adero",
-    "Ba\u2022ag",
-    "Bascaran",
-    "Bigao",
-    "Binitayan",
-    "Bongalon",
-    "Budiao",
-    "Burgos",
-    "Busay",
-    "Canarom",
-    "Cullat",
-    "Dela Paz",
-    "Dinoronan",
-    "Gabawan",
-    "Gapo",
-    "Ibaugan",
-    "Ilawod Area Pob.",
-    "Inarado",
-    "Kidaco",
-    "Kilicao",
-    "Kimantong",
-    "Kinawitan",
-    "Kiwalo",
-    "Lacag",
-    "Mabini",
-    "Malabog",
-    "Malobago",
-    "Maopi",
-    "Market Area Pob.",
-    "Maroroy",
-    "Matnog",
-    "Mayon",
-    "Mi-isi",
-    "Nabasan",
-    "Namantao",
-    "Pandan",
-    "Pe\u2022afrancia",
-    "Sagpon",
-    "Salvacion",
-    "San Rafael",
-    "San Ramon",
-    "San Roque",
-    "San Vicente Grande",
-    "San Vicente Peque\u2022o",
-    "Sipi",
-    "Tabon-tabon",
-    "Tagas",
-    "Talahib",
-    "Villahermosa",
-  ],
-  "Guinobatan": [
-    "Agpay",
-    "Balite",
-    "Banao",
-    "Batbat",
-    "Binogsacan Lower",
-    "Binogsacan Upper",
-    "Bololo",
-    "Bubulusan",
-    "Calzada",
-    "Catomag",
-    "Do\u2022a Mercedes",
-    "Do\u2022a Tomasa",
-    "Ilawod",
-    "Inamnan Grande",
-    "Inamnan Peque\u2022o",
-    "Inascan",
-    "Iraya",
-    "Lomacao",
-    "Maguiron",
-    "Maipon",
-    "Malabnig",
-    "Malipo",
-    "Malobago",
-    "Maninila",
-    "Mapaco",
-    "Marcial O. Ra\u2022ola",
-    "Masarawag",
-    "Mauraro",
-    "Minto",
-    "Morera",
-    "Muladbucad Grande",
-    "Muladbucad Peque\u2022o",
-    "Ongo",
-    "Palanas",
-    "Poblacion",
-    "Pood",
-    "Quibongbongan",
-    "Quitago",
-    "San Francisco",
-    "San Jose",
-    "San Rafael",
-    "Sinungtan",
-    "Tandarora",
-    "Travesia",
-  ],
-  "Jovellar": [
-    "Aurora Pob.",
-    "Bagacay",
-    "Bautista",
-    "Cabraran",
-    "Calzada Pob.",
-    "Del Rosario",
-    "Estrella",
-    "Florista",
-    "Mabini Pob.",
-    "Magsaysay Pob",
-    "Mamlad",
-    "Maogog",
-    "Mercado Pob.",
-    "Plaza Pob.",
-    "Quitinday Pob.",
-    "Rizal Pob.",
-    "Salvacion",
-    "San Isidro",
-    "San Roque",
-    "San Vicente",
-    "Sinagaran",
-    "Villa Paz",
-    "White Deer Pob.",
-  ],
-  "Legazpi City": [
-    "Bgy. 1 - Em's Barrio (Pob.)",
-    "Bgy. 10 - Cabugao",
-    "Bgy. 11 - Maoyod Pob.",
-    "Bgy. 12 - Tula-tula (Pob.)",
-    "Bgy. 13 - Ilawod West Pob.",
-    "Bgy. 14 - Ilawod Pob.",
-    "Bgy. 15 - Ilawod East Pob.",
-    "Bgy. 16 - Kawit-East Washington Drive (Pob.)",
-    "Bgy. 17 - Rizal Street., Ilawod (Pob.)",
-    "Bgy. 18 - Cabag\u2022an West (Pob.)",
-    "Bgy. 19 - Cabag\u2022an",
-    "Bgy. 2 - Em's Barrio South (Pob.)",
-    "Bgy. 20 - Cabag\u2022an East (Pob.)",
-    "Bgy. 21 - Binanuahan West (Pob.)",
-    "Bgy. 22 - Binanuahan East (Pob.)",
-    "Bgy. 23 - Imperial Court Subd. (Pob.)",
-    "Bgy. 24 - Rizal Street",
-    "Bgy. 25 - Lapu-lapu (Pob.)",
-    "Bgy. 26 - Dinagaan (Pob.)",
-    "Bgy. 27 - Victory Village South (Pob.)",
-    "Bgy. 28 - Victory Village North (Pob.)",
-    "Bgy. 29 - Sabang (Pob.)",
-    "Bgy. 3 - Em's Barrio East (Pob.)",
-    "Bgy. 30 - Pigcale (Pob.)",
-    "Bgy. 31 - Centro-Baybay (Pob.)",
-    "Bgy. 32 - San Roque",
-    "Bgy. 33 - PNR-Pe\u2022aranda St.-Iraya (Pob.)",
-    "Bgy. 34 - Oro Site-Magallanes St. (Pob.)",
-    "Bgy. 35 - Tinago (Pob.)",
-    "Bgy. 36 - Kapantawan (Pob.)",
-    "Bgy. 37 - Bitano (Pob.)",
-    "Bgy. 38 - Gogon",
-    "Bgy. 39 - Bonot (Pob.)",
-    "Bgy. 4 - Sagpon Pob.",
-    "Bgy. 40 - Cruzada",
-    "Bgy. 41 - Bogtong",
-    "Bgy. 42 - Rawis",
-    "Bgy. 43 - Tamaoyan",
-    "Bgy. 44 - Pawa",
-    "Bgy. 45 - Dita",
-    "Bgy. 46 - San Joaquin",
-    "Bgy. 47 - Arimbay",
-    "Bgy. 48 - Bagong Abre",
-    "Bgy. 49 - Bigaa",
-    "Bgy. 5 - Sagmin Pob.",
-    "Bgy. 50 - Padang",
-    "Bgy. 51 - Buyuan",
-    "Bgy. 52 - Matanag",
-    "Bgy. 53 - Bonga",
-    "Bgy. 54 - Mabinit",
-    "Bgy. 55 - Estanza",
-    "Bgy. 56 - Taysan",
-    "Bgy. 57 - Dap-dap",
-    "Bgy. 58 - Buragwis",
-    "Bgy. 59 - Puro",
-    "Bgy. 6 - Ba\u2022adero Pob.",
-    "Bgy. 60 - Lamba",
-    "Bgy. 61 - Maslog",
-    "Bgy. 62 - Homapon",
-    "Bgy. 63 - Mariawa",
-    "Bgy. 64 - Bagacay",
-    "Bgy. 65 - Imalnod",
-    "Bgy. 66 - Banquerohan",
-    "Bgy. 67 - Bariis",
-    "Bgy. 68 - San Francisco",
-    "Bgy. 69 - Buenavista",
-    "Bgy. 7 - Ba\u2022o (Pob.)",
-    "Bgy. 70 - Cagbacong",
-    "Bgy. 8 - Bagumbayan (Pob.)",
-    "Bgy. 9 - Pinaric (Pob.)",
-  ],
-  "Libon": [
-    "Alongong",
-    "Apud",
-    "Bacolod",
-    "Bariw",
-    "Bonbon",
-    "Buga",
-    "Bulusan",
-    "Burabod",
-    "Caguscos",
-    "East Carisac",
-    "Harigue",
-    "Libtong",
-    "Linao",
-    "Mabayawas",
-    "Macabugos",
-    "Magallang",
-    "Malabiga",
-    "Marayag",
-    "Matara",
-    "Molosbolos",
-    "Natasan",
-    "Ni\u2022o Jesus",
-    "Nogpo",
-    "Pantao",
-    "Rawis",
-    "Sagrada Familia",
-    "Salvacion",
-    "Sampongan",
-    "San Agustin",
-    "San Antonio",
-    "San Isidro",
-    "San Jose",
-    "San Pascual",
-    "San Ramon",
-    "San Vicente",
-    "Santa Cruz",
-    "Talin-talin",
-    "Tambo",
-    "Villa Petrona",
-    "West Carisac",
-    "Zone I (Pob.)",
-    "Zone II (Pob.)",
-    "Zone III (Pob.)",
-    "Zone IV (Pob.)",
-    "Zone V (Pob.)",
-    "Zone VI (Pob.)",
-    "Zone VII (Pob.)",
-  ],
-  "Ligao City": [
-    "Abella",
-    "Allang",
-    "Amtic",
-    "Bacong",
-    "Bagumbayan",
-    "Balanac",
-    "Baligang",
-    "Barayong",
-    "Basag",
-    "Batang",
-    "Bay",
-    "Binanowan",
-    "Binatagan (Pob.)",
-    "Bobonsuran",
-    "Bonga",
-    "Busac",
-    "Busay",
-    "Cabarian",
-    "Calzada (Pob.)",
-    "Catburawan",
-    "Cavasi",
-    "Culliat",
-    "Dunao",
-    "Francia",
-    "Guilid",
-    "Herrera",
-    "Layon",
-    "Macalidong",
-    "Mahaba",
-    "Malama",
-    "Maonon",
-    "Nabonton",
-    "Nasisi",
-    "Oma-oma",
-    "Palapas",
-    "Pandan",
-    "Paulba",
-    "Paulog",
-    "Pinamaniquian",
-    "Pinit",
-    "Ranao-ranao",
-    "San Vicente",
-    "Santa Cruz (Pob.)",
-    "Tagpo",
-    "Tambo",
-    "Tandarura",
-    "Tastas",
-    "Tinago",
-    "Tinampo",
-    "Tiongson",
-    "Tomolin",
-    "Tuburan",
-    "Tula-tula Grande",
-    "Tula-tula Peque\u2022o",
-    "Tupas",
-  ],
-  "Malilipot": [
-    "Barangay I (Pob.)",
-    "Barangay II (Pob.)",
-    "Barangay III (Pob.)",
-    "Barangay IV (Pob.)",
-    "Barangay V (Pob.)",
-    "Binitayan",
-    "Calbayog",
-    "Canaway",
-    "Salvacion",
-    "San Antonio Santicon (Pob.)",
-    "San Antonio Sulong",
-    "San Francisco",
-    "San Isidro Ilawod",
-    "San Isidro Iraya",
-    "San Jose",
-    "San Roque",
-    "Santa Cruz",
-    "Santa Teresa",
-  ],
-  "Malinao": [
-    "Awang",
-    "Bagatangki",
-    "Bagumbayan",
-    "Balading",
-    "Balza",
-    "Bariw",
-    "Baybay",
-    "Bulang",
-    "Burabod",
-    "Cabunturan",
-    "Comun",
-    "Diaro",
-    "Estancia",
-    "Jonop",
-    "Labnig",
-    "Libod",
-    "Malolos",
-    "Matalipni",
-    "Ogob",
-    "Pawa",
-    "Payahan",
-    "Poblacion",
-    "Quinarabasahan",
-    "Santa Elena",
-    "Soa",
-    "Sugcad",
-    "Tagoytoy",
-    "Tanawan",
-    "Tuliw",
-  ],
-  "Manito": [
-    "Balabagon",
-    "Balasbas",
-    "Bamban",
-    "Buyo",
-    "Cabacongan",
-    "Cabit",
-    "Cawayan",
-    "Cawit",
-    "Holugan",
-    "It-Ba (Pob.)",
-    "Malobago",
-    "Manumbalay",
-    "Nagotgot",
-    "Pawa",
-    "Tinapian",
-  ],
-  "Oas": [
-    "Badbad",
-    "Badian",
-    "Bagsa",
-    "Bagumbayan",
-    "Balogo",
-    "Banao",
-    "Bangiawon",
-    "Bogtong",
-    "Bongoran",
-    "Busac",
-    "Cadawag",
-    "Cagmanaba",
-    "Calaguimit",
-    "Calpi",
-    "Calzada",
-    "Camagong",
-    "Casinagan",
-    "Centro Poblacion",
-    "Coliat",
-    "Del Rosario",
-    "Gumabao",
-    "Ilaor Norte",
-    "Ilaor Sur",
-    "Iraya Norte",
-    "Iraya Sur",
-    "Manga",
-    "Maporong",
-    "Maramba",
-    "Matambo",
-    "Mayag",
-    "Mayao",
-    "Moroponros",
-    "Nagas",
-    "Obaliw-Rinas",
-    "Pistola",
-    "Ramay",
-    "Rizal",
-    "Saban",
-    "San Agustin",
-    "San Antonio",
-    "San Isidro",
-    "San Jose",
-    "San Juan",
-    "San Miguel",
-    "San Pascual",
-    "San Ramon",
-    "San Vicente",
-    "Tablon",
-    "Talisay",
-    "Talongog",
-    "Tapel",
-    "Tobgon",
-    "Tobog",
-  ],
-  "Pio Duran": [
-    "Agol",
-    "Alabangpuro",
-    "Banawan",
-    "Barangay I (Pob.)",
-    "Barangay II (Pob.)",
-    "Barangay III (Pob.)",
-    "Barangay IV (Pob.)",
-    "Barangay V (Pob.)",
-    "Basicao Coastal",
-    "Basicao Interior",
-    "Binodegahan",
-    "Buenavista",
-    "Buyo",
-    "Caratagan",
-    "Cuyaoyao",
-    "Flores",
-    "La Medalla",
-    "Lawinon",
-    "Macasitas",
-    "Malapay",
-    "Malidong",
-    "Mamlad",
-    "Marigondon",
-    "Matanglad",
-    "Nablangbulod",
-    "Oringon",
-    "Palapas",
-    "Panganiran",
-    "Rawis",
-    "Salvacion",
-    "Santo Cristo",
-    "Sukip",
-    "Tibabo",
-  ],
-  "Polangui": [
-    "Agos",
-    "Alnay",
-    "Alomon",
-    "Amoguis",
-    "Anopol",
-    "Apad",
-    "Balaba",
-    "Balangibang",
-    "Balinad",
-    "Basud",
-    "Binagbangan",
-    "Buyo",
-    "Centro Occidental (Pob.)",
-    "Centro Oriental (Pob.)",
-    "Cepres",
-    "Cotmon",
-    "Cotnogan",
-    "Danao",
-    "Gabon",
-    "Gamot",
-    "Itaran",
-    "Kinale",
-    "Kinuartilan",
-    "La Medalla",
-    "La Purisima",
-    "Lanigay",
-    "Lidong",
-    "Lourdes",
-    "Magpanambo",
-    "Magurang",
-    "Matacon",
-    "Maynaga",
-    "Maysua",
-    "Mendez",
-    "Napo",
-    "Pinagdapugan",
-    "Ponso",
-    "Salvacion",
-    "San Roque",
-    "Santa Cruz",
-    "Santa Teresita",
-    "Santicon",
-    "Sugcad",
-    "Ubaliw",
-  ],
-  "Rapu-Rapu": [
-    "Bagaobawan",
-    "Batan",
-    "Bilbao",
-    "Binosawan",
-    "Bogtong",
-    "Buenavista",
-    "Buhatan",
-    "Calanaga",
-    "Caracaran",
-    "Carogcog",
-    "Dap-dap",
-    "Gaba",
-    "Galicia",
-    "Guadalupe",
-    "Hamorawon",
-    "Lagundi",
-    "Liguan",
-    "Linao",
-    "Malobago",
-    "Mananao",
-    "Mancao",
-    "Manila",
-    "Masaga",
-    "Morocborocan",
-    "Nagcalsot",
-    "Pagcolbon",
-    "Poblacion",
-    "Sagrada",
-    "San Ramon",
-    "Santa Barbara",
-    "Tinocawan",
-    "Tinopan",
-    "Viga",
-    "Villahermosa",
-  ],
-  "Santo Domingo": [
-    "Alimsog",
-    "Bagong San Roque",
-    "Buhatan",
-    "Calayucay",
-    "Del Rosario Pob.",
-    "Fidel Surtida",
-    "Lidong",
-    "Market Site Pob.",
-    "Nagsiya Pob.",
-    "Pandayan Pob.",
-    "Salvacion",
-    "San Andres",
-    "San Fernando",
-    "San Francisco Pob.",
-    "San Isidro",
-    "San Juan Pob.",
-    "San Pedro Pob.",
-    "San Rafael Pob.",
-    "San Roque",
-    "San Vicente Pob.",
-    "Santa Misericordia",
-    "Santo Domingo Pob.",
-    "Santo Ni\u2022o",
-  ],
-  "Tabaco City": [
-    "Agnas",
-    "Bacolod",
-    "Bangkilingan",
-    "Bantayan",
-    "Baranghawon",
-    "Basagan",
-    "Basud (Pob.)",
-    "Bog\u2022abong",
-    "Bombon (Pob.)",
-    "Bonot",
-    "Buang",
-    "Buhian",
-    "Cabag\u2022an",
-    "Cobo",
-    "Comon",
-    "Cormidal",
-    "Divino Rostro (Pob.)",
-    "Fatima",
-    "Guinobat",
-    "Hacienda",
-    "Magapo",
-    "Mariroc",
-    "Matagbac",
-    "Oras",
-    "Oson",
-    "Panal",
-    "Pawa",
-    "Pinagbobong",
-    "Quinale Cabasan (Pob.)",
-    "Quinastillojan",
-    "Rawis",
-    "Sagurong",
-    "Salvacion",
-    "San Antonio",
-    "San Carlos",
-    "San Isidro",
-    "San Juan (Pob.)",
-    "San Lorenzo",
-    "San Ramon",
-    "San Roque",
-    "San Vicente",
-    "Santo Cristo (Pob.)",
-    "Sua-Igot",
-    "Tabiguian",
-    "Tagas",
-    "Tayhi (Pob.)",
-    "Visita",
-  ],
-  "Tiwi": [
-    "Bagumbayan",
-    "Bariis",
-    "Baybay",
-    "Belen",
-    "Biyong",
-    "Bolo",
-    "Cale",
-    "Cararayan",
-    "Coro-coro",
-    "Dap-dap",
-    "Gajo",
-    "Joroan",
-    "Libjo",
-    "Libtong",
-    "Matalibong",
-    "Maynonong",
-    "Mayong",
-    "Misibis",
-    "Naga",
-    "Nagas",
-    "Oyama",
-    "Putsan",
-    "San Bernardo",
-    "Sogod",
-    "Tigbi (Pob.)",
-  ],
-}
 
 const APPLICANT_SORT_OPTIONS = [
   { id: 'name:asc', sortBy: 'name', order: 'asc', label: 'Name (last name, A to Z)' },
@@ -975,7 +217,10 @@ export const sortJobsByMatch = (jobs, userSkills) => {
 
 function App() {
   const [activeRole, setActiveRole] = useState(() => typeof window !== "undefined" ? (localStorage.getItem('peso-active-role') || 'Applicant') : 'Applicant')
-  const [activeView, setActiveView] = useState(() => typeof window !== "undefined" ? (localStorage.getItem('peso-active-view') || 'dashboard') : 'dashboard')
+  const [activeView, setActiveView] = useState(() => {
+    const saved = typeof window !== 'undefined' ? localStorage.getItem('peso-active-view') : null
+    return saved === 'all-dashboard' ? 'dashboard' : (saved || 'dashboard')
+  })
   const [currentUser, setCurrentUser] = useState(null)
   const [isLoggedIn, setIsLoggedIn] = useState(false)
   const [userAccounts, setUserAccounts] = useState(initialAccounts)
@@ -1017,6 +262,7 @@ function App() {
     if (role === 'Employer') {
       return {
         name: base.name || '',
+        establishmentAddress: getEmployerAddress(userObj),
         location: base.location || '',
         skills: normalizeSkills(base.skills),
         traits: base.traits || '',
@@ -1145,23 +391,12 @@ const [authView, setAuthView] = useState("login")
   const [signupConsent, setSignupConsent] = useState(false)
   const [signupUploading, setSignupUploading] = useState(false)
   const [signupProgress, setSignupProgress] = useState("")
-  const [requirementsFile, setRequirementsFile] = useState(null)
   const [employerRequests, setEmployerRequests] = useState({ items: [], total: 0, totalPages: 1, loading: false })
   const [adminUsers, setAdminUsers] = useState([])
-  const [jobForm, setJobForm] = useState({
-    title: "",
-    customTitle: "",
-    company: "",
-    location: "",
-    description: "",
-    requirements: "",
-    salary: "",
-    slots: "",
-    deadline: "",
-    locationType: "",
-    employmentType: "",
-    skills: [],
-  })
+  const [jobForm, setJobForm] = useState(emptyJobPosting)
+  const [jobFieldErrors, setJobFieldErrors] = useState({})
+  const [editJobFieldErrors, setEditJobFieldErrors] = useState({})
+  const [jobSubmitting, setJobSubmitting] = useState(false)
   const [showCreateJobPosting, setShowCreateJobPosting] = useState(false)
   const [employerJobStatusFilter, setEmployerJobStatusFilter] = useState('all')
   const [editingJob, setEditingJob] = useState(null)
@@ -1628,40 +863,68 @@ const [authView, setAuthView] = useState("login")
       .catch(() => setReferredApplicantIdsByJob({}))
   }
 
-  const handleCreateJob = (event) => {
+  const openCreateJobPosting = async () => {
+    let address = getEmployerAddress({ establishmentAddress: profileData.establishmentAddress, profile: profileData })
+    let company = profileData.companyName || ''
+    // Refresh on every open: already signed-in sessions may predate address recovery.
+    try {
+      const response = await fetch(`${API_URL}/api/profile`, { headers: { Authorization: `Bearer ${getToken()}` } })
+      const data = await response.json()
+      if (response.ok && !data.error) {
+        address = getEmployerAddress(data)
+        company = data.companyName || company
+        setProfileData((current) => ({ ...current, establishmentAddress: address }))
+        setCurrentUser((current) => ({ ...current, establishmentAddress: address }))
+      }
+    } catch { /* Keep the registered address already loaded in this session. */ }
+    setJobForm({ ...emptyJobPosting(), ...address, company })
+    setJobFieldErrors({})
+    setShowCreateJobPosting(true)
+  }
+
+  const handleCreateJob = async (event) => {
     event.preventDefault()
+    const form = event.currentTarget
+    if (jobSubmitting) return
+    const payload = { ...jobForm, company: jobForm.company || profileData.companyName || '' }
+    const { errors } = validateJobPosting(payload)
+    setJobFieldErrors(errors)
+    if (Object.keys(errors).length) { focusJobError(form); return }
     const token = getToken()
     if (!token) return alert('Not authenticated')
-    const { title, customTitle, company, description, skills } = jobForm
-    const payload = { ...jobForm, company: company || profileData.companyName || '', location: jobForm.location || profileData.location || '' }
-    if (!title || (title === 'Other' && !customTitle.trim()) || (title === 'Other' && customTitle.trim().length > 80) || !payload.company || !description) return alert('A job title (custom titles up to 80 characters), company, and description are required')
-    if (!Array.isArray(skills) || skills.length === 0) return alert('Please select at least one skill for the job')
-
-    fetch(`${API_URL}/api/jobs`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify(payload),
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.error) return alert(data.error)
-        setJobForm({ title: '', customTitle: '', company: '', location: '', description: '', requirements: '', salary: '', slots: '', deadline: '', locationType: '', employmentType: '', skills: [] })
-        setShowCreateJobPosting(false)
-        fetchJobs()
-        fetchNotifications()
-        alert('Job request submitted for review')
+    setJobSubmitting(true)
+    try {
+      const response = await fetch(`${API_URL}/api/jobs`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(payload),
       })
-      .catch((err) => {
-        console.error(err)
-        alert('Failed to submit job request')
-      })
+      const data = await response.json()
+      if (!response.ok || data.error) {
+        if (data.fieldErrors) { setJobFieldErrors(data.fieldErrors); focusJobError(form) }
+        else alert(data.error || 'Failed to submit job request')
+        return
+      }
+      setJobForm(emptyJobPosting())
+      setShowCreateJobPosting(false)
+      fetchJobs()
+      fetchNotifications()
+      alert('Job request submitted for review')
+    } catch (err) {
+      console.error(err)
+      alert('Failed to submit job request')
+    } finally { setJobSubmitting(false) }
   }
 
   const openEditJob = (job, canSave = true) => {
     setEditingJob(job)
     setEditingJobCanSave(canSave)
     const knownTitle = jobTitleGroups.some((group) => group.titles.some((item) => item.name === job.title))
+    setEditJobFieldErrors({})
+    const normalized = normalizeJobPosting(job)
     setEditingJobForm({
+      ...emptyJobPosting(),
+      ...normalized,
+      salaryMin: normalized.salaryMin ?? '',
+      salaryMax: normalized.salaryMax ?? '',
       title: knownTitle ? job.title : 'Other',
       customTitle: knownTitle ? '' : (job.title || ''),
       company: job.company || '',
@@ -1672,25 +935,25 @@ const [authView, setAuthView] = useState("login")
       slots: job.slots || '',
       deadline: job.deadline ? new Date(job.deadline).toISOString().slice(0, 10) : '',
       locationType: job.locationType || '',
-      employmentType: job.employmentType || '',
+      employmentType: normalized.employmentType || 'Full-time',
       skills: Array.isArray(job.skills) ? job.skills : [],
     })
   }
 
   const handleSaveEditedJob = async (event) => {
     event.preventDefault()
+    const form = event.currentTarget
     if (!editingJob || !editingJobCanSave) return
-    if (!editingJobForm.title || (editingJobForm.title === 'Other' && !editingJobForm.customTitle.trim()) || (editingJobForm.title === 'Other' && editingJobForm.customTitle.trim().length > 80) || !editingJobForm.company || !editingJobForm.description) {
-      return alert('A job title (custom titles up to 80 characters), company, and description are required')
-    }
-    if (!Array.isArray(editingJobForm.skills) || editingJobForm.skills.length === 0) {
-      return alert('Please select at least one skill for the job')
-    }
-    if (!window.confirm('Save these changes to the approved job posting?')) return
+    if (jobSubmitting) return
+    const keepDeadline = editingJob.deadline ? new Date(editingJob.deadline).toISOString().slice(0, 10) : ''
+    const { errors } = validateJobPosting(editingJobForm, { keepDeadline })
+    setEditJobFieldErrors(errors)
+    if (Object.keys(errors).length) { focusJobError(form); return }
 
     const token = getToken()
     if (!token) return alert('Not authenticated')
 
+    setJobSubmitting(true)
     try {
       const response = await fetch(`${API_URL}/api/jobs/${editingJob._id}`, {
         method: 'PUT',
@@ -1698,6 +961,7 @@ const [authView, setAuthView] = useState("login")
         body: JSON.stringify(editingJobForm),
       })
       const data = await response.json().catch(() => null)
+      if (data?.fieldErrors) { setEditJobFieldErrors(data.fieldErrors); focusJobError(form); return }
       if (!response.ok || data?.error) throw new Error(data?.error || `Request failed: ${response.status}`)
 
       setEditingJob(null)
@@ -1707,7 +971,7 @@ const [authView, setAuthView] = useState("login")
     } catch (err) {
       console.error(err)
       alert(err?.message || 'Failed to update job posting')
-    }
+    } finally { setJobSubmitting(false) }
   }
 
   const handleReviewJob = async (jobId, status, options = {}) => {
@@ -1833,32 +1097,6 @@ const [authView, setAuthView] = useState("login")
     }
   }
 
-  const handleSubmitEmployerRequirements = async (event) => {
-    event.preventDefault()
-    const token = getToken()
-    if (!token || !requirementsFile) return alert('Select the NSRP registration PDF first')
-
-    const payload = new FormData()
-    payload.append('requirements', requirementsFile)
-    try {
-      const response = await fetch(`${API_URL}/api/employer-requirements`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: payload,
-      })
-      const data = await response.json().catch(() => null)
-      if (!response.ok) return alert(data?.error || 'Failed to submit requirements')
-      setRequirementsFile(null)
-      alert('NSRP registration form submitted for admin review.')
-      const profileResponse = await fetch(`${API_URL}/api/profile`, { headers: { Authorization: `Bearer ${token}` } })
-      const profile = await profileResponse.json().catch(() => null)
-      if (profile && !profile.error) setCurrentUser((current) => ({ ...current, verificationStatus: profile.verificationStatus, verificationReason: profile.verificationReason }))
-      fetchEmployerRequests()
-    } catch (err) {
-      alert(err?.message || 'Failed to submit requirements')
-    }
-  }
-
   const handleReviewApplicantVerification = (applicantId, status) => {
     const token = getToken()
     if (!token) return alert('Not authenticated')
@@ -1927,56 +1165,58 @@ const [authView, setAuthView] = useState("login")
     })
   }
 
-  const handleDownloadRequirements = async (requestId, filename) => {
+  // Fetches the NSRP PDF with the auth header; resolves to a PDF blob, or null after reporting the failure.
+  const fetchNsrpPdfBlob = async (url) => {
     const token = getToken()
-    if (!token) return
-    const response = await fetch(`${API_URL}/api/employer-requirements/${requestId}/download`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    if (!response.ok) return alert('Requirements PDF could not be downloaded')
-    const blob = await response.blob()
+    if (!token) return null
+    const unavailable = 'This document is unavailable or corrupted'
+    try {
+      const response = await fetch(`${API_URL}${url}`, { headers: { Authorization: `Bearer ${token}` } })
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}))
+        setAppMessage({ type: 'error', text: response.status === 422 || response.status === 404 ? unavailable : (data.error || unavailable) })
+        return null
+      }
+      const blob = await response.blob()
+      if (!blob.size) {
+        setAppMessage({ type: 'error', text: unavailable })
+        return null
+      }
+      const nameMatch = /filename="([^"]+)"/.exec(response.headers.get('Content-Disposition') || '')
+      const pdf = blob.type === 'application/pdf' ? blob : new Blob([blob], { type: 'application/pdf' })
+      return Object.assign(pdf, { suggestedName: nameMatch?.[1] })
+    } catch {
+      setAppMessage({ type: 'error', text: unavailable })
+      return null
+    }
+  }
+
+  const openNsrpBlob = async (url) => {
+    const preview = window.open('', '_blank')
+    const blob = await fetchNsrpPdfBlob(url)
+    if (!blob) {
+      preview?.close()
+      return
+    }
+    const objectUrl = URL.createObjectURL(blob)
+    if (preview) preview.location.href = objectUrl
+    else window.open(objectUrl, '_blank')
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
+  }
+
+  const handleDownloadRequirements = async (requestId, filename) => {
+    const blob = await fetchNsrpPdfBlob(`/api/employers/${requestId}/nsrp/download`)
+    if (!blob) return
     const link = document.createElement('a')
     link.href = URL.createObjectURL(blob)
-    link.download = filename || 'nsrp-registration-form.pdf'
+    link.download = blob.suggestedName || filename || 'NSRP-employer.pdf'
+    document.body.appendChild(link)
     link.click()
-    URL.revokeObjectURL(link.href)
+    link.remove()
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000)
   }
 
-  const handleViewRequirements = async (requestId) => {
-    const token = getToken()
-    if (!token) return
-    const preview = window.open('', '_blank')
-    const response = await fetch(`${API_URL}/api/employer-requirements/${requestId}/view`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    if (!response.ok) {
-      preview?.close()
-      return alert('Requirements PDF could not be opened')
-    }
-    const blob = await response.blob()
-    const url = URL.createObjectURL(blob)
-    if (preview) preview.location.href = url
-    else window.open(url, '_blank')
-    setTimeout(() => URL.revokeObjectURL(url), 60_000)
-  }
-
-  const handleViewOwnRequirements = async () => {
-    const token = getToken()
-    if (!token) return
-    const preview = window.open('', '_blank')
-    const response = await fetch(`${API_URL}/api/employer-requirements/current/view`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    if (!response.ok) {
-      preview?.close()
-      return alert('Your submitted PDF could not be opened')
-    }
-    const blob = await response.blob()
-    const url = URL.createObjectURL(blob)
-    if (preview) preview.location.href = url
-    else window.open(url, '_blank')
-    setTimeout(() => URL.revokeObjectURL(url), 60_000)
-  }
+  const handleViewRequirements = (requestId) => openNsrpBlob(`/api/employers/${requestId}/nsrp/view`)
 
   const handleReferApplicantFromJob = async (jobId, applicantEmail, isReferred = false) => {
     const token = getToken()
@@ -2163,8 +1403,8 @@ const [authView, setAuthView] = useState("login")
           localStorage.removeItem('peso-token')
           return
         }
-        const norm = normalizeProfile({ profile: data.profile, companyName: data.companyName, contactName: data.contactName, phone: data.phone }, data.role)
-        setCurrentUser({ id: data.id, email: data.email, role: data.role, companyName: data.companyName, contactName: data.contactName, phone: data.phone, profile: data.profile, verificationDocuments: data.verificationDocuments, verificationStatus: data.verificationStatus, verificationReason: data.verificationReason, token })
+        const norm = normalizeProfile({ establishmentAddress: data.establishmentAddress, profile: data.profile, companyName: data.companyName, contactName: data.contactName, phone: data.phone }, data.role)
+        setCurrentUser({ ...data, establishmentAddress: norm.establishmentAddress, token })
         setActiveRole(data.role)
         setIsLoggedIn(true)
         setProfileData(norm)
@@ -2437,6 +1677,8 @@ const [authView, setAuthView] = useState("login")
   const filteredPendingJobs = pendingJobs.filter((job) => (activeRole === 'Admin' ? matchesAdminJobSearch(job) : true))
   const filteredApprovedJobs = approvedJobs.filter((job) => (activeRole === 'Admin' ? matchesAdminJobSearch(job) : true))
   const filteredDeclinedJobs = declinedJobs.filter((job) => (activeRole === 'Admin' ? matchesAdminJobSearch(job) : true))
+  const registeredJobAddress = profileData.establishmentAddress || {}
+  const jobSkillSuggestions = [...new Set([...availableSkills, ...myJobs.flatMap((job) => Array.isArray(job.skills) ? job.skills : [])])]
   const employerPendingJobs = myJobs.filter((job) => job.status === 'pending')
   const employerDeclinedJobs = myJobs.filter((job) => job.status === 'declined')
   const employerApprovedJobs = myJobs.filter((job) => job.status === 'approved')
@@ -2453,12 +1695,23 @@ const [authView, setAuthView] = useState("login")
     currentUser?.verificationStatus && currentUser.verificationStatus !== 'approved',
   )
 
+  useEffect(() => {
+    if (activeView === 'all-dashboard') setActiveView('dashboard')
+  }, [activeView])
+
   // Unverified applicants land on My Documents once (not every navigation)
   useEffect(() => {
     if (isLoggedIn && activeRole === 'Applicant' && currentUser?.verificationStatus && currentUser.verificationStatus !== 'approved' && activeView === 'home') {
       setActiveView('documents')
     }
   }, [isLoggedIn, activeRole, currentUser?.verificationStatus, activeView])
+
+  // Completed accounts may still have the checklist saved from an older session.
+  useEffect(() => {
+    if (isLoggedIn && ['Applicant', 'Employer'].includes(activeRole) && currentUser?.registration?.complete === true && activeView === 'complete') {
+      setActiveView('dashboard')
+    }
+  }, [isLoggedIn, activeRole, currentUser?.registration?.complete, activeView])
 
   // Incomplete accounts can only leave the checklist through its profile/document links.
   useEffect(() => {
@@ -2752,7 +2005,7 @@ const [authView, setAuthView] = useState("login")
     if (item.id === "profile") return false
     if (activeRole === 'Employer' && !employerApproved) return item.id === 'verification'
     if (registrationIncomplete) return item.id === 'complete'
-    if (item.id === 'complete') return ['Applicant', 'Employer'].includes(activeRole) && !currentUser?.registration?.complete
+    if (item.id === 'complete') return ['Applicant', 'Employer'].includes(activeRole) && currentUser?.registration?.complete === false
     if (activeRole === 'Employer') return employerApproved && item.id !== 'verification'
     // Unverified applicants only get My Documents (job listings stay hidden)
     if (activeRole === 'Applicant') return applicantApproved || item.id === 'documents'
@@ -3066,97 +2319,19 @@ const [authView, setAuthView] = useState("login")
               </div>
             </section>
           )}
-          {activeView === "all-dashboard" && (
-            <section className="portal-card rounded-2xl border border-slate-300 bg-white p-6 text-black">
-              <h2 className="text-xl font-semibold text-black">All Dashboard</h2>
-              <p className="mb-6 mt-2 text-sm text-black">Read-only overview. Select a card to open its list.</p>
-              <AllDashboard token={getToken()} onNavigate={setActiveView} />
-            </section>
-          )}
           {activeView === "dashboard" && (
-            <section className="admin-requests-card portal-card rounded-2xl border border-slate-300 bg-white p-6 text-black">
+            <section className="portal-card rounded-2xl border border-slate-300 bg-white p-6 text-black">
               <h2 className="text-xl font-semibold text-black">Dashboard</h2>
-              {activeRole === 'Employer' && (!employerApproved || registrationIncomplete) ? (
-                <div className="mt-4 rounded-2xl border border-amber-300 bg-white p-5">
-                  <h3 className="text-lg font-semibold text-black">Employer verification</h3>
-                  <p className="mt-2 text-sm text-black">
-                    Your account is active, but employer tools stay locked until the admin approves your NSRP registration form.
-                  </p>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <a
-                      href="/MSRP_testFile.pdf"
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-black"
-                    >
-                      View MSRP form
-                    </a>
-                    <a
-                      href="/MSRP_testFile.pdf"
-                      download="MSRP_testFile.pdf"
-                      className="inline-flex rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-black"
-                    >
-                      Download MSRP form
-                    </a>
-                  </div>
-                  <p className="mt-3 text-sm text-amber-300">Status: {currentUser.verificationStatus.replace('_', ' ')}</p>
-                  {currentUser.verificationStatus === 'declined' && (
-                    <div className="mt-3 rounded-xl border border-rose-400/40 bg-rose-950/30 p-3">
-                      <p className="text-sm font-semibold text-rose-300">Admin review message</p>
-                      <p className="mt-1 text-sm text-slate-200">{currentUser.verificationReason || 'Please submit a corrected NSRP registration form for another review.'}</p>
-                    </div>
-                  )}
-                  {currentUser.requirementsFile && (
-                    <div className="mt-5 rounded-xl border border-slate-300 bg-slate-50 p-3">
-                      <p className="text-sm font-semibold text-black">Submitted PDF</p>
-                      <p className="mt-1 text-xs text-black">{currentUser.requirementsFile.originalName}</p>
-                      <button
-                        type="button"
-                        onClick={handleViewOwnRequirements}
-                        className="mt-3 rounded-2xl bg-cyan-500 px-3 py-2 text-sm font-semibold text-slate-950"
-                      >
-                        View submitted PDF
-                      </button>
-                    </div>
-                  )}
-                  {currentUser.verificationStatus === 'under_review' && currentUser.requirementsFile ? (
-                    <p className="mt-5 text-sm text-amber-300">Your PDF is waiting for admin review. You cannot submit another file until this review is complete.</p>
-                  ) : (
-                    <form className="mt-5 space-y-3" onSubmit={handleSubmitEmployerRequirements}>
-                      <label htmlFor="requirements-pdf" className="block text-sm font-medium text-black">
-                        {currentUser.verificationStatus === 'declined' ? 'Submit a corrected NSRP registration form (PDF, max 10 MB)' : 'NSRP registration form (PDF, max 10 MB)'}
-                      </label>
-                      <input
-                        id="requirements-pdf"
-                        type="file"
-                        accept="application/pdf,.pdf"
-                        onChange={(event) => setRequirementsFile(event.target.files?.[0] || null)}
-                        className="block w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-black"
-                      />
-                      <button type="submit" className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950">
-                        Submit for review
-                      </button>
-                    </form>
-                  )}
-                </div>
-              ) : activeRole === 'Employer' ? (
+              <p className="mb-6 mt-2 text-sm text-slate-600">
+                {activeRole === 'Admin'
+                  ? 'Monitor registrations, job requests, document reviews, referrals, and hiring across the portal.'
+                  : activeRole === 'Employer'
+                    ? 'Track your job postings, applicants, referrals, hiring, and recent activity.'
+                    : 'Track your applications, referrals, document reviews, and account status.'}
+              </p>
+              <RoleDashboard token={getToken()} onNavigate={setActiveView} />
+              {activeRole === 'Employer' && employerApproved && (
                 <>
-                  <p className="mt-3 text-black">Employer dashboard \u2022 quick overview of your postings.</p>
-                  <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-                    <div className="rounded-2xl border border-slate-300 bg-white p-4">
-                      <p className="text-sm text-black">My job requests</p>
-                      <p className="mt-2 text-2xl font-semibold text-black">{myJobs.length}</p>
-                    </div>
-                    <div className="rounded-2xl border border-slate-300 bg-white p-4">
-                      <p className="text-sm text-black">Pending approvals</p>
-                      <p className="mt-2 text-2xl font-semibold text-black">{pendingJobs.length}</p>
-                    </div>
-                    <div className="rounded-2xl border border-slate-300 bg-white p-4">
-                      <p className="text-sm text-black">Total applicants</p>
-                      <p className="mt-2 text-2xl font-semibold text-black">{myJobs.reduce((acc, j) => acc + (j.applicants ? j.applicants.length : 0), 0)}</p>
-                    </div>
-                  </div>
-
                   <div className="employer-dashboard-postings">
                     <div className="employer-dashboard-postings-heading">
                       <div>
@@ -3196,28 +2371,9 @@ const [authView, setAuthView] = useState("login")
                     )}
                   </div>
 
-                  <div className="mt-6 flex gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setActiveView('employer')}
-                      className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
-                    >
-                      Manage Postings
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveView('jobs')}
-                      className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-black"
-                    >
-                      Job Request
-                    </button>
-                  </div>
+                  <button type="button" onClick={() => setActiveView('employer')} className="mt-6 rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950">Manage Postings</button>
                 </>
-              ) : (
-                <p className="mt-3 text-slate-400">Welcome to the portal dashboard.</p>
               )}
-
-
             </section>
           )}
 
@@ -3381,7 +2537,7 @@ const [authView, setAuthView] = useState("login")
                                               <div className="portal-actions-row">
                                                 {user.requirementsFile && (
                                                   <>
-                                                    <button type="button" className="portal-table-action" onClick={() => handleViewRequirements(user.requirementsFile.requestId)}>View MSRP</button>
+                                                    <button type="button" className="portal-table-action" onClick={() => handleViewRequirements(user.requirementsFile.requestId)}>View NSRP</button>
                                                     <button type="button" className="portal-table-action" onClick={() => handleDownloadRequirements(user.requirementsFile.requestId, user.requirementsFile.originalName)}>Download</button>
                                                   </>
                                                 )}
@@ -3851,27 +3007,13 @@ const [authView, setAuthView] = useState("login")
           )}
 
           {activeView === "employer" && (
-            <section className="employer-module-card portal-card rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-              <h2 className="text-xl font-semibold text-white">Employer Module</h2>
-              <p className="mt-3 text-slate-400">Submit job requests and track their review status.</p>
+            <section className="employer-module-card portal-card rounded-2xl border border-slate-200 bg-white p-6">
+              <h2 className="text-xl font-semibold text-slate-900">Employer Module</h2>
+              <p className="mt-3 text-slate-600">Submit job requests and track their review status.</p>
 
               <button
                 type="button"
-                onClick={() => {
-                  setJobForm({
-                    title: '',
-                    customTitle: '',
-                    company: profileData.companyName || '',
-                    location: profileData.location || '',
-                    description: '',
-                    requirements: '',
-                    salary: '',
-                    locationType: '',
-                    employmentType: '',
-                    skills: [],
-                  })
-                  setShowCreateJobPosting(true)
-                }}
+                onClick={openCreateJobPosting}
                 className="mt-6 rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
               >
                 Create Job Posting
@@ -3879,7 +3021,7 @@ const [authView, setAuthView] = useState("login")
 
               {showCreateJobPosting && (
                 <div
-                  className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4"
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-slate-200/70 p-4"
                   role="dialog"
                   aria-modal="true"
                   aria-labelledby="create-job-posting-title"
@@ -3899,143 +3041,25 @@ const [authView, setAuthView] = useState("login")
                         Close
                       </button>
                     </div>
-                <form className="space-y-4 mt-4" onSubmit={handleCreateJob}>
-                  <div>
-                    <JobTitlePicker
-                      categories={jobTitleGroups}
-                      title={jobForm.title}
-                      customTitle={jobForm.customTitle}
-                      onChange={(value) => setJobForm({ ...jobForm, ...value })}
-                    />
-                    {jobTitleLoadError && <p role="alert" className="mt-2 text-sm text-rose-700">{jobTitleLoadError}</p>}
-                  </div>
-                  <div>
-                    <label htmlFor="job-description" className="block text-sm font-medium text-slate-200">
-                      Description
-                    </label>
-                    <textarea
-                      id="job-description"
-                      rows="3"
-                      value={jobForm.description}
-                      onChange={(e) => setJobForm({ ...jobForm, description: e.target.value })}
-                      className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
-                      placeholder="Describe the responsibilities and role."
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="job-requirements" className="block text-sm font-medium text-slate-200">
-                      Requirements
-                    </label>
-                    <textarea
-                      id="job-requirements"
-                      rows="2"
-                      value={jobForm.requirements}
-                      onChange={(e) => setJobForm({ ...jobForm, requirements: e.target.value })}
-                      className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
-                      placeholder="Describe the qualifications and expectations."
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-200">Required Skills</label>
-                    <SkillTagPicker
-                      theme="light"
-                      selected={jobForm.skills}
-                      onChange={(next) => setJobForm({ ...jobForm, skills: next })}
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label htmlFor="job-location-type" className="block text-sm font-medium text-slate-200">
-                        Location Type
-                      </label>
-                      <select
-                        id="job-location-type"
-                        value={jobForm.locationType}
-                        onChange={(e) => setJobForm({ ...jobForm, locationType: e.target.value })}
-                        className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
-                      >
-                        <option value="">Select location type</option>
-                        <option value="On-site">On-site</option>
-                        <option value="Hybrid">Hybrid</option>
-                        <option value="Remote">Remote</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label htmlFor="job-employment-type" className="block text-sm font-medium text-slate-200">
-                        Employment Type
-                      </label>
-                      <select
-                        id="job-employment-type"
-                        value={jobForm.employmentType}
-                        onChange={(e) => setJobForm({ ...jobForm, employmentType: e.target.value })}
-                        className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
-                      >
-                        <option value="">Select employment type</option>
-                        <option value="Full-time">Full-time</option>
-                        <option value="Part-time">Part-time</option>
-                        <option value="Contract">Contract</option>
-                        <option value="Internship">Internship</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div>
-                    <label htmlFor="job-salary" className="block text-sm font-medium text-slate-200">
-                      Salary
-                    </label>
-                    <input
-                      id="job-salary"
-                      value={jobForm.salary}
-                      inputMode="numeric"
-                      onChange={(e) => setJobForm({ ...jobForm, salary: formatPesoSalary(e.target.value) })}
-                      className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
-                      placeholder="e.g. \u20B125,000"
-                    />
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <label htmlFor="job-slots" className="block text-sm font-medium text-slate-200">
-                      Available slots
-                      <input
-                        id="job-slots"
-                        type="number"
-                        min="1"
-                        max="10000"
-                        value={jobForm.slots}
-                        onChange={(event) => setJobForm({ ...jobForm, slots: event.target.value })}
-                        className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
-                        placeholder="Optional"
-                      />
-                    </label>
-                    <label htmlFor="job-deadline" className="block text-sm font-medium text-slate-200">
-                      Application deadline
-                      <input
-                        id="job-deadline"
-                        type="date"
-                        value={jobForm.deadline}
-                        onChange={(event) => setJobForm({ ...jobForm, deadline: event.target.value })}
-                        className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
-                      />
-                    </label>
-                  </div>
-                  <button
-                    type="submit"
-                    className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
-                  >
-                    Submit Job Request
-                  </button>
+                <form className="space-y-4 mt-4" noValidate onSubmit={handleCreateJob}>
+                  <JobPostingFields value={jobForm} registeredAddress={registeredJobAddress} onChange={setJobForm} categories={jobTitleGroups} suggestions={jobSkillSuggestions} errors={jobFieldErrors} setErrors={setJobFieldErrors} disabled={jobSubmitting} />
+                  {jobTitleLoadError && <p role="alert" className="text-sm text-rose-700">{jobTitleLoadError}</p>}
+                  {Object.values(jobFieldErrors).some(Boolean) && <p role="alert" className="text-sm text-rose-700">Check the highlighted fields before submitting.</p>}
+                  <button type="submit" disabled={jobSubmitting} className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-50">{jobSubmitting ? 'Submitting...' : 'Submit Job Request'}</button>
                 </form>
               </div>
                 </div>
               )}
 
-              <div className="employer-pending-panel mt-6 rounded-2xl border border-slate-800 bg-slate-950/80 p-5">
+              <div className="employer-pending-panel mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-5">
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <h3 className="text-lg font-semibold text-white">My Job Requests</h3>
+                  <h3 className="text-lg font-semibold text-slate-900">My Job Requests</h3>
                   <div className="flex flex-wrap gap-2">
                     {[
                       { id: 'all', label: 'All', activeClass: 'bg-slate-200 text-slate-950', count: myJobs.length },
                       { id: 'pending', label: 'Pending', activeClass: 'bg-yellow-400 text-slate-950', count: employerPendingJobs.length },
-                      { id: 'approved', label: 'Approved', activeClass: 'bg-green-500 text-white', count: employerApprovedJobs.length },
-                      { id: 'declined', label: 'Declined', activeClass: 'bg-red-500 text-white', count: employerDeclinedJobs.length },
+                      { id: 'approved', label: 'Approved', activeClass: 'bg-green-500 text-slate-900', count: employerApprovedJobs.length },
+                      { id: 'declined', label: 'Declined', activeClass: 'bg-red-500 text-slate-900', count: employerDeclinedJobs.length },
                     ].map((filter) => (
                       <button
                         key={filter.id}
@@ -4044,7 +3068,7 @@ const [authView, setAuthView] = useState("login")
                         className={`rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.15em] transition ${
                           employerJobStatusFilter === filter.id
                             ? filter.activeClass
-                            : 'border border-slate-600 bg-slate-900 text-slate-300 hover:border-slate-400'
+                            : 'border border-slate-600 bg-white text-slate-700 hover:border-slate-400'
                         }`}
                       >
                         {filter.label} ({filter.count})
@@ -4053,7 +3077,7 @@ const [authView, setAuthView] = useState("login")
                   </div>
                 </div>
                 {filteredMyJobs.length === 0 ? (
-                  <p className="mt-3 text-slate-400">{myJobs.length === 0 ? 'No job requests submitted yet.' : `No ${employerJobStatusFilter} job requests.`}</p>
+                  <p className="mt-3 text-slate-600">{myJobs.length === 0 ? 'No job requests submitted yet.' : `No ${employerJobStatusFilter} job requests.`}</p>
                 ) : (
                   <>
                     <div className="mt-3">
@@ -4067,17 +3091,29 @@ const [authView, setAuthView] = useState("login")
                     </div>
                     <div className="mt-4 space-y-4">
                       {myJobsPagination.paginate(sortedMyJobs).map((job) => (
-                        <div key={job._id} className="employer-pending-item rounded-2xl border border-slate-700 bg-slate-900 p-4">
+                        <div key={job._id}
+                          role={job.status === 'pending' ? 'button' : undefined}
+                          tabIndex={job.status === 'pending' ? 0 : undefined}
+                          aria-label={job.status === 'pending' ? `Edit ${job.title}` : undefined}
+                          onClick={job.status === 'pending' ? () => openEditJob(job, true) : undefined}
+                          onKeyDown={job.status === 'pending' ? (event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault()
+                              openEditJob(job, true)
+                            }
+                          } : undefined}
+                          className={`employer-pending-item rounded-2xl border border-slate-200 bg-white p-4 ${job.status === 'pending' ? 'cursor-pointer transition hover:border-cyan-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-500' : ''}`}>
                           <div className="flex items-center justify-between gap-4">
                             <div>
-                              <p className="text-lg font-semibold text-white">{job.title}</p>
-                              <p className="text-sm text-slate-400">{job.company} \u2022 {job.location || 'Remote'}</p>
+                              <p className="text-lg font-semibold text-slate-900">{job.title}</p>
+                              <p className="text-sm text-slate-600">{job.company} \u2022 {job.location || 'Remote'}</p>
                             </div>
                             <span className={`rounded-full px-3 py-1 text-xs uppercase tracking-[0.2em] ${job.status === 'approved' ? 'bg-cyan-500 text-slate-950' : job.status === 'declined' ? 'bg-rose-400 text-slate-950' : 'bg-amber-400 text-slate-950'}`}>
                               {job.status || 'pending'}
                             </span>
                           </div>
-                          <p className="mt-3 text-sm text-slate-300">{job.description}</p>
+                          <p className="mt-3 text-sm text-slate-700">{job.description}</p>
+                          {job.status === 'pending' && <p className="mt-2 text-xs font-medium text-cyan-700">Click to edit this pending request</p>}
                           {job.status === 'declined' && (
                             <p className="mt-2 text-sm text-rose-300">Reason: {job.reviewReason || 'No reason provided.'}</p>
                           )}
@@ -4098,7 +3134,7 @@ const [authView, setAuthView] = useState("login")
               </div>
 
               {(employerPendingJobs.length > 0 || employerApprovedJobs.length > 0 || employerDeclinedJobs.length > 0) && (
-                <p className="mt-4 text-xs uppercase tracking-[0.2em] text-slate-400">
+                <p className="mt-4 text-xs uppercase tracking-[0.2em] text-slate-600">
                   Pending: {employerPendingJobs.length} \u2022 Approved: {employerApprovedJobs.length} \u2022 Declined: {employerDeclinedJobs.length}
                 </p>
               )}
@@ -4289,14 +3325,15 @@ const [authView, setAuthView] = useState("login")
 
           {editingJob && (
             <div
-              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4"
+              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-200/70 p-4"
               role="dialog"
               aria-modal="true"
               aria-labelledby="edit-job-title"
               onClick={() => setEditingJob(null)}
             >
               <form
-                className="w-full max-w-2xl rounded-2xl border border-slate-300 bg-white p-6 shadow-2xl"
+                className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-slate-300 bg-white p-6 shadow-2xl"
+                noValidate
                 onSubmit={handleSaveEditedJob}
                 onClick={(event) => event.stopPropagation()}
               >
@@ -4314,131 +3351,16 @@ const [authView, setAuthView] = useState("login")
                   </button>
                 </div>
 
-                <div className="mt-5">
-                  <JobTitlePicker
-                    id="edit-job-title-input"
-                    categories={jobTitleGroups}
-                    title={editingJobForm.title}
-                    customTitle={editingJobForm.customTitle}
-                    disabled={!editingJobCanSave}
-                    onChange={(value) => setEditingJobForm({ ...editingJobForm, ...value })}
-                  />
-                </div>
-
-                <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                  {[
-                    ['edit-job-company', 'Company', 'company'],
-                    ['edit-job-location', 'Location', 'location'],
-                    ['edit-job-salary', 'Salary', 'salary'],
-                  ].map(([id, label, field]) => (
-                    <label key={id} htmlFor={id} className="text-sm font-medium text-black">
-                      {label}
-                      <input
-                        id={id}
-                        value={editingJobForm[field]}
-                        disabled={!editingJobCanSave}
-                        inputMode={field === 'salary' ? 'numeric' : undefined}
-                        onChange={(event) => setEditingJobForm({ ...editingJobForm, [field]: field === 'salary' ? formatPesoSalary(event.target.value) : event.target.value })}
-                        className="mt-2 w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-black"
-                      />
-                    </label>
-                  ))}
-                  <label htmlFor="edit-job-slots" className="text-sm font-medium text-black">
-                    Available slots
-                    <input
-                      id="edit-job-slots"
-                      type="number"
-                      min="1"
-                      max="10000"
-                      value={editingJobForm.slots}
-                      disabled={!editingJobCanSave}
-                      onChange={(event) => setEditingJobForm({ ...editingJobForm, slots: event.target.value })}
-                      className="mt-2 w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-black"
-                    />
-                  </label>
-                  <label htmlFor="edit-job-deadline" className="text-sm font-medium text-black">
-                    Application deadline
-                    <input
-                      id="edit-job-deadline"
-                      type="date"
-                      value={editingJobForm.deadline}
-                      disabled={!editingJobCanSave}
-                      onChange={(event) => setEditingJobForm({ ...editingJobForm, deadline: event.target.value })}
-                      className="mt-2 w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-black"
-                    />
-                  </label>
-                  <label htmlFor="edit-job-location-type" className="text-sm font-medium text-black">
-                    Location Type
-                    <select
-                      id="edit-job-location-type"
-                      value={editingJobForm.locationType}
-                      disabled={!editingJobCanSave}
-                      onChange={(event) => setEditingJobForm({ ...editingJobForm, locationType: event.target.value })}
-                      className="mt-2 w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-black"
-                    >
-                      <option value="">Select location type</option>
-                      <option value="On-site">On-site</option>
-                      <option value="Hybrid">Hybrid</option>
-                      <option value="Remote">Remote</option>
-                    </select>
-                  </label>
-                  <label htmlFor="edit-job-employment-type" className="text-sm font-medium text-black">
-                    Employment Type
-                    <select
-                      id="edit-job-employment-type"
-                      value={editingJobForm.employmentType}
-                      disabled={!editingJobCanSave}
-                      onChange={(event) => setEditingJobForm({ ...editingJobForm, employmentType: event.target.value })}
-                      className="mt-2 w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-black"
-                    >
-                      <option value="">Select employment type</option>
-                      <option value="Full-time">Full-time</option>
-                      <option value="Part-time">Part-time</option>
-                      <option value="Contract">Contract</option>
-                      <option value="Internship">Internship</option>
-                    </select>
-                  </label>
-                  <label htmlFor="edit-job-description" className="text-sm font-medium text-black sm:col-span-2">
-                    Description
-                    <textarea
-                      id="edit-job-description"
-                      rows="3"
-                      value={editingJobForm.description}
-                      disabled={!editingJobCanSave}
-                      onChange={(event) => setEditingJobForm({ ...editingJobForm, description: event.target.value })}
-                      className="mt-2 w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-black"
-                    />
-                  </label>
-                  <label htmlFor="edit-job-requirements" className="text-sm font-medium text-black sm:col-span-2">
-                    Requirements
-                    <textarea
-                      id="edit-job-requirements"
-                      rows="2"
-                      value={editingJobForm.requirements}
-                      disabled={!editingJobCanSave}
-                      onChange={(event) => setEditingJobForm({ ...editingJobForm, requirements: event.target.value })}
-                      className="mt-2 w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-black"
-                    />
-                  </label>
-                </div>
-
-                <fieldset className="mt-4">
-                  <legend className="text-sm font-medium text-black">Skills</legend>
-                  <SkillTagPicker
-                    theme="light"
-                    selected={editingJobForm.skills}
-                    disabled={!editingJobCanSave}
-                    onChange={(next) => setEditingJobForm({ ...editingJobForm, skills: next })}
-                  />
-                </fieldset>
+                <JobPostingFields id="edit-job" value={editingJobForm} registeredAddress={registeredJobAddress} onChange={setEditingJobForm} categories={jobTitleGroups} suggestions={jobSkillSuggestions} errors={editJobFieldErrors} setErrors={setEditJobFieldErrors} disabled={!editingJobCanSave || jobSubmitting} keepDeadline={editingJob.deadline ? new Date(editingJob.deadline).toISOString().slice(0, 10) : ''} />
 
                 {editingJobCanSave && (
                   <div className="mt-5 flex justify-end gap-2">
                     <button
                       type="submit"
+                      disabled={jobSubmitting}
                       className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
                     >
-                      Save Changes
+                      {jobSubmitting ? 'Saving...' : 'Save Changes'}
                     </button>
                   </div>
                 )}
@@ -4470,7 +3392,7 @@ const [authView, setAuthView] = useState("login")
               onClick={() => setSelectedNotification(null)}
             >
               <div
-                className="w-full max-w-2xl rounded-2xl border border-slate-300 bg-white p-6 shadow-2xl"
+                className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-slate-300 bg-white p-6 shadow-2xl"
                 onClick={(event) => event.stopPropagation()}
               >
                 <div className="flex items-start justify-between gap-4">

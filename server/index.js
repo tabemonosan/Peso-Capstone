@@ -1,3 +1,4 @@
+import { matchLocation, getEmployerAddress } from '../shared/phLocations.js'
 import 'dotenv/config'
 import express from 'express'
 import mongoose from 'mongoose'
@@ -33,6 +34,7 @@ import {
 } from '../shared/nsrpValidation.js'
 import { NSRP_SKILL_LABELS, normalizeSkillLabel } from '../shared/nsrpSkills.js'
 import { NSRP_ROW_LIMITS } from '../shared/nsrpTableLimits.js'
+import { LOCATION_TYPES, EMPLOYMENT_TYPES, LEGACY_EMPLOYMENT_TYPES, PAY_FREQUENCIES, EDUCATION_LEVELS as JOB_EDUCATION_LEVELS, EXPERIENCE_LEVELS, JOB_LIMITS, validateJobPosting, formatSalary, formatLocation, normalizeJobPosting } from '../shared/jobPosting.js'
 import { registrationProgress } from './utils/registration.js'
 import { validateReviewTransition } from './utils/docReview.js'
 import { storeDocumentFile, loadDocumentFile, deleteApplicantDocumentFiles } from './utils/documentFiles.js'
@@ -42,8 +44,8 @@ import { redactPath, redactString } from './utils/redact.js'
 import { VERIFICATION_DOC_KEYS, REQUIRED_DOC_KEYS, VERIFICATION_DOC_LABELS } from '../shared/verificationDocs.js'
 import { baseApprovedJobFilter, buildJobFilter, countJobFacets } from './utils/jobFilters.js'
 
-const LOCATION_TYPE_OPTIONS = ['On-site', 'Remote', 'Hybrid']
-const EMPLOYMENT_TYPE_OPTIONS = ['Full-time', 'Part-time', 'Contract', 'Temporary', 'Internship']
+const LOCATION_TYPE_OPTIONS = LOCATION_TYPES
+const EMPLOYMENT_TYPE_OPTIONS = EMPLOYMENT_TYPES
 import { parsePagination, paginateQuery, escapeRegex } from './utils/paginate.js'
 import { resolveSort } from './utils/sort.js'
 
@@ -85,11 +87,25 @@ const EMPLOYER_REQUEST_SORTS = {
   status: { fields: () => ({}), statusRank: { field: 'status', values: STATUS_PRIORITY }, defaultOrder: 1 },
 }
 
+// Salary sorting uses the structured minimum, with a numeric legacy fallback.
+const jobSalarySortAmount = {
+  $cond: [{ $eq: ['$negotiable', true] }, null, {
+    $ifNull: ['$salaryMin', { $convert: {
+      input: { $replaceAll: { input: { $replaceAll: { input: { $ifNull: ['$salary', ''] }, find: '\u20b1', replacement: '' } }, find: ',', replacement: '' } },
+      to: 'double', onError: null, onNull: null,
+    } }],
+  }],
+}
+
 const JOB_SORTS = {
   createdAt: { fields: (d) => ({ createdAt: d }), defaultOrder: -1 },
   title: { fields: (d) => ({ title: d }), collation: true, defaultOrder: 1 },
   company: { fields: (d) => ({ company: d }), collation: true, defaultOrder: 1 },
-  salary: { fields: (d) => ({ salary: d }), numeric: ['salary'], defaultOrder: -1 },
+  salary: {
+    fields: (d) => ({ __sortSalaryEmpty: 1, __sortSalaryAmount: d }),
+    computed: { __sortSalaryAmount: jobSalarySortAmount, __sortSalaryEmpty: { $eq: [jobSalarySortAmount, null] } },
+    defaultOrder: -1,
+  },
   deadline: { fields: (d) => ({ deadline: d }), nullsLast: ['deadline'], defaultOrder: 1 },
   status: { fields: () => ({}), statusRank: { field: 'status', values: STATUS_PRIORITY }, defaultOrder: 1 },
 }
@@ -97,7 +113,7 @@ const JOB_SORTS = {
 const app = express()
 const PORT = process.env.PORT || 4000
 
-app.use(cors({ origin: 'http://localhost:5173', exposedHeaders: ['X-NSRP-Layout-Warnings'] }))
+app.use(cors({ origin: 'http://localhost:5173', exposedHeaders: ['X-NSRP-Layout-Warnings', 'Content-Disposition'] }))
 // The unauthenticated sign-up preview gets a tighter body cap than the global
 // parser so oversized payloads are rejected before any processing. This must be
 // mounted before the global parser to take effect (a parsed body is not re-read).
@@ -152,11 +168,24 @@ const jobSchema = new Schema({
   location: String,
   description: String,
   requirements: String,
+  // Display string kept in sync with the structured salary fields; older postings only have this.
   salary: String,
-  slots: { type: Number, min: 1 },
+  // Keep historical bounds on stored documents so reviewing old jobs still works.
+  // New/edited requests enforce the stricter current bounds in validateJobPosting.
+  salaryMin: { type: Number, min: 0, max: 10000000 },
+  salaryMax: { type: Number, min: 0, max: 10000000 },
+  payFrequency: { type: String, enum: ['', ...PAY_FREQUENCIES], default: '' },
+  negotiable: { type: Boolean, default: false },
+  slots: { type: Number, min: 1, max: 10000, validate: Number.isInteger },
   deadline: Date,
-  locationType: { type: String, enum: ['', 'On-site', 'Hybrid', 'Remote'], default: '' },
-  employmentType: { type: String, enum: ['', 'Full-time', 'Part-time', 'Contract', 'Temporary', 'Internship'], default: '' },
+  locationType: { type: String, enum: ['', ...LOCATION_TYPES], default: '' },
+  city: { type: String, trim: true, maxlength: JOB_LIMITS.placeMax },
+  province: { type: String, trim: true, maxlength: JOB_LIMITS.placeMax },
+  // Legacy values remain valid on save; normalizeJobPosting maps them on read.
+  employmentType: { type: String, enum: ['', ...EMPLOYMENT_TYPES, ...Object.keys(LEGACY_EMPLOYMENT_TYPES)], default: '' },
+  education: { type: String, enum: ['', ...JOB_EDUCATION_LEVELS], default: '' },
+  experience: { type: String, enum: ['', ...EXPERIENCE_LEVELS], default: '' },
+  notesToAdmin: { type: String, maxlength: JOB_LIMITS.notesMax },
   skills: [String],
   status: { type: String, enum: ['pending', 'approved', 'declined'], default: 'pending' },
   reviewReason: String,
@@ -177,6 +206,7 @@ jobSchema.index({ createdBy: 1, createdAt: -1, _id: 1 })
 jobSchema.index({ 'applicants.email': 1, createdAt: -1 })
 jobSchema.index({ status: 1, deadline: 1 })
 jobSchema.index({ status: 1, location: 1 })
+jobSchema.index({ status: 1, city: 1, province: 1 })
 jobSchema.index({ status: 1, locationType: 1 })
 jobSchema.index({ status: 1, employmentType: 1 })
 const JobPosting = mongoose.model('JobPosting', jobSchema)
@@ -366,6 +396,36 @@ function authenticateRequest(req) {
   } catch {
     return null
   }
+}
+
+function nsrpDownloadName(companyName) {
+  const safe = String(companyName || 'employer').replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 80)
+  return `NSRP-${safe || 'employer'}.pdf`
+}
+
+// Lean queries return BSON Binary for Buffer fields; normalise before sending or the body becomes JSON.
+function sendEmployerNsrpDocument(res, request, disposition) {
+  const file = request?.requirementsFile
+  let buffer = null
+  const raw = file?.data
+  if (raw) {
+    buffer = Buffer.isBuffer(raw) ? raw : Buffer.from(raw.buffer || raw)
+  } else if (file?.path && fs.existsSync(file.path)) {
+    buffer = fs.readFileSync(file.path)
+  }
+  if (!buffer) return res.status(404).json({ error: 'NSRP document not found' })
+  if (!buffer.length || buffer.subarray(0, 5).toString('latin1') !== '%PDF-') {
+    console.warn('NSRP document is not a valid PDF', { requestId: String(request._id), bytes: buffer.length })
+    return res.status(422).json({ error: 'This document is unavailable or corrupted' })
+  }
+  res.set({
+    'Content-Type': 'application/pdf',
+    'Content-Disposition': `${disposition}; filename="${nsrpDownloadName(request.companyName)}"`,
+    'Content-Length': String(buffer.length),
+    'Cache-Control': 'private, no-store',
+    'X-Content-Type-Options': 'nosniff',
+  })
+  return res.send(buffer)
 }
 
 // Signed, expiring URL so admins (and the owner) can view a doc without a public URL
@@ -1087,6 +1147,15 @@ app.post('/api/auth/resend-verification', async (req, res) => {
   }
 })
 
+async function hydrateEmployerAddress(employer, request) {
+  const address = getEmployerAddress(employer, request)
+  if (!address.city) return
+  if (employer.establishmentAddress?.city !== address.city || employer.establishmentAddress?.province !== address.province) {
+    await Employer.updateOne({ _id: employer._id }, { $set: { establishmentAddress: address } })
+  }
+  employer.establishmentAddress = address
+}
+
 app.post('/api/login', async (req, res) => {
   try {
     const { email, password } = req.body
@@ -1103,8 +1172,9 @@ app.post('/api/login', async (req, res) => {
     if (type === 'Applicant') user = await loadApplicantWithCurrentResume(user.email)
     if (user.verificationStatus === 'restricted') return res.status(403).json({ error: 'Your account has been restricted. Please contact PESO support.' })
 
+    if (type === 'Employer') await hydrateEmployerAddress(user, requirements)
     const registration = ['Applicant', 'Employer'].includes(type) ? registrationProgress(user, type, { requirementsFile: requirements?.requirementsFile, requestLocation: requirements?.location }) : undefined
-    const safe = { id: String(user._id), email: user.email, role: type, emailVerified: ['Applicant', 'Employer'].includes(type) ? Boolean(user.emailVerified) : undefined, needsNameConfirmation: type === 'Applicant' ? Boolean(user.needsNameConfirmation) : undefined, registration, verificationDocuments: type === 'Applicant' ? summarizeVerificationDocuments(user) : undefined, attentionCount: type === 'Applicant' ? attentionCount(user) : undefined, companyName: type === 'Employer' ? (user.companyName || requirements?.companyName) : undefined, contactName: type === 'Employer' ? (user.contactName || requirements?.contactName) : undefined, phone: type === 'Employer' ? (user.phone || requirements?.phone) : undefined, profile: user.profile, verificationStatus: type === 'Employer' ? employerVerification.status : type === 'Applicant' ? (user.verificationStatus || 'approved') : undefined, verificationReason: type === 'Employer' ? employerVerification.reason : type === 'Applicant' ? user.verificationReason : undefined, approvalNoticePending: type === 'Employer' ? Boolean(user.approvalNoticePending) : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size, status: requirements.requirementsFile.status, sourceType: requirements.requirementsFile.sourceType, version: requirements.requirementsFile.version } : undefined, requirementsSubmittedAt: type === 'Employer' ? (requirements?.requirementsSubmittedAt || user.requirementsSubmittedAt) : undefined, nsrpVerificationFile: type === 'Applicant' && user.nsrpVerificationFile?.originalName ? { originalName: user.nsrpVerificationFile.originalName, size: user.nsrpVerificationFile.size, uploadedAt: user.nsrpVerificationFile.uploadedAt } : undefined }
+    const safe = { id: String(user._id), email: user.email, role: type, emailVerified: ['Applicant', 'Employer'].includes(type) ? Boolean(user.emailVerified) : undefined, needsNameConfirmation: type === 'Applicant' ? Boolean(user.needsNameConfirmation) : undefined, registration, verificationDocuments: type === 'Applicant' ? summarizeVerificationDocuments(user) : undefined, attentionCount: type === 'Applicant' ? attentionCount(user) : undefined, establishmentAddress: type === 'Employer' ? user.establishmentAddress : undefined, companyName: type === 'Employer' ? (user.companyName || requirements?.companyName) : undefined, contactName: type === 'Employer' ? (user.contactName || requirements?.contactName) : undefined, phone: type === 'Employer' ? (user.phone || requirements?.phone) : undefined, profile: user.profile, verificationStatus: type === 'Employer' ? employerVerification.status : type === 'Applicant' ? (user.verificationStatus || 'approved') : undefined, verificationReason: type === 'Employer' ? employerVerification.reason : type === 'Applicant' ? user.verificationReason : undefined, approvalNoticePending: type === 'Employer' ? Boolean(user.approvalNoticePending) : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size, status: requirements.requirementsFile.status, sourceType: requirements.requirementsFile.sourceType, version: requirements.requirementsFile.version } : undefined, requirementsSubmittedAt: type === 'Employer' ? (requirements?.requirementsSubmittedAt || user.requirementsSubmittedAt) : undefined, nsrpVerificationFile: type === 'Applicant' && user.nsrpVerificationFile?.originalName ? { originalName: user.nsrpVerificationFile.originalName, size: user.nsrpVerificationFile.size, uploadedAt: user.nsrpVerificationFile.uploadedAt } : undefined }
     const token = jwt.sign({ email: user.email, role: type }, jwtSecret, { expiresIn: '7d' })
     res.json({ user: safe, token })
   } catch (err) {
@@ -1125,9 +1195,10 @@ app.get('/api/profile', async (req, res) => {
     let { user, type } = found
     if (type === 'Applicant') user = await loadApplicantWithCurrentResume(user.email)
     const requirements = type === 'Employer' ? await EmployerRequest.findOne({ email: user.email }).select('+requirementsFile.data').lean() : null
+    if (type === 'Employer') await hydrateEmployerAddress(user, requirements)
     const employerVerification = type === 'Employer' ? await loadEmployerVerification(user.email) : null
     const registration = ['Applicant', 'Employer'].includes(type) ? registrationProgress(user, type, { requirementsFile: requirements?.requirementsFile, requestLocation: requirements?.location }) : undefined
-    res.json({ id: String(user._id), email: user.email, role: type, emailVerified: ['Applicant', 'Employer'].includes(type) ? Boolean(user.emailVerified) : undefined, needsNameConfirmation: type === 'Applicant' ? Boolean(user.needsNameConfirmation) : undefined, registration, companyName: type === 'Employer' ? (user.companyName || requirements?.companyName) : undefined, contactName: type === 'Employer' ? (user.contactName || requirements?.contactName) : undefined, phone: type === 'Employer' ? (user.phone || requirements?.phone) : undefined, profile: user.profile, verificationStatus: type === 'Employer' ? employerVerification.status : type === 'Applicant' ? (user.verificationStatus || 'approved') : undefined, verificationReason: type === 'Employer' ? employerVerification.reason : type === 'Applicant' ? user.verificationReason : undefined, approvalNoticePending: type === 'Employer' ? Boolean(user.approvalNoticePending) : undefined, verificationDocuments: type === 'Applicant' ? summarizeVerificationDocuments(user) : undefined, attentionCount: type === 'Applicant' ? attentionCount(user) : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size, status: requirements.requirementsFile.status, sourceType: requirements.requirementsFile.sourceType, version: requirements.requirementsFile.version } : undefined, requirementsSubmittedAt: type === 'Employer' ? (requirements?.requirementsSubmittedAt || user.requirementsSubmittedAt) : undefined, nsrpVerificationFile: type === 'Applicant' && user.nsrpVerificationFile?.originalName ? { originalName: user.nsrpVerificationFile.originalName, size: user.nsrpVerificationFile.size, uploadedAt: user.nsrpVerificationFile.uploadedAt } : undefined })
+    res.json({ id: String(user._id), email: user.email, role: type, emailVerified: ['Applicant', 'Employer'].includes(type) ? Boolean(user.emailVerified) : undefined, needsNameConfirmation: type === 'Applicant' ? Boolean(user.needsNameConfirmation) : undefined, registration, establishmentAddress: type === 'Employer' ? user.establishmentAddress : undefined, companyName: type === 'Employer' ? (user.companyName || requirements?.companyName) : undefined, contactName: type === 'Employer' ? (user.contactName || requirements?.contactName) : undefined, phone: type === 'Employer' ? (user.phone || requirements?.phone) : undefined, profile: user.profile, verificationStatus: type === 'Employer' ? employerVerification.status : type === 'Applicant' ? (user.verificationStatus || 'approved') : undefined, verificationReason: type === 'Employer' ? employerVerification.reason : type === 'Applicant' ? user.verificationReason : undefined, approvalNoticePending: type === 'Employer' ? Boolean(user.approvalNoticePending) : undefined, verificationDocuments: type === 'Applicant' ? summarizeVerificationDocuments(user) : undefined, attentionCount: type === 'Applicant' ? attentionCount(user) : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size, status: requirements.requirementsFile.status, sourceType: requirements.requirementsFile.sourceType, version: requirements.requirementsFile.version } : undefined, requirementsSubmittedAt: type === 'Employer' ? (requirements?.requirementsSubmittedAt || user.requirementsSubmittedAt) : undefined, nsrpVerificationFile: type === 'Applicant' && user.nsrpVerificationFile?.originalName ? { originalName: user.nsrpVerificationFile.originalName, size: user.nsrpVerificationFile.size, uploadedAt: user.nsrpVerificationFile.uploadedAt } : undefined })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Server error' })
@@ -1670,6 +1741,22 @@ async function resolveJobTitle(title, customTitle) {
   return catalogTitle?.name || requestedTitle
 }
 
+const JOB_FIELD_ERRORS_MESSAGE = 'Check the highlighted job posting fields.'
+
+async function prepareJobPosting(input, options = {}) {
+  const { errors, value } = validateJobPosting(input, options)
+  if (Object.keys(errors).length) return { errors }
+  const title = await resolveJobTitle(value.title, value.customTitle)
+  if (!title) return { errors: { title: 'Select or enter a valid job title.' } }
+  const { customTitle: _customTitle, ...fields } = value
+  fields.title = title
+  fields.salary = formatSalary(fields)
+  fields.location = formatLocation(fields)
+  // Accept applications through the end of the selected Philippine calendar day.
+  fields.deadline = value.deadline ? new Date(`${value.deadline}T23:59:59.999+08:00`) : undefined
+  return { errors, fields }
+}
+
 app.get('/api/job-titles', async (_req, res) => {
   try {
     const titles = await JobTitle.find().sort({ category: 1, name: 1 }).lean()
@@ -1727,19 +1814,14 @@ app.post('/api/jobs', requireVerifiedEmail, requireApprovedEmployer, async (req,
     if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
     const token = auth.split(' ')[1]
     const decoded = jwt.verify(token, jwtSecret)
-    const { title, customTitle, company, location, description, requirements, salary, skills, locationType, employmentType, slots, deadline } = req.body || {}
+    const body = req.body || {}
     const employer = await Employer.findOne({ email: decoded.email }).lean()
     const request = await EmployerRequest.findOne({ email: decoded.email }).lean()
-    const resolvedCompany = company || employer?.companyName || employer?.profile?.companyName || request?.companyName || ''
-    const resolvedLocation = location || employer?.profile?.location || request?.location || ''
-    const resolvedTitle = await resolveJobTitle(title, customTitle)
-    if (!resolvedTitle || !resolvedCompany || !description) return res.status(400).json({ error: 'A valid job title, company, and description are required. Custom titles must be 80 characters or fewer.' })
-    if (!Array.isArray(skills) || skills.length === 0) return res.status(400).json({ error: 'Select at least one skill' })
-    const normalizedSlots = slots === '' || slots === undefined || slots === null ? undefined : Number(slots)
-    if (normalizedSlots !== undefined && (!Number.isInteger(normalizedSlots) || normalizedSlots < 1 || normalizedSlots > 10000)) return res.status(400).json({ error: 'Slots must be a whole number between 1 and 10,000' })
-    if (deadline && (!/^\d{4}-\d{2}-\d{2}$/.test(deadline) || Number.isNaN(Date.parse(`${deadline}T00:00:00.000Z`)) || new Date(`${deadline}T00:00:00.000Z`).toISOString().slice(0, 10) !== deadline)) return res.status(400).json({ error: 'Enter a valid application deadline' })
-    const normalizedSkills = skills.filter((skill) => typeof skill === 'string').map((skill) => skill.trim()).filter(Boolean)
-    const job = new JobPosting({ title: resolvedTitle, company: resolvedCompany, location: resolvedLocation, description, requirements, salary, slots: normalizedSlots, deadline: deadline ? new Date(`${deadline}T00:00:00.000Z`) : undefined, skills: normalizedSkills, locationType: locationType || '', employmentType: employmentType || '', createdBy: decoded.email })
+    const resolvedCompany = body.company || employer?.companyName || employer?.profile?.companyName || request?.companyName || ''
+    const { errors, fields } = await prepareJobPosting(body)
+    if (!resolvedCompany) return res.status(400).json({ error: 'A company name is required.' })
+    if (Object.keys(errors).length) return res.status(422).json({ error: JOB_FIELD_ERRORS_MESSAGE, fieldErrors: errors })
+    const job = new JobPosting({ ...fields, company: resolvedCompany, createdBy: decoded.email })
     await job.save()
 
     await notifyAdmins({
@@ -1764,30 +1846,20 @@ app.put('/api/jobs/:id', requireVerifiedEmail, requireApprovedEmployer, async (r
     const token = auth.split(' ')[1]
     const decoded = jwt.verify(token, jwtSecret)
 
-    const { title, customTitle, company, location, description, requirements, salary, skills, locationType, employmentType, slots, deadline } = req.body || {}
-    const resolvedTitle = await resolveJobTitle(title, customTitle)
-    if (!resolvedTitle || !company || !description) return res.status(400).json({ error: 'A valid job title, company, and description are required. Custom titles must be 80 characters or fewer.' })
-    if (!Array.isArray(skills) || skills.length === 0) return res.status(400).json({ error: 'Select at least one skill' })
-    const normalizedSlots = slots === '' || slots === undefined || slots === null ? undefined : Number(slots)
-    if (normalizedSlots !== undefined && (!Number.isInteger(normalizedSlots) || normalizedSlots < 1 || normalizedSlots > 10000)) return res.status(400).json({ error: 'Slots must be a whole number between 1 and 10,000' })
-    if (deadline && (!/^\d{4}-\d{2}-\d{2}$/.test(deadline) || Number.isNaN(Date.parse(`${deadline}T00:00:00.000Z`)) || new Date(`${deadline}T00:00:00.000Z`).toISOString().slice(0, 10) !== deadline)) return res.status(400).json({ error: 'Enter a valid application deadline' })
+    const body = req.body || {}
+    const { company } = body
+    if (!company) return res.status(400).json({ error: 'A company name is required.' })
 
     const job = await JobPosting.findById(req.params.id)
     if (!job) return res.status(404).json({ error: 'Job not found' })
     if (job.createdBy !== decoded.email) return res.status(403).json({ error: 'Forbidden' })
     if (job.status !== 'pending') return res.status(400).json({ error: 'Only pending job postings can be edited' })
 
-    job.title = resolvedTitle
-    job.company = company
-    job.location = location || ''
-    job.description = description
-    job.requirements = requirements || ''
-    job.salary = salary || ''
-    job.slots = normalizedSlots
-    job.deadline = deadline ? new Date(`${deadline}T00:00:00.000Z`) : undefined
-    job.locationType = locationType || ''
-    job.employmentType = employmentType || ''
-    job.skills = skills.filter((skill) => typeof skill === 'string').map((skill) => skill.trim()).filter(Boolean)
+    const keepDeadline = job.deadline ? new Date(job.deadline).toISOString().slice(0, 10) : ''
+    const { errors, fields } = await prepareJobPosting(body, { keepDeadline })
+    if (Object.keys(errors).length) return res.status(422).json({ error: JOB_FIELD_ERRORS_MESSAGE, fieldErrors: errors })
+
+    job.set({ ...fields, company })
     await job.save()
 
     res.json(job)
@@ -1799,11 +1871,17 @@ app.put('/api/jobs/:id', requireVerifiedEmail, requireApprovedEmployer, async (r
 
 app.get('/api/jobs', requireVerifiedEmail, requireApprovedEmployer, async (req, res) => {
   try {
+    const viewer = authenticateRequest(req)
+    const present = (doc) => {
+      const job = normalizeJobPosting(typeof doc.toObject === 'function' ? doc.toObject() : doc)
+      if (viewer?.role !== 'Admin' && viewer?.email !== job.createdBy) delete job.notesToAdmin
+      return job
+    }
     const attachEmployerBranding = async (jobDocs) => {
       const emails = [...new Set(jobDocs.map((job) => job.createdBy).filter(Boolean))]
       if (emails.length === 0) {
         return jobDocs.map((job) => {
-          const plain = typeof job.toObject === 'function' ? job.toObject() : job
+          const plain = present(job)
           return { ...plain, employerBranding: null }
         })
       }
@@ -1813,7 +1891,7 @@ app.get('/api/jobs', requireVerifiedEmail, requireApprovedEmployer, async (req, 
         bannerImage: employer.profile?.bannerImage || '',
       }]))
       return jobDocs.map((job) => {
-        const plain = typeof job.toObject === 'function' ? job.toObject() : job
+        const plain = present(job)
         return { ...plain, employerBranding: brandingByEmail.get((plain.createdBy || '').toLowerCase()) || null }
       })
     }
@@ -1954,6 +2032,7 @@ app.get('/api/jobs', requireVerifiedEmail, requireApprovedEmployer, async (req, 
       } else if (status === 'approved') {
         result.items = await attachEmployerBranding(result.items)
       }
+      result.items = result.items.map(present)
       return res.json(result)
     }
     const { status } = req.query
@@ -1972,7 +2051,7 @@ app.get('/api/jobs', requireVerifiedEmail, requireApprovedEmployer, async (req, 
       const token = auth.split(' ')[1]
       const decoded = jwt.verify(token, jwtSecret)
       const jobs = await JobPosting.find({ createdBy: decoded.email }).sort({ createdAt: -1 })
-      return res.json(jobs)
+      return res.json(jobs.map(present))
     }
     if (status === 'applied') {
       const auth = req.headers.authorization
@@ -1982,7 +2061,7 @@ app.get('/api/jobs', requireVerifiedEmail, requireApprovedEmployer, async (req, 
       if (decoded.role !== 'Applicant') return res.status(403).json({ error: 'Forbidden' })
       if (!decoded.email) return res.status(401).json({ error: 'Invalid token payload' })
       const jobs = await JobPosting.find({ applicants: { $elemMatch: { email: decoded.email } } }).sort({ createdAt: -1 })
-      return res.json(jobs)
+      return res.json(jobs.map(present))
     }
     if (status === 'declined') {
       const auth = req.headers.authorization
@@ -3270,6 +3349,13 @@ app.post('/api/employer-requests', requirementsUpload.single('requirements'), as
       fs.writeFileSync(documentPath, pdfBuffer)
     }
 
+    const establishmentAddress = mode === 'online'
+      ? matchLocation(details.cityMunicipality, details.province)
+      : matchLocation(req.body.city, req.body.province)
+    if (!establishmentAddress) return reject(422, {
+      error: 'Choose the establishment city/municipality from the location list.',
+      fieldErrors: { city: 'Choose a city/municipality from the location list.', province: 'Province must match the selected city/municipality.' },
+    })
     const passwordHash = await bcrypt.hash(password, 10)
     try {
       createdEmployer = await createUserInRole('Employer', {
@@ -3280,6 +3366,7 @@ app.post('/api/employer-requests', requirementsUpload.single('requirements'), as
         companyName: companyName.trim(),
         contactName: contactName.trim(),
         phone,
+        establishmentAddress,
         profile: { name: contactName.trim(), location: location.trim(), summary: companyName.trim() },
         verificationHistory: [{ status: EMPLOYER_VERIFICATION_STATUS.UNDER_REVIEW, by: 'system', at: new Date() }],
       })
@@ -3305,7 +3392,7 @@ app.post('/api/employer-requests', requirementsUpload.single('requirements'), as
       contactName: contactName.trim(),
       location: location.trim(),
       phone,
-      registrationDetails: details,
+      registrationDetails: { ...details, cityMunicipality: establishmentAddress.city, province: establishmentAddress.province },
       representativeName: mode === 'online' ? representativeName.trim() : '',
       consentAt: new Date(),
       status: EMPLOYER_VERIFICATION_STATUS.UNDER_REVIEW,
@@ -3540,6 +3627,7 @@ app.post('/api/employer-requirements', requirementsUpload.single('requirements')
     uploadedPath = null
     await Employer.updateOne({ email: decoded.email }, {
       $set: {
+        ...(matchLocation(updatedDetails.cityMunicipality, updatedDetails.province) ? { establishmentAddress: matchLocation(updatedDetails.cityMunicipality, updatedDetails.province) } : {}),
         verificationStatus: EMPLOYER_VERIFICATION_STATUS.UNDER_REVIEW,
         requirementsSubmittedAt: request.requirementsSubmittedAt,
         companyName,
@@ -3579,70 +3667,29 @@ app.get('/api/employer-requirements/current/view', async (req, res) => {
     const decoded = jwt.verify(token, jwtSecret)
     if (decoded.role !== 'Employer') return res.status(403).json({ error: 'Forbidden' })
     const request = await EmployerRequest.findOne({ email: decoded.email }).select('+requirementsFile.data').lean()
-    if (!request?.requirementsFile?.data && (!request?.requirementsFile?.path || !fs.existsSync(request.requirementsFile.path))) {
-      return res.status(404).json({ error: 'Requirements PDF not found' })
-    }
-    if (request.requirementsFile.data) {
-      res.type('application/pdf')
-      res.set('Content-Disposition', 'inline')
-      return res.send(request.requirementsFile.data)
-    }
-    res.type('application/pdf')
-    res.set('Content-Disposition', 'inline')
-    res.sendFile(path.resolve(request.requirementsFile.path))
+    return sendEmployerNsrpDocument(res, request, 'inline')
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Failed to view requirements' })
   }
 })
 
-app.get('/api/employer-requirements/:id/download', async (req, res) => {
-  try {
-    const auth = req.headers.authorization
-    if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
-    const token = auth.split(' ')[1]
-    const decoded = jwt.verify(token, jwtSecret)
-    if (decoded.role !== 'Admin') return res.status(403).json({ error: 'Forbidden' })
-    const request = await EmployerRequest.findById(req.params.id).select('+requirementsFile.data').lean()
-    if (!request?.requirementsFile?.data && (!request?.requirementsFile?.path || !fs.existsSync(request.requirementsFile.path))) {
-      return res.status(404).json({ error: 'Requirements PDF not found' })
+// Admin NSRP document access. The /nsrp paths are canonical; /employer-requirements/:id/* are kept for older clients.
+for (const [suffix, disposition] of [['view', 'inline'], ['download', 'attachment']]) {
+  app.get([`/api/employers/:id/nsrp/${suffix}`, `/api/employer-requirements/:id/${suffix}`], async (req, res) => {
+    try {
+      const decoded = authenticateRequest(req)
+      if (!decoded) return res.status(401).json({ error: 'Missing token' })
+      if (decoded.role !== 'Admin') return res.status(403).json({ error: 'Forbidden' })
+      if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).json({ error: 'NSRP document not found' })
+      const request = await EmployerRequest.findById(req.params.id).select('+requirementsFile.data').lean()
+      return sendEmployerNsrpDocument(res, request, disposition)
+    } catch (err) {
+      console.error(err)
+      res.status(500).json({ error: `Failed to ${suffix} NSRP document` })
     }
-    if (request.requirementsFile.data) {
-      res.type('application/pdf')
-      res.set('Content-Disposition', `attachment; filename="${request.requirementsFile.originalName || 'nsrp-registration-form.pdf'}"`)
-      return res.send(request.requirementsFile.data)
-    }
-    res.download(request.requirementsFile.path, request.requirementsFile.originalName || 'nsrp-registration-form.pdf')
-  } catch (err) {
-    console.error(err)
-    res.status(500).json({ error: 'Failed to download requirements' })
-  }
-})
-
-app.get('/api/employer-requirements/:id/view', async (req, res) => {
-  try {
-    const auth = req.headers.authorization
-    if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
-    const token = auth.split(' ')[1]
-    const decoded = jwt.verify(token, jwtSecret)
-    if (decoded.role !== 'Admin') return res.status(403).json({ error: 'Forbidden' })
-    const request = await EmployerRequest.findById(req.params.id).select('+requirementsFile.data').lean()
-    if (!request?.requirementsFile?.data && (!request?.requirementsFile?.path || !fs.existsSync(request.requirementsFile.path))) {
-      return res.status(404).json({ error: 'Requirements PDF not found' })
-    }
-    if (request.requirementsFile.data) {
-      res.type('application/pdf')
-      res.set('Content-Disposition', 'inline')
-      return res.send(request.requirementsFile.data)
-    }
-    res.type('application/pdf')
-    res.set('Content-Disposition', 'inline')
-    res.sendFile(path.resolve(request.requirementsFile.path))
-  } catch (err) {
-    console.error(err)
-    res.status(500).json({ error: 'Failed to view requirements' })
-  }
-})
+  })
+}
 
 // Admin: view an applicant's NSRP application PDF for a given job
 app.get('/api/job-applications/view', async (req, res) => {

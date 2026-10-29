@@ -1,4 +1,5 @@
-﻿import { useCallback, useEffect, useRef, useState } from "react"
+import { EMPLOYMENT_TYPES, formatSalary, formatLocation, mapEmploymentType, normalizeJobPosting } from '../../shared/jobPosting.js'
+import { useCallback, useEffect, useRef, useState } from "react"
 import { API_URL } from "../config"
 import { NSRP_SKILL_LABELS } from "../../shared/nsrpSkills.js"
 import { NSRP_ROW_LIMITS } from "../../shared/nsrpTableLimits.js"
@@ -293,7 +294,7 @@ function JobsView({
     skills: mergeFacetOptions(applicantJobsData.facets.skills, availableSkills),
     locations: applicantJobsData.facets.locations,
     locationTypes: mergeFacetOptions(applicantJobsData.facets.locationTypes, ['On-site', 'Remote', 'Hybrid']),
-    employmentTypes: mergeFacetOptions(applicantJobsData.facets.employmentTypes, ['Full-time', 'Part-time', 'Contract', 'Temporary', 'Internship']),
+    employmentTypes: mergeFacetOptions(applicantJobsData.facets.employmentTypes, EMPLOYMENT_TYPES),
   }
   const applicantMySkills = Array.isArray(currentUser?.profile?.skills) ? currentUser.profile.skills : []
   // SortControl matches options by `${sortBy}:${order}` as the option id
@@ -518,7 +519,7 @@ function JobsView({
   const [selectedApplicantsByJob, setSelectedApplicantsByJob] = useState({})
   const openReviewJob = (job) => {
     reviewOpenerRef.current = document.activeElement
-    setReviewJob(job)
+    setReviewJob(normalizeJobPosting(job))
     setReviewError('')
   }
 
@@ -831,20 +832,22 @@ function JobsView({
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 id="job-detail-title" className="text-xl font-bold">{detailJob.title}</h2>
-              <p id="job-detail-description" className="mt-1 text-sm text-slate-600">{detailJob.company} · {detailJob.location || 'Remote'}</p>
+              <p id="job-detail-description" className="mt-1 text-sm text-slate-600">{detailJob.company} · {formatLocation(detailJob) || 'Not specified'}</p>
             </div>
             <button type="button" onClick={() => setDetailJob(null)} aria-label="Close job details" className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold">Close</button>
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
-            {detailJob.employmentType && <span className="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs">{detailJob.employmentType}</span>}
+            {detailJob.employmentType && <span className="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs">{mapEmploymentType(detailJob.employmentType)}</span>}
             {detailJob.locationType && <span className="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs">{detailJob.locationType}</span>}
-            <span className="text-slate-700">💰 {detailJob.salary || 'Not specified'}</span>
+            <span className="text-slate-700">💰 {formatSalary(detailJob) || 'Not specified'}</span>
             <span className="text-slate-500">Posted {detailJob.createdAt ? new Date(detailJob.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'recently'}</span>
           </div>
           {typeof detailJob.skillMatch === 'number' && detailJob.skillTotal > 0 && (
             <p className="mt-3 text-sm font-medium text-cyan-700">{detailJob.skillMatch} of {detailJob.skillTotal} skills match yours</p>
           )}
           <p className="mt-4 whitespace-pre-wrap text-sm text-slate-700">{detailJob.description || 'No description provided.'}</p>
+          <p className="mt-3 text-sm text-slate-700">Education: {detailJob.education || 'Not Required'} &middot; Experience: {detailJob.experience || 'No Experience'}</p>
+          <p className="mt-2 text-sm text-slate-700">Slots: {detailJob.slots ?? 'Not specified'} &middot; Apply by: {detailJob.deadline ? new Date(detailJob.deadline).toLocaleDateString('en-PH', { timeZone: 'Asia/Manila' }) : 'Not specified'}</p>
           {detailJob.requirements && <p className="mt-3 whitespace-pre-wrap text-sm text-slate-700"><span className="font-semibold">Requirements: </span>{detailJob.requirements}</p>}
           {Array.isArray(detailJob.skills) && detailJob.skills.length > 0 && (
             <div className="mt-3 flex flex-wrap gap-2">
@@ -1952,10 +1955,17 @@ function JobsView({
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
               {[
                 ['Status', reviewJob.status || 'pending'],
-                ['Location', reviewJob.location || 'Not specified'],
+                ['Location', formatLocation(reviewJob) || 'Not specified'],
+                ['City/Municipality', reviewJob.city || 'Not specified'],
+                ['Province', reviewJob.province || 'Not specified'],
                 ['Location type', reviewJob.locationType || 'Not specified'],
-                ['Employment type', reviewJob.employmentType || 'Not specified'],
-                ['Salary', reviewJob.salary || 'Not specified'],
+                ['Employment type', mapEmploymentType(reviewJob.employmentType) || 'Not specified'],
+                ['Educational attainment', reviewJob.education || 'Not Required'],
+                ['Experience', reviewJob.experience || 'No Experience'],
+                ['Salary', formatSalary(reviewJob) || 'Not specified'],
+                ['Pay frequency', reviewJob.payFrequency || 'Monthly'],
+                ['Negotiable', reviewJob.negotiable ? 'Yes' : 'No'],
+                ['Required skills', (reviewJob.skills || []).join(', ') || 'Not specified'],
                 ['Slots', reviewJob.slots ?? 'Not specified'],
                 ['Application deadline', reviewJob.deadline ? new Date(reviewJob.deadline).toLocaleDateString() : 'Not specified'],
               ].map(([label, value]) => (
@@ -1972,6 +1982,7 @@ function JobsView({
                 <h3 className="text-sm font-semibold">Requirements</h3>
                 <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">{reviewJob.requirements || 'No additional requirements provided.'}</p>
               </div>
+              <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4"><h3 className="text-sm font-semibold">Notes to PESO Admin</h3><p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">{reviewJob.notesToAdmin || 'No private notes provided.'}</p></div>
               <div className="rounded-xl bg-slate-50 p-3 sm:col-span-2">
                 <h3 className="text-sm font-semibold">Employer details</h3>
                 <dl className="mt-2 grid gap-x-4 gap-y-2 text-sm sm:grid-cols-2">

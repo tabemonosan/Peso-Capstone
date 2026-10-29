@@ -2191,3 +2191,8 @@ input[type="file"]::file-selector-button {
     border-right-color: var(--border);
   }
 }
+
+/* Keep inline job errors red inside the employer module's light theme. */
+.portal-shell-employer .employer-form-panel [role="alert"] {
+  color: #be123c !important;
+}

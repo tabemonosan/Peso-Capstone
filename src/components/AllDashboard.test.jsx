@@ -32,6 +32,20 @@ describe('AllDashboard', () => {
     expect(globalThis.fetch.mock.calls[0][1].method).toBeUndefined()
   })
 
+  it.each([
+    ['Employer', { jobs: { pending: 2, approved: 3, declined: 1 }, applicants: 4, referrals: { total: 5 }, hires: 1 }, 'Jobs pending', 'employer'],
+    ['Applicant', { verificationStatus: 'approved', documentsAwaitingReview: 1, applications: 4, referrals: { total: 2 } }, 'Applications', 'jobs'],
+  ])('shows only %s metrics and navigates to its own role pages', async (role, stats, label, destination) => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => ({ role, stats, charts: { applications: [] }, activity: [] }) })
+    const navigate = vi.fn()
+    render(<AllDashboard token="t" onNavigate={navigate} />)
+    await screen.findByText('Recent activity')
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(label) }))
+    expect(navigate).toHaveBeenCalledWith(destination)
+    expect(screen.queryByRole('button', { name: /Employers/ })).not.toBeInTheDocument()
+    if (role === 'Applicant') expect(screen.queryByRole('button', { name: /Jobs pending/ })).not.toBeInTheDocument()
+  })
+
   it('shows an error when the request fails', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: false, json: async () => ({ error: 'nope' }) })
     render(<AllDashboard token="t" onNavigate={() => {}} />)

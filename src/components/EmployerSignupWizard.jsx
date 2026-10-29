@@ -1,3 +1,5 @@
+import CityProvinceFields from './CityProvinceFields'
+import { PH_LOCATIONS, provinceForCity } from '../../shared/phLocations.js'
 import { useEffect, useMemo, useRef, useState } from "react"
 import { API_URL } from "../config"
 import NsrpPdfPreview from "./NsrpPdfPreview"
@@ -56,7 +58,7 @@ function EmployerPrintWarnings({ warnings, onFix }) {
   )
 }
 
-export default function EmployerSignupWizard({ locations, onCancel }) {
+export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCancel }) {
   const saved = useMemo(readDraft, [])
   const [email, setEmail] = useState(saved.email || "")
   const [password, setPassword] = useState("")
@@ -103,7 +105,6 @@ export default function EmployerSignupWizard({ locations, onCancel }) {
     review: mode === "upload" ? "Review and submit" : "Preview and submit",
   }
   const flowPos = flow.indexOf(step)
-  const municipalities = Object.keys(locations || {})
   const barangays = locations?.[address.municipality] || []
   const hasPassword = isPasswordValid(password)
 
@@ -268,7 +269,7 @@ export default function EmployerSignupWizard({ locations, onCancel }) {
         if (!establishment[key]?.trim()) nextErrors[key] = `${label} is required.`
       }
     } else if (step === "address") {
-      if (!address.municipality) nextErrors.municipality = "City/municipality is required."
+      if (!provinceForCity(address.municipality)) nextErrors.municipality = "Choose a city/municipality from the location list."
       if (!address.barangay) nextErrors.barangay = "Barangay is required."
     } else if (step === "contact") {
       if (!contact.title) nextErrors.title = "Contact title is required."
@@ -284,7 +285,7 @@ export default function EmployerSignupWizard({ locations, onCancel }) {
       if (!basic.companyName?.trim()) nextErrors.companyName = "Establishment name is required."
       if (!basic.contactName?.trim()) nextErrors.contactName = "Contact name is required."
       if (!/^09\d{9}$/.test(basic.phone || "")) nextErrors.phone = "Enter an 11-digit mobile number starting with 09."
-      if (!basic.municipality) nextErrors.municipality = "City/municipality is required."
+      if (!provinceForCity(basic.municipality)) nextErrors.municipality = "Choose a city/municipality from the location list."
       if (!basic.barangay) nextErrors.barangay = "Barangay is required."
     }
     setErrors(nextErrors)
@@ -343,7 +344,7 @@ export default function EmployerSignupWizard({ locations, onCancel }) {
       if (!response.ok) {
         const data = await response.json().catch(() => null)
         setError(data?.error || "Could not generate the Form 2 preview.")
-        if (data?.fieldErrors) setErrors((current) => ({ ...current, ...data.fieldErrors }))
+        if (data?.fieldErrors) setErrors((current) => ({ ...current, ...data.fieldErrors, ...(data.fieldErrors.city ? { municipality: data.fieldErrors.city } : {}) }))
         return false
       }
       const blob = await response.blob()
@@ -419,6 +420,8 @@ export default function EmployerSignupWizard({ locations, onCancel }) {
       payload.append("companyName", companyName)
       payload.append("contactName", contactName)
       payload.append("location", location)
+      payload.append("city", mode === "upload" ? basic.municipality || "" : address.municipality || "")
+      payload.append("province", provinceForCity(mode === "upload" ? basic.municipality : address.municipality))
       payload.append("phone", phone)
       payload.append("registrationDetails", JSON.stringify(registrationDetails))
       payload.append("representativeName", mode === "upload" ? "" : representative.trim())
@@ -434,7 +437,7 @@ export default function EmployerSignupWizard({ locations, onCancel }) {
           setStep("account")
         }
         setError(data?.error || "Employer account creation failed.")
-        if (data?.fieldErrors) setErrors((current) => ({ ...current, ...data.fieldErrors }))
+        if (data?.fieldErrors) setErrors((current) => ({ ...current, ...data.fieldErrors, ...(data.fieldErrors.city ? { municipality: data.fieldErrors.city } : {}) }))
         return
       }
       localStorage.removeItem(STORAGE_KEY)
@@ -636,7 +639,7 @@ export default function EmployerSignupWizard({ locations, onCancel }) {
           <div className="grid gap-3 sm:grid-cols-2">
             {field("House/unit no. & street", "street", address.street, (value) => updateValue(setAddress, "street", value))}
             {field("Subdivision/village/building", "subdivision", address.subdivision, (value) => updateValue(setAddress, "subdivision", value))}
-            {selectField("City/municipality", "municipality", address.municipality, municipalities, (value) => { setAddress((current) => ({ ...current, municipality: value, barangay: "" })); setErrors((current) => ({ ...current, municipality: undefined, barangay: undefined })); setStepValidity((current) => ({ ...current, address: false })); setPreview(null) }, "Select city/municipality")}
+            <CityProvinceFields id="employer-address" cityLabel="City/municipality" locations={locations} city={address.municipality || ""} province={provinceForCity(address.municipality)} errors={{ city: errors.municipality, province: errors.province }} onChange={({ city }) => { setAddress((current) => ({ ...current, municipality: city, barangay: "" })); setErrors((current) => ({ ...current, municipality: undefined, province: undefined, barangay: undefined })); setStepValidity((current) => ({ ...current, address: false })); setPreview(null); }} />
             {selectField("Barangay", "barangay", address.barangay, barangays, (value) => updateValue(setAddress, "barangay", value), address.municipality ? "Select barangay" : "Select city/municipality first")}
             {field("Landmark", "landmark", address.landmark, (value) => updateValue(setAddress, "landmark", value))}
           </div>
@@ -661,7 +664,7 @@ export default function EmployerSignupWizard({ locations, onCancel }) {
             {field("Mobile number", "phone", basic.phone, (value) => updateValue(setBasic, "phone", value.replace(/\D/g, "").slice(0, 11)), { required: true, inputMode: "numeric", maxLength: 11 })}
             {field("House/unit no. & street", "street", basic.street, (value) => updateValue(setBasic, "street", value))}
             {field("Subdivision/village/building", "subdivision", basic.subdivision, (value) => updateValue(setBasic, "subdivision", value))}
-            {selectField("City/municipality", "municipality", basic.municipality, municipalities, (value) => { setBasic((current) => ({ ...current, municipality: value, barangay: "" })); setErrors((current) => ({ ...current, municipality: undefined, barangay: undefined })); setStepValidity((current) => ({ ...current, basic: false })) }, "Select city/municipality")}
+            <CityProvinceFields id="employer-address" cityLabel="City/municipality" locations={locations} city={basic.municipality || ""} province={provinceForCity(basic.municipality)} errors={{ city: errors.municipality, province: errors.province }} onChange={({ city }) => { setBasic((current) => ({ ...current, municipality: city, barangay: "" })); setErrors((current) => ({ ...current, municipality: undefined, province: undefined, barangay: undefined })); setStepValidity((current) => ({ ...current, basic: false })); }} />
             {selectField("Barangay", "barangay", basic.barangay, locations?.[basic.municipality] || [], (value) => updateValue(setBasic, "barangay", value), basic.municipality ? "Select barangay" : "Select city/municipality first")}
             {field("Landmark", "landmark", basic.landmark, (value) => updateValue(setBasic, "landmark", value))}
           </div>

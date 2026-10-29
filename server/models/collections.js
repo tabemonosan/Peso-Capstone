@@ -180,6 +180,10 @@ const employerSchema = new Schema({
     default: [],
   },
   approvalNoticePending: { type: Boolean, default: false },
+  establishmentAddress: {
+    city: { type: String, trim: true, maxlength: 80 },
+    province: { type: String, trim: true, maxlength: 80 },
+  },
   companyName: String,
   contactName: String,
   phone: String,

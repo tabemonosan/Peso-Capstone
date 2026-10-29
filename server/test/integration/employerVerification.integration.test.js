@@ -1,10 +1,12 @@
+import { deadlineBounds } from '../../../shared/jobPosting.js'
 // @vitest-environment node
-import { beforeAll, afterAll, beforeEach, describe, expect, it } from "vitest"
+import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 import request from "supertest"
 import mongoose from "mongoose"
 import jwt from "jsonwebtoken"
 import { startTestDb, stopTestDb, clearDb } from "./helpers.js"
 
+vi.mock('../../mailer.js', () => ({ sendEmail: vi.fn().mockResolvedValue({ ok: true }), sendVerificationEmail: vi.fn().mockResolvedValue({ ok: true }), initMailer: vi.fn().mockResolvedValue(undefined) }))
 const { app } = await import("../../index.js")
 const { Admin, Applicant, Employer, Notification, Referral } = await import("../../models/collections.js")
 const EmployerRequest = mongoose.model("EmployerRequest")
@@ -175,6 +177,11 @@ describe("employer verification access control", () => {
       title: "Software Engineer",
       company: "Example Works",
       description: "Build and maintain software.",
+      locationType: "Remote",
+      employmentType: "Full-time",
+      negotiable: true,
+      slots: 1,
+      deadline: deadlineBounds().min,
       skills: ["JavaScript"],
     })
     expect(job.status).toBe(200)

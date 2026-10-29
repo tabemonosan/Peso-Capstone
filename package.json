@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "server": "node server/index.js",
+    "server": "node --watch server/index.js",
     "seed:job-titles": "node server/scripts/seed-job-titles.js",
     "migrate:names": "node server/scripts/migrate-split-names.js",
     "migrate:document-files": "node server/scripts/migrate-document-files.js",
