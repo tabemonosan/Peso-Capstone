@@ -1,6 +1,7 @@
-import { render, screen, fireEvent, within } from '@testing-library/react'
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
 import MyDocumentsModal from '../components/MyDocumentsModal'
+import MyDocumentsPage from '../components/MyDocumentsPage'
 
 const docs = [
   {
@@ -32,6 +33,39 @@ const docs = [
 ]
 
 describe('MyDocumentsModal file viewers', () => {
+  it('keeps document cards closed until the applicant opens them', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => ({ verificationStatus: 'under_review', documents: docs }) })
+    render(<MyDocumentsPage applicantId="applicant1" token="token" />)
+    await screen.findByText('Submitted to PESO')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.queryByText('Birth Certificate')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Manage my documents' }))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByText('Birth Certificate')).toBeInTheDocument()
+    fetchMock.mockRestore()
+  })
+
+  it('waits for pending review, allows rejected resubmissions, and requests corrections for approved documents', async () => {
+    const onUpdated = vi.fn()
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => ({ ok: true }) })
+    render(<MyDocumentsModal token="token" onClose={() => {}} onUpdated={onUpdated} info={{ documents: [
+      { ...docs[0], required: true, status: 'approved' },
+      { ...docs[1], required: true, status: 'rejected', uploadsRemaining: 3, latest: { ...docs[1].latest, reviewReason: 'Please upload a clear copy' } },
+      { ...docs[2], required: true, status: 'pending' },
+    ] }} />)
+    const pending = screen.getByText(/Valid ID #1/).closest('li')
+    expect(within(pending).queryByRole('button', { name: /Upload|Replace|Resubmit/ })).not.toBeInTheDocument()
+    expect(screen.getByText(/PESO feedback: Please upload a clear copy/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Resubmit', exact: true })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Request correction' }))
+    fireEvent.change(screen.getByLabelText('What needs to be corrected?'), { target: { value: 'My phone number has changed.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send request to PESO' }))
+    await screen.findByText(/Your correction request was sent to PESO/)
+    expect(fetchMock).toHaveBeenCalledWith('http://localhost:4000/api/profile/verification-documents/nsrpForm/correction-request', expect.objectContaining({ method: 'POST', body: JSON.stringify({ reason: 'My phone number has changed.' }) }))
+    await waitFor(() => expect(onUpdated).toHaveBeenCalled())
+    fetchMock.mockRestore()
+  })
+
   it('shows grouped front/back controls only for uploaded Valid ID sides and opens their signed URLs', () => {
     const open = vi.spyOn(window, 'open').mockImplementation(() => null)
     render(

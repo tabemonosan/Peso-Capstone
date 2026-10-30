@@ -208,6 +208,33 @@ async function goToWorkStep() {
 }
 
 describe('wizard work-experience errors', () => {
+  it.each(['read', 'write', 'speak', 'understand'])('blocks Next when Other language is blank and %s is checked', async (proficiency) => {
+    await goToWorkStep()
+    const group = screen.getByRole('group', { name: 'Others proficiency' })
+    fireEvent.click(within(group).getByRole('checkbox', { name: proficiency, exact: true }))
+    fireEvent.change(screen.getByLabelText('Other language'), { target: { value: '   ' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
+    await waitFor(() => expect(screen.getByLabelText('Other language')).toHaveAttribute('aria-invalid', 'true'))
+    expect(screen.getByRole('heading', { name: 'Work & skills' })).toBeInTheDocument()
+    expect(within(group).getByText('Enter the other language when selecting its proficiency.')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Other language'), { target: { value: 'Bikol' } })
+    expect(screen.getByLabelText('Other language')).toHaveAttribute('aria-invalid', 'false')
+    fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
+    await screen.findByRole('heading', { name: 'Employment & preferences' })
+  })
+
+  it('allows leaving Other language empty after all its proficiency boxes are unchecked', async () => {
+    await goToWorkStep()
+    const group = screen.getByRole('group', { name: 'Others proficiency' })
+    const checkbox = within(group).getByRole('checkbox', { name: 'understand', exact: true })
+    fireEvent.click(checkbox)
+    fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
+    await waitFor(() => expect(screen.getByLabelText('Other language')).toHaveAttribute('aria-invalid', 'true'))
+    fireEvent.click(checkbox)
+    fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
+    await screen.findByRole('heading', { name: 'Employment & preferences' })
+  })
+
   it('From after To shows the message under the To input, marks it invalid, and focuses it', async () => {
     await goToWorkStep()
     fireEvent.click(screen.getByRole('button', { name: /add work experience/i }))

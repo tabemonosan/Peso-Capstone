@@ -44,6 +44,7 @@ const verificationDocVersionSchema = new Schema({
 
 // Per-document slot (including resume) with version history
 const verificationDocSlotSchema = new Schema({
+  correctionRequest: { reason: String, requestedAt: Date },
   idType: String, // only used by validId1 / validId2
   uploads: { type: Number, default: 0 }, // capped at 5 per document
   versions: { type: [verificationDocVersionSchema], default: [] },
@@ -76,6 +77,9 @@ const nsrpWorkExperienceSchema = new Schema({
 }, { _id: false })
 
 const applicantSchema = new Schema({
+  sessionVersion: { type: Number, default: 0 },
+  deletedAt: Date,
+  retainedEmail: { type: String, select: false },
   email: { type: String, required: true, unique: true },  passwordHash: { type: String, required: true },
   ...emailVerificationFields,
   verificationStatus: { type: String, enum: ['under_review', 'approved', 'declined', 'restricted'], default: 'under_review' },
@@ -251,7 +255,11 @@ const hireReportSchema = new Schema({
   applicantId: { type: Schema.Types.ObjectId, ref: 'Applicant', required: true },
   employerId: { type: Schema.Types.ObjectId, ref: 'Employer', required: true },
   jobId: { type: Schema.Types.ObjectId, ref: 'Job', required: true },
-  status: { type: String, enum: ['hired', 'deployed'], required: true },
+  status: { type: String, enum: ['hired', 'not_hired', 'deployed'], required: true },
+  reportedByRole: { type: String, enum: ['Employer', 'Applicant'], default: 'Employer' },
+  employmentDate: String,
+  notes: { type: String, maxlength: 1000 },
+  history: [{ status: String, employmentDate: String, notes: String, reportedAt: Date }],
   reportedAt: { type: Date, default: Date.now },
 }, { collection: 'hire_reports', timestamps: true })
 hireReportSchema.index({ reportedAt: -1, _id: 1 })
@@ -308,6 +316,21 @@ const usedEmailProofSchema = new Schema({
 })
 
 const Applicant = mongoose.models.Applicant || mongoose.model('Applicant', applicantSchema)
+const accountDeletionRequestSchema = new Schema({
+  applicantId: { type: Schema.Types.ObjectId, ref: 'Applicant', required: true },
+  activeApplicant: { type: Schema.Types.ObjectId },
+  applicantName: String,
+  email: { type: String, required: true },
+  reason: { type: String, maxlength: 1000 },
+  status: { type: String, enum: ['pending', 'processing', 'cancelled', 'approved', 'declined'], default: 'pending' },
+  reviewReason: String,
+  reviewedBy: String,
+  reviewedAt: Date,
+  processingToken: { type: String, select: false },
+  processingStartedAt: Date,
+}, { collection: 'account_deletion_requests', timestamps: true })
+accountDeletionRequestSchema.index({ activeApplicant: 1 }, { unique: true, sparse: true })
+const AccountDeletionRequest = mongoose.models.AccountDeletionRequest || mongoose.model('AccountDeletionRequest', accountDeletionRequestSchema)
 const Employer = mongoose.models.Employer || mongoose.model('Employer', employerSchema)
 const Admin = mongoose.models.Admin || mongoose.model('Admin', adminSchema)
 const JobTitle = mongoose.models.JobTitle || mongoose.model('JobTitle', jobTitleSchema)
@@ -365,6 +388,7 @@ async function updateUserProfileByEmail(email, profile) {
 }
 
 export {
+  AccountDeletionRequest,
   Applicant,
   Employer,
   Admin,

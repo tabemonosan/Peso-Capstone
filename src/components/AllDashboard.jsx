@@ -12,7 +12,7 @@ const cardsFor = (role, stats) => {
       { label: 'Jobs approved', value: stats.jobs.approved, to: 'jobs' },
       { label: 'Jobs declined', value: stats.jobs.declined, to: 'jobs' },
       { label: 'Documents awaiting review', value: stats.documentsAwaitingReview, to: 'applicants' },
-      { label: 'Hires', value: stats.hires, to: 'peso-referrals' },
+      { label: 'Hires', value: stats.hires, to: 'employment-updates' },
       { label: 'Referrals', value: stats.referrals.total, to: 'peso-referrals' },
     ]
   }
@@ -26,9 +26,9 @@ const cardsFor = (role, stats) => {
       { label: 'Hires reported', value: stats.hires, to: 'referrals' },
     ]
   }
+  const accountStatus = { label: 'Account status', value: String(stats.verificationStatus).replace('_', ' '), to: 'profile' }
+  if (stats.verificationStatus !== 'approved') return [accountStatus]
   return [
-    { label: 'Account status', value: String(stats.verificationStatus).replace('_', ' '), to: 'documents' },
-    { label: 'Documents awaiting review', value: stats.documentsAwaitingReview, to: 'documents' },
     { label: 'Applications', value: stats.applications, to: 'jobs' },
     { label: 'Referrals', value: stats.referrals.total, to: 'jobs' },
   ]
@@ -79,6 +79,7 @@ export default function AllDashboard({ token, onNavigate }) {
 
   const cards = cardsFor(data.role, data.stats)
   const isAdmin = data.role === 'Admin'
+  const showActivity = data.role !== 'Applicant' || data.stats.verificationStatus === 'approved'
   const chartData = isAdmin
     ? data.charts.registrations.map((row, i) => ({ date: row.date, registrations: row.count, applications: data.charts.applications[i]?.count || 0 }))
     : data.charts.applications.map((row) => ({ date: row.date, applications: row.count }))
@@ -99,6 +100,7 @@ export default function AllDashboard({ token, onNavigate }) {
         ))}
       </div>
 
+      {showActivity && <>
       <section className="rounded-2xl border border-slate-300 bg-white p-4">
         <h3 className="text-base font-semibold text-black">{isAdmin ? 'Registrations and applications' : 'Applications'} &bull; last 30 days</h3>
         <div className="mt-4 h-64 w-full">
@@ -135,12 +137,14 @@ export default function AllDashboard({ token, onNavigate }) {
               <li key={item.id} className="py-3">
                 <p className="text-sm font-semibold text-black">{item.title}</p>
                 <p className="text-sm text-black">{item.message}</p>
+                {isAdmin && item.type === 'hire_report_submitted' && <button type="button" onClick={() => onNavigate('employment-updates')} className="mt-2 rounded-lg border border-cyan-300 bg-cyan-50 px-3 py-1.5 text-sm font-semibold text-cyan-900">View hiring updates</button>}
                 <p className="mt-1 text-xs text-slate-600">{item.createdAt ? new Date(item.createdAt).toLocaleString() : ''}</p>
               </li>
             ))}
           </ul>
         )}
       </section>
+      </>}
     </div>
   )
 }

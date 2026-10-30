@@ -1,5 +1,6 @@
 import { PH_LOCATIONS as albayLocations, getEmployerAddress } from '../shared/phLocations.js'
 import { useCallback, useEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { API_URL } from "./config"
 import JobsView from "./components/JobsView"
 import VerificationDocumentsForm, { emptyVerificationDocs, validateVerificationDocs } from "./components/VerificationDocumentsForm"
@@ -19,6 +20,10 @@ import { validatePassword } from "./utils/passwordPolicy"
 import { SUFFIX_OPTIONS, capitalizeName, validateNameField, formatFullName, formatDisplayName } from "../shared/nameFields.js"
 import { EMPLOYER_VERIFICATION_STATUS as EMPLOYER_STATUS } from "../shared/employerVerification.js"
 import ReferralList from "./components/ReferralList"
+import ApplicantEmploymentReports from "./components/ApplicantEmploymentReports"
+import ApplicantAccountSettings from "./components/ApplicantAccountSettings"
+import AdminAccountDeletionRequests from "./components/AdminAccountDeletionRequests"
+import AdminEmploymentUpdatesModal from "./components/AdminEmploymentUpdatesModal"
 import Pagination from "./components/Pagination"
 import SortControl, { SortableTh } from "./components/SortControl"
 import ConfirmDialog from "./components/ConfirmDialog"
@@ -54,15 +59,16 @@ const navigationByRole = {
     { id: "employers", label: "Employers" },
     { id: "applicants", label: "Applicants" },
     { id: "requests", label: "Employer Requests" },
+    { id: "account-deletions", label: "Account Deletions" },
     { id: "jobs", label: "Job Postings" },
     { id: "job-titles", label: "Job Titles" },
+    { id: "employment-updates", label: "Hiring Updates" },
     { id: "peso-referrals", label: "Reports" },
   ],
   Employer: [
     { id: "complete", label: "Complete Registration" },
     { id: "verification", label: "Account verification" },
     { id: "dashboard", label: "Dashboard" },
-    { id: "home", label: "Home" },
     { id: "employer", label: "Job Postings" },
     { id: "referrals", label: "Reports" },
     { id: "reviews", label: "Reviews" },
@@ -72,7 +78,7 @@ const navigationByRole = {
     { id: "complete", label: "Complete Registration" },
     { id: "dashboard", label: "Dashboard" },
     { id: "home", label: "Home" },
-    { id: "documents", label: "My Documents" },
+    { id: "employment-reports", label: "Employment updates" },
     { id: "jobs", label: "Jobs" },
     { id: "reputation", label: "Reviews" },
     { id: "notify", label: "Notifications" },
@@ -222,6 +228,8 @@ function App() {
     return saved === 'all-dashboard' ? 'dashboard' : (saved || 'dashboard')
   })
   const [currentUser, setCurrentUser] = useState(null)
+  const [showProfileDocuments, setShowProfileDocuments] = useState(() => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('editNsrp') === '1')
+  const documentLinkHandled = useRef(false)
   const [isLoggedIn, setIsLoggedIn] = useState(false)
   const [userAccounts, setUserAccounts] = useState(initialAccounts)
   const [formData, setFormData] = useState(() => ({
@@ -372,7 +380,21 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
   )
 }
 
-const [authView, setAuthView] = useState("login")
+  const [authView, setAuthView] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('peso-auth-view')
+      return ['signup', 'employer'].includes(saved) ? saved : 'login'
+    } catch { return 'login' }
+  })
+  const [showSignupRestoreNotice, setShowSignupRestoreNotice] = useState(() => authView !== 'login')
+  useEffect(() => {
+    try { sessionStorage.setItem('peso-auth-view', isLoggedIn ? 'login' : authView) } catch { /* Browser storage may be unavailable. */ }
+    if (authView === 'login') setShowSignupRestoreNotice(false)
+  }, [authView, isLoggedIn])
+  const finishSignup = () => {
+    try { sessionStorage.setItem('peso-auth-view', 'login') } catch { /* Keep the success screen usable without storage. */ }
+    setShowSignupRestoreNotice(false)
+  }
   const [signupForm, setSignupForm] = useState({
     email: "",
     password: "",
@@ -480,6 +502,7 @@ const [authView, setAuthView] = useState("login")
   }, [confirmDialog, confirmBusy, closeConfirmDialog])
   const [showVerificationModal, setShowVerificationModal] = useState(false)
   const [reviewDocsApplicant, setReviewDocsApplicant] = useState(null)
+  const [hiringUpdates, setHiringUpdates] = useState(null)
   const [verificationEmail, setVerificationEmail] = useState('')
   const [verificationCode, setVerificationCode] = useState('')
   const [showSkillPrompt, setShowSkillPrompt] = useState(false)
@@ -548,10 +571,17 @@ const [authView, setAuthView] = useState("login")
     if (activeRole === "Admin" && activeView === "records") {
       setActiveView("employers")
     }
+    if (activeRole === "Employer" && activeView === "home") {
+      setActiveView("dashboard")
+    }
   }, [activeRole, activeView])
 
   const getToken = () =>
     currentUser?.token || (typeof window !== "undefined" ? localStorage.getItem('peso-token') : null)
+  const openApplicantDocuments = () => {
+    setShowProfileDocuments(true)
+    setActiveView('profile')
+  }
 
   const updateRegistrationUser = useCallback((data) => {
     setCurrentUser((current) => ({ ...current, registration: data.registration }))
@@ -648,6 +678,10 @@ const [authView, setAuthView] = useState("login")
     })
       .then((r) => r.json())
       .then((data) => {
+        if (data?.code === 'SESSION_ENDED') {
+          handleLogout()
+          return
+        }
         const list = Array.isArray(data?.items) ? data.items : []
         // Deduplicate by _id to guard against double-fetch (StrictMode / overlapping effects)
         const seen = new Set()
@@ -1097,26 +1131,25 @@ const [authView, setAuthView] = useState("login")
     }
   }
 
-  const handleReviewApplicantVerification = (applicantId, status) => {
+  const handleReviewApplicantVerification = async (applicantId, status) => {
     const token = getToken()
-    if (!token) return alert('Not authenticated')
-    const reason = status === 'declined' ? (window.prompt('Reason for declining (optional)') || '') : ''
-    fetch(`${API_URL}/api/applicants/${applicantId}/verification`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ status, reason }),
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.error) return setAppMessage({ type: 'error', text: data.error })
-        fetchAdminUsers()
-        fetchAdminApplicants()
-        setAppMessage({ type: 'success', text: `Applicant ${status}.` })
+    if (!token) return { error: 'Not authenticated' }
+    try {
+      const response = await fetch(`${API_URL}/api/applicants/${applicantId}/verification`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(status === 'unrestrict' ? { action: 'unrestrict' } : { status }),
       })
-      .catch((err) => {
-        console.error(err)
-        setAppMessage({ type: 'error', text: err?.message || 'Failed to update applicant' })
-      })
+      const data = await response.json().catch(() => null)
+      if (!response.ok || data?.error) return { error: data?.error || 'Failed to update applicant' }
+      fetchAdminUsers()
+      fetchAdminApplicants()
+      setReviewDocsApplicant((current) => current && String(current.id || current._id) === String(applicantId) ? { ...current, verificationStatus: data.verificationStatus } : current)
+      setAppMessage({ type: 'success', text: status === 'unrestrict' ? 'Applicant unrestricted.' : `Applicant ${status}.` })
+      return { ok: true, verificationStatus: data.verificationStatus }
+    } catch (err) {
+      return { error: err?.message || 'Failed to update applicant' }
+    }
   }
 
   const handleReviewEmployerRequest = async (requestId, status, reason = '') => {
@@ -1355,6 +1388,36 @@ const [authView, setAuthView] = useState("login")
       return
     }
 
+    if (activeRole === 'Applicant' && (
+      ['document_approved', 'document_rejected', 'document_reverted'].includes(notification?.type)
+      || (notification?.link || notification?.linkPath || '').split('?')[0] === '/documents'
+    )) {
+      setSelectedNotification(null)
+      openApplicantDocuments()
+      return
+    }
+    if (activeRole === 'Applicant' && (notification?.type === 'employment_update' || (notification?.type === 'application_status_changed' && notification?.metadata?.status === 'accepted'))) {
+      setSelectedNotification(null)
+      setActiveView('employment-reports')
+      return
+    }
+    if (activeRole === 'Admin' && notification?.type === 'account_deletion_requested') {
+      setSelectedNotification(null)
+      setActiveView('account-deletions')
+      return
+    }
+    if (activeRole === 'Applicant' && notification?.type === 'account_deletion_declined') {
+      setSelectedNotification(null)
+      setShowProfileDocuments(false)
+      setActiveView('profile')
+      requestAnimationFrame(() => document.getElementById('account-settings')?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }))
+      return
+    }
+    if (activeRole === 'Admin' && notification?.type === 'hire_report_submitted') {
+      setSelectedNotification(null)
+      setHiringUpdates({ applicantId: notification.metadata?.applicantId, jobId: notification.metadata?.jobId })
+      return
+    }
     setSelectedNotification(notification)
   }
 
@@ -1699,10 +1762,35 @@ const [authView, setAuthView] = useState("login")
     if (activeView === 'all-dashboard') setActiveView('dashboard')
   }, [activeView])
 
-  // Unverified applicants land on My Documents once (not every navigation)
+  // Restore older saved document destinations inside the applicant profile.
+  useEffect(() => {
+    if (activeRole === 'Applicant' && activeView === 'documents') {
+      setShowProfileDocuments(true)
+      setActiveView('profile')
+    }
+  }, [activeRole, activeView])
+
+  // Support existing document links and the new profile destination after login.
+  useEffect(() => {
+    if (!isLoggedIn || activeRole !== 'Applicant' || documentLinkHandled.current) return
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('accountSettings') === '1') {
+      documentLinkHandled.current = true
+      setShowProfileDocuments(false)
+      setActiveView('profile')
+      return
+    }
+    if (window.location.pathname === '/documents' || params.get('documents') === '1' || params.get('editNsrp') === '1') {
+      documentLinkHandled.current = true
+      setShowProfileDocuments(true)
+      setActiveView('profile')
+    }
+  }, [isLoggedIn, activeRole])
+
+  // Keep documents off the landing page; applicants open them inside Profile.
   useEffect(() => {
     if (isLoggedIn && activeRole === 'Applicant' && currentUser?.verificationStatus && currentUser.verificationStatus !== 'approved' && activeView === 'home') {
-      setActiveView('documents')
+      setActiveView('dashboard')
     }
   }, [isLoggedIn, activeRole, currentUser?.verificationStatus, activeView])
 
@@ -1740,8 +1828,15 @@ const [authView, setAuthView] = useState("login")
             <h1>{authView === "signup" ? "Sign Up" : authView === "employer" ? "Employer Sign Up" : "Welcome back"}</h1>
             <p>{authView === "employer" ? "Create your employer account." : "Enter your PESO account credentials to continue."}</p>
           </div>
+          {showSignupRestoreNotice && authView !== 'login' && (
+            <div role="status" className="mb-4 rounded-xl border border-cyan-300 bg-cyan-50 p-4 text-sm text-cyan-950">
+              <p className="font-semibold">Your signup draft has been restored.</p>
+              <p className="mt-1">Your saved answers and step are back. Passwords, email verification, uploaded files, and signatures are not saved. Select Account to enter your password and verify your email again, then reselect files and add your signature before submitting.</p>
+              <button type="button" onClick={() => setShowSignupRestoreNotice(false)} className="mt-2 rounded-lg border border-cyan-700 px-3 py-1 text-xs font-semibold">Dismiss notice</button>
+            </div>
+          )}
           {authView === "signup" ? (
-            <ApplicantSignupWizard onCancel={() => setAuthView("login")} />
+            <ApplicantSignupWizard onCancel={() => setAuthView("login")} onComplete={finishSignup} />
           ) : authView === "login" ? (
             <form className="auth-form" onSubmit={handleLogin}>
               <div>
@@ -1810,7 +1905,7 @@ const [authView, setAuthView] = useState("login")
               </div>
             </form>
           ) : authView === "employer" ? (
-            <EmployerSignupWizard locations={albayLocations} onCancel={() => setAuthView("login")} />
+            <EmployerSignupWizard locations={albayLocations} onCancel={() => setAuthView("login")} onComplete={finishSignup} />
           ) : (
             <form className="auth-form auth-detail-form applicant-signup-form" onSubmit={handleSignup}>
               <div>
@@ -2007,12 +2102,11 @@ const [authView, setAuthView] = useState("login")
     if (registrationIncomplete) return item.id === 'complete'
     if (item.id === 'complete') return ['Applicant', 'Employer'].includes(activeRole) && currentUser?.registration?.complete === false
     if (activeRole === 'Employer') return employerApproved && item.id !== 'verification'
-    // Unverified applicants only get My Documents (job listings stay hidden)
-    if (activeRole === 'Applicant') return applicantApproved || item.id === 'documents'
+    // Verification details stay in My Documents; the dashboard remains available.
+    if (activeRole === 'Applicant') return applicantApproved || item.id === 'dashboard'
     return true
   })
   // Server state is the source of truth; this is just UI gating
-  const applicantDocAttention = activeRole === 'Applicant' ? (currentUser?.attentionCount || 0) : 0
   const showProfileTab = ["Applicant", "Employer"].includes(activeRole) && (activeRole !== 'Employer' || employerApproved)
 
   return (
@@ -2052,7 +2146,8 @@ const [authView, setAuthView] = useState("login")
             {showProfileTab && (
               <button
                 type="button"
-                onClick={() => setActiveView("profile")}
+                aria-label="Profile"
+                onClick={() => { setShowProfileDocuments(false); setActiveView("profile") }}
                 className={`portal-profile-button inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-medium transition-colors ${
                   activeView === "profile" ? "bg-cyan-500 text-slate-950" : "text-slate-200"
                 }`}
@@ -2093,7 +2188,10 @@ const [authView, setAuthView] = useState("login")
               <button
                 key={`${item.id}-${item.label}-${index}`}
                 type="button"
-                onClick={() => setActiveView(item.id)}
+                onClick={() => {
+                  if (activeRole === 'Admin' && item.id === 'employment-updates') setHiringUpdates({})
+                  else setActiveView(item.id)
+                }}
                 className={`portal-nav-item ${
                   activeView === item.id ? "is-active" : ""
                 }`}
@@ -2120,34 +2218,27 @@ const [authView, setAuthView] = useState("login")
               </button>
             </div>
           )}
-          {applicantDocAttention > 0 && (
-            <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm font-medium text-amber-800" role="alert">
-              <span>{applicantDocAttention} document{applicantDocAttention === 1 ? '' : 's'} need{applicantDocAttention === 1 ? 's' : ''} your attention.</span>
-              <button type="button" onClick={() => setActiveView('documents')} className="rounded-xl bg-amber-500 px-3 py-1.5 text-xs font-semibold text-slate-950">
-                Review now
-              </button>
-            </div>
-          )}
 
           <main className="space-y-6">
-          {appMessage && (
+          {appMessage && createPortal(
             <div
               role="status"
-              className={`flex items-center justify-between gap-4 rounded-2xl border px-4 py-3 text-sm ${
+              className={`fixed left-3 right-3 top-3 z-[1000] flex items-center justify-between gap-4 rounded-2xl border px-4 py-3 text-sm shadow-xl sm:left-6 sm:right-6 ${
                 appMessage.type === 'error'
-                  ? 'border-rose-400/40 bg-rose-950/40 text-rose-200'
-                  : 'border-cyan-400/40 bg-cyan-950/40 text-cyan-200'
+                  ? 'border-rose-400 bg-rose-950 text-rose-100'
+                  : 'border-cyan-400 bg-cyan-950 text-cyan-100'
               }`}
             >
-              <p>{appMessage.text}</p>
+              <p className="min-w-0 break-words">{appMessage.text}</p>
               <button
                 type="button"
                 onClick={() => setAppMessage(null)}
-                className="rounded-full border border-current px-3 py-1 text-xs font-semibold"
+                className="shrink-0 rounded-full border border-current px-3 py-1 text-xs font-semibold"
               >
                 Dismiss
               </button>
-            </div>
+            </div>,
+            document.body
           )}
           {approvalNotice && activeRole === 'Employer' && (
             <section className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-green-300 bg-green-50 p-5 text-green-950" role="status">
@@ -2168,29 +2259,14 @@ const [authView, setAuthView] = useState("login")
             <CompleteRegistrationPage
               role={activeRole}
               token={getToken()}
-              onNavigate={(target) => setActiveView(target === 'continue' ? 'home' : target === 'documents' && activeRole === 'Applicant' ? 'documents' : target === 'dashboard' && activeRole === 'Employer' ? 'dashboard' : 'profile')}
+              onNavigate={(target) => {
+                if (target === 'documents' && activeRole === 'Applicant') return openApplicantDocuments()
+                setActiveView(target === 'continue' ? (activeRole === 'Employer' ? 'dashboard' : 'home') : target === 'dashboard' && activeRole === 'Employer' ? 'dashboard' : 'profile')
+              }}
               onUpdated={updateRegistrationUser}
             />
           )}
-          {activeView === "documents" && activeRole === 'Applicant' && (
-            <MyDocumentsPage
-              applicantId={currentUser?.id || currentUser?._id}
-              token={getToken()}
-              onUpdated={() => {
-                const token = getToken()
-                if (!token) return
-                fetch(`${API_URL}/api/profile`, { headers: { Authorization: `Bearer ${token}` } })
-                  .then((r) => r.json())
-                  .then((data) => {
-                    if (!data?.error) {
-                      setCurrentUser((current) => ({ ...current, verificationStatus: data.verificationStatus, verificationReason: data.verificationReason, attentionCount: data.attentionCount }))
-                    }
-                  })
-                  .catch(() => {})
-              }}
-            />
-          )}
-          {activeView === "home" && (
+          {activeView === "home" && activeRole !== 'Employer' && (
             <section className="portal-card rounded-2xl border border-slate-300 bg-white p-8 text-black">
               <p className="text-sm font-semibold uppercase tracking-wide text-cyan-600">
                 PESO Job Portal
@@ -2329,7 +2405,10 @@ const [authView, setAuthView] = useState("login")
                     ? 'Track your job postings, applicants, referrals, hiring, and recent activity.'
                     : 'Track your applications, referrals, document reviews, and account status.'}
               </p>
-              <RoleDashboard token={getToken()} onNavigate={setActiveView} />
+              <RoleDashboard token={getToken()} onNavigate={(target) => {
+                if (activeRole === 'Admin' && target === 'employment-updates') setHiringUpdates({})
+                else setActiveView(target)
+              }} />
               {activeRole === 'Employer' && employerApproved && (
                 <>
                   <div className="employer-dashboard-postings">
@@ -2583,7 +2662,12 @@ const [authView, setAuthView] = useState("login")
               onClose={() => setReviewDocsApplicant(null)}
               onReviewed={() => { fetchAdminUsers(); fetchAdminApplicants() }}
               onRestrict={(applicantId) => handleReviewApplicantVerification(applicantId, 'restricted')}
+              onUnrestrict={(applicantId) => handleReviewApplicantVerification(applicantId, 'unrestrict')}
+              readOnly={Boolean(reviewDocsApplicant.deletedAt)}
             />
+          )}
+          {activeRole === 'Admin' && hiringUpdates && (
+            <AdminEmploymentUpdatesModal token={getToken()} applicantId={hiringUpdates.applicantId} jobId={hiringUpdates.jobId} onClose={() => setHiringUpdates(null)} />
           )}
 
           {activeView === "profile" && (<section className={`${activeRole === 'Employer' ? 'employer-profile-card portal-card' : activeRole === 'Applicant' ? 'applicant-profile-card portal-card' : ''} rounded-2xl border border-slate-800 bg-slate-900/70 p-6`}>
@@ -2818,6 +2902,22 @@ const [authView, setAuthView] = useState("login")
                       )}
                     </div>
                   </form>
+                  <div className="mt-6" id="profile-documents">
+                    <MyDocumentsPage
+                      applicantId={currentUser?.id || currentUser?._id}
+                      token={getToken()}
+                      open={showProfileDocuments}
+                      onOpenChange={setShowProfileDocuments}
+                      onUpdated={async () => {
+                        const token = getToken()
+                        if (!token) return
+                        const response = await fetch(`${API_URL}/api/profile`, { headers: { Authorization: `Bearer ${token}` } })
+                        const data = await response.json()
+                        if (response.ok && !data.error) setCurrentUser((current) => ({ ...current, registration: data.registration, verificationStatus: data.verificationStatus, verificationReason: data.verificationReason, attentionCount: data.attentionCount }))
+                      }}
+                    />
+                  </div>
+                  <ApplicantAccountSettings token={getToken()} onMessage={(text) => setAppMessage({ type: 'success', text })} />
                 </>
               ) : (
                 <>
@@ -3189,7 +3289,7 @@ const [authView, setAuthView] = useState("login")
                 const url = new URL(window.location.href)
                 url.searchParams.set('editNsrp', '1')
                 window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
-                setActiveView('documents')
+                openApplicantDocuments()
               }}
             />
           )}
@@ -3202,6 +3302,14 @@ const [authView, setAuthView] = useState("login")
               token={getToken()}
               employerId={currentUser?._id || currentUser?.id || currentUser?.employerId}
             />
+          )}
+
+          {activeView === 'account-deletions' && activeRole === 'Admin' && (
+            <AdminAccountDeletionRequests token={getToken()} onMessage={(text) => { setAppMessage({ type: 'success', text }); fetchAdminUsers(); fetchAdminApplicants() }} onViewRetained={(record) => setReviewDocsApplicant({ id: record.applicantId, email: record.email, displayName: record.applicantName, deletedAt: true })} />
+          )}
+
+          {activeView === "employment-reports" && activeRole === "Applicant" && (
+            <ApplicantEmploymentReports token={getToken()} applicantId={currentUser?._id || currentUser?.id} />
           )}
 
           {activeView === "notify" && (
@@ -3550,6 +3658,7 @@ const [authView, setAuthView] = useState("login")
               onLoadApplicants={fetchAdminUsers}
               initialJobId={referralPrefill.jobId}
               initialApplicantIds={referralPrefill.applicantIds}
+              onViewUpdates={() => setHiringUpdates({})}
             />
           )}
             </>

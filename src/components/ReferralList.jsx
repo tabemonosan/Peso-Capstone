@@ -5,6 +5,7 @@ import RatingForm from "./RatingForm"
 import Pagination from "./Pagination"
 import { usePagination } from "../hooks/usePagination"
 import { formatFullName } from "../../shared/nameFields.js"
+import { outcomeLabel } from "../../shared/employmentReporting.js"
 
 function ReferralList({ token, employerId }) {
   const [referrals, setReferrals] = useState([])
@@ -29,36 +30,38 @@ function ReferralList({ token, employerId }) {
     setLoading(true)
     setError("")
 
-    fetch(`${API_URL}/api/referrals/employer/${employerId}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(async (response) => {
-        const data = await response.json().catch(() => null)
-        if (!response.ok) {
-          throw new Error(data?.error || `Request failed: ${response.status}`)
-        }
-        return Array.isArray(data) ? data : []
+    let cancelled = false
+    const load = async (path) => {
+      const response = await fetch(`${API_URL}${path}`, { headers: { Authorization: `Bearer ${token}` } })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) throw new Error(data?.error || `Request failed: ${response.status}`)
+      return Array.isArray(data) ? data : []
+    }
+    Promise.all([load(`/api/referrals/employer/${employerId}`), load('/api/hire-reports')])
+      .then(([items, reports]) => {
+        if (cancelled) return
+        setReferrals(items)
+        setHireReportsByReferral(Object.fromEntries(reports.filter((report) => report.referralId).map((report) => [String(report.referralId), report])))
       })
-      .then((data) => setReferrals(data))
       .catch((err) => {
+        if (cancelled) return
         setReferrals([])
         setError(err?.message || "Failed to load referrals")
       })
-      .finally(() => setLoading(false))
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
   }, [token, employerId])
 
   const handleRespond = async (referralId, status) => {
     if (!token) return
     const action = status === 'accepted' ? 'Accept' : 'Decline'
-    if (!window.confirm(`${action} this referral?${status === 'declined' ? ' The applicant will be removed from this list.' : ''}`)) return
+    if (!window.confirm(`${action} this referral? This response does not report a hiring outcome to PESO.`)) return
     const previous = referrals
     setError("")
 
-    // Declined referrals are removed from the employer's list; accepted stay and show as accepted
+    // Keep declined referrals available so the employer can report the outcome.
     setReferrals((current) =>
-      status === 'declined'
-        ? current.filter((item) => String(item._id) !== String(referralId))
-        : current.map((item) => (String(item._id) === String(referralId) ? { ...item, status } : item)),
+      current.map((item) => (String(item._id) === String(referralId) ? { ...item, status } : item)),
     )
 
     try {
@@ -76,11 +79,9 @@ function ReferralList({ token, employerId }) {
         throw new Error(data?.error || `Request failed: ${response.status}`)
       }
 
-      if (status !== 'declined') {
-        setReferrals((current) =>
-          current.map((item) => (String(item._id) === String(referralId) ? { ...item, ...data } : item)),
-        )
-      }
+      setReferrals((current) =>
+        current.map((item) => (String(item._id) === String(referralId) ? { ...item, status: data.status } : item)),
+      )
     } catch (err) {
       setReferrals(previous)
       setError(err?.message || "Failed to update referral status")
@@ -137,7 +138,7 @@ function ReferralList({ token, employerId }) {
   return (
     <section className="employer-referrals-card rounded-2xl border border-slate-300 bg-white p-6 text-black">
       <h2 className="text-xl font-semibold text-black">Referrals</h2>
-      <p className="mt-3 text-black">Review PESO referrals and respond to pending applicants.</p>
+      <p className="mt-3 text-black">PESO facilitates referrals and retains the NSRP form. Contact applicants directly for hiring and decide deployment timing. Report the outcome to PESO; applicants must also report once officially hired or deployed.</p>
 
       {loading && <p className="mt-4 text-black">Loading referrals…</p>}
       {!loading && error && <p className="mt-4 text-sm text-rose-700">{error}</p>}
@@ -244,19 +245,18 @@ function ReferralList({ token, employerId }) {
                   </div>
                 )}
 
-                {status === "accepted" && applicantId && jobId && (
+                {(status === "accepted" || status === "declined") && applicantId && jobId && (
                   <>
-                    {!hireReport && (
                       <HireReportForm
                         token={token}
                         applicantId={String(applicantId)}
                         jobId={String(jobId)}
                         referralId={referralId}
+                        existingReport={hireReport}
                         onCreated={(created) => handleHireReportCreated(referralId, created)}
                       />
-                    )}
 
-                    {hireReport && !hasRating && (
+                    {hireReport && hireReport.status !== 'not_hired' && !hasRating && (
                       <RatingForm
                         token={token}
                         toUserId={String(applicantId)}
@@ -266,7 +266,8 @@ function ReferralList({ token, employerId }) {
                       />
                     )}
 
-                    {hasRating && (
+                    {hireReport && <p className="mt-3 text-sm text-slate-700">Reported to PESO: {outcomeLabel(hireReport.status)}</p>}
+                    {hasRating && hireReport?.status !== 'not_hired' && (
                       <p className="mt-4 text-sm text-cyan-300">Rating submitted for this hire report.</p>
                     )}
                   </>
@@ -330,10 +331,18 @@ function ReferralList({ token, employerId }) {
             <div className="space-y-2 px-6 pb-6 pt-1 text-sm text-black">
               <p><span className="font-semibold">Name:</span> {formatFullName(selectedProfile.profile) || 'N/A'}</p>
               <p><span className="font-semibold">Email:</span> {selectedProfile.email || 'N/A'}</p>
+              <p><span className="font-semibold">Phone:</span> {selectedProfile.phone || 'N/A'}</p>
               <p><span className="font-semibold">Location:</span> {selectedProfile.profile?.location || 'N/A'}</p>
               <p><span className="font-semibold">Skills:</span> {Array.isArray(selectedProfile.profile?.skills) && selectedProfile.profile.skills.length > 0 ? selectedProfile.profile.skills.join(', ') : 'N/A'}</p>
               {selectedProfile.profile?.traits && <p><span className="font-semibold">Traits:</span> {selectedProfile.profile.traits}</p>}
               {selectedProfile.profile?.summary && <p><span className="font-semibold">Summary:</span> {selectedProfile.profile.summary}</p>}
+              {['education', 'technicalTraining', 'workExperience'].map((key) => selectedProfile.profile?.[key]?.length > 0 && (
+                <div key={key}>
+                  <p className="font-semibold">{{ education: 'Education', technicalTraining: 'Training', workExperience: 'Work experience' }[key]}:</p>
+                  <ul className="list-disc pl-5">{selectedProfile.profile[key].map((entry, index) => <li key={index}>{Object.values(entry).filter(Boolean).join(' · ')}</li>)}</ul>
+                </div>
+              ))}
+              <p className="text-xs text-slate-500">The NSRP form and supporting verification documents are retained by PESO.</p>
             </div>
           </div>
         </div>

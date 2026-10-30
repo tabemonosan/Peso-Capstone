@@ -3,8 +3,9 @@ import { API_URL } from "../config"
 import Pagination from "./Pagination"
 import { usePagination } from "../hooks/usePagination"
 import { formatFullName } from "../../shared/nameFields.js"
+import { outcomeLabel } from "../../shared/employmentReporting.js"
 
-function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, initialApplicantIds = [] }) {
+function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, initialApplicantIds = [], onViewUpdates }) {
   const [jobs, setJobs] = useState([])
   const [referredApplicantIdsByJob, setReferredApplicantIdsByJob] = useState({})
   const [referralStatusByJob, setReferralStatusByJob] = useState({})
@@ -51,7 +52,7 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
 
     const headers = { Authorization: `Bearer ${token}` }
 
-    const jobsRequest = fetch("${API_URL}/api/jobs?status=approved", { headers })
+    const jobsRequest = fetch(`${API_URL}/api/jobs?status=approved`, { headers })
       .then(async (response) => {
         const data = await response.json().catch(() => null)
         if (!response.ok) throw new Error(data?.error || `Failed to load jobs (${response.status})`)
@@ -59,7 +60,7 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
       })
       .then((data) => setJobs(data))
 
-    const referralsRequest = fetch("${API_URL}/api/referrals/admin", { headers })
+    const referralsRequest = fetch(`${API_URL}/api/referrals/admin`, { headers })
       .then(async (response) => {
         const data = await response.json().catch(() => null)
         if (!response.ok) throw new Error(data?.error || `Failed to load referrals (${response.status})`)
@@ -79,7 +80,7 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
         setReferralStatusByJob(statusByJob)
       })
 
-    const hireReportsRequest = fetch("${API_URL}/api/hire-reports", { headers })
+    const hireReportsRequest = fetch(`${API_URL}/api/hire-reports`, { headers })
       .then(async (response) => {
         const data = await response.json().catch(() => null)
         if (!response.ok) throw new Error(data?.error || `Failed to load hire reports (${response.status})`)
@@ -127,7 +128,7 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
     }))
 
     try {
-      const response = await fetch("${API_URL}/api/referrals", {
+      const response = await fetch(`${API_URL}/api/referrals`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -324,6 +325,7 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
 
       <div className="admin-hire-reports mt-6 rounded-2xl border border-slate-800 bg-slate-950/80 p-5">
         <h3 className="text-lg font-semibold text-white">Hire Reports Tracking</h3>
+        {onViewUpdates && <button type="button" onClick={onViewUpdates} className="mt-3 rounded-lg border border-cyan-300 bg-white px-3 py-2 text-sm font-semibold text-cyan-900">Compare applicant and employer updates</button>}
         {hireReports.length === 0 ? (
           <p className="mt-3 text-sm text-slate-400">No hire reports yet.</p>
         ) : (
@@ -332,20 +334,28 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
               <thead>
                 <tr className="border-b border-slate-700 text-xs uppercase tracking-[0.2em] text-slate-400">
                   <th className="px-2 py-2">Status</th>
-                  <th className="px-2 py-2">Applicant ID</th>
-                  <th className="px-2 py-2">Employer ID</th>
-                  <th className="px-2 py-2">Job ID</th>
+                  <th className="px-2 py-2">Reported by</th>
+                  <th className="px-2 py-2">Hire / deployment date</th>
+                  <th className="px-2 py-2">Notes to PESO</th>
+                  <th className="px-2 py-2">Applicant</th>
+                  <th className="px-2 py-2">Employer</th>
+                  <th className="px-2 py-2">Job</th>
                   <th className="px-2 py-2">Reported</th>
+                  <th className="px-2 py-2">Previous updates</th>
                 </tr>
               </thead>
               <tbody>
                 {hireReportsPagination.paginate(hireReports).map((report) => (
                   <tr key={report._id} className="border-b border-slate-800">
-                    <td className="px-2 py-2">{report.status}</td>
-                    <td className="px-2 py-2">{String(report.applicantId || "")}</td>
-                    <td className="px-2 py-2">{String(report.employerId || "")}</td>
-                    <td className="px-2 py-2">{String(report.jobId || "")}</td>
+                    <td className="px-2 py-2">{outcomeLabel(report.status)}</td>
+                    <td className="px-2 py-2">{report.reportedByRole || 'Employer'}</td>
+                    <td className="px-2 py-2">{report.employmentDate || 'Not provided'}</td>
+                    <td className="px-2 py-2">{report.notes || '—'}</td>
+                    <td className="px-2 py-2">{(() => { const account = (adminUsers || []).find((user) => String(user.id || user._id) === String(report.applicantId)); return formatFullName(account?.profile) || account?.email || String(report.applicantId || '') })()}</td>
+                    <td className="px-2 py-2">{(() => { const account = (adminUsers || []).find((user) => String(user.id || user._id) === String(report.employerId)); return account?.companyName || account?.email || String(report.employerId || '') })()}</td>
+                    <td className="px-2 py-2">{jobs.find((job) => String(job._id) === String(report.jobId))?.title || String(report.jobId || '')}</td>
                     <td className="px-2 py-2">{report.reportedAt ? new Date(report.reportedAt).toLocaleString() : "N/A"}</td>
+                    <td className="px-2 py-2">{report.history?.length > 0 ? <details><summary>{report.history.length} previous update(s)</summary><ul>{report.history.map((entry, index) => <li key={index} className="mt-2">{outcomeLabel(entry.status)}{entry.employmentDate ? ` · ${entry.employmentDate}` : ''}{entry.notes ? ` · ${entry.notes}` : ''}{entry.reportedAt ? ` · reported ${new Date(entry.reportedAt).toLocaleString()}` : ''}</li>)}</ul></details> : 'None'}</td>
                   </tr>
                 ))}
               </tbody>

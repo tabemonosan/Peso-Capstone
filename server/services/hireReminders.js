@@ -15,7 +15,7 @@ export async function sendHireReportReminders({ now = new Date(), notifyFn = not
   const referrals = await Referral.find({ status: 'accepted', updatedAt: { $lte: acceptedBefore } }).lean()
   let sent = 0
   for (const referral of referrals) {
-    const reported = await HireReport.exists({ referralId: referral._id })
+    const reported = await HireReport.exists({ referralId: referral._id, $or: [{ reportedByRole: 'Employer' }, { reportedByRole: { $exists: false } }] })
     if (reported) continue
     const recent = await Notification.exists({
       type: 'hire_report_reminder',

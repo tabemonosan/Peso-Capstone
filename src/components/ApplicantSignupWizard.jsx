@@ -13,7 +13,7 @@ import {
   NSRP_TEXT_LIMITS, NSRP_NUMERIC_SPECS, NSRP_SECTION_MAX_ROWS,
   EMPLOYED_TYPES, UNEMPLOYED_TYPES, EDUCATION_LEVELS, SEX_OPTIONS, CIVIL_STATUS_OPTIONS,
   EMPLOYMENT_STATUS_OPTIONS, YES_NO, DISABILITY_OPTIONS, WORK_STATUS_OPTIONS,
-  digitsOnly, normalizePhMobile, normalizePassportNo,
+  digitsOnly, normalizePhMobile, normalizePassportNo, validateNsrpLanguages,
 } from "../../shared/nsrpValidation.js"
 
 const STORAGE_KEY = "peso-applicant-signup-draft"
@@ -175,7 +175,7 @@ function safeDraft() {
   }
 }
 
-export default function ApplicantSignupWizard({ onCancel, mode = "signup", initialAnswers = {}, token, onSaved }) {
+export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "signup", initialAnswers = {}, token, onSaved }) {
   const isUpdate = mode === "update"
   const saved = useMemo(safeDraft, [])
   const [email, setEmail] = useState(saved.email)
@@ -459,6 +459,13 @@ export default function ApplicantSignupWizard({ onCancel, mode = "signup", initi
       return Object.keys(localErrors).length === 0
     }
     if (step >= 1 && step <= 6) {
+      if (step === 4) {
+        const languageErrors = validateNsrpLanguages(answers.languages)
+        if (Object.keys(languageErrors).length) {
+          showErrors(languageErrors)
+          return false
+        }
+      }
       const bodyAnswers = { ...answers, email }
       const response = await fetch(`${API_URL}/api/nsrp/validate-signup`, {
         method: "POST",
@@ -656,6 +663,7 @@ export default function ApplicantSignupWizard({ onCancel, mode = "signup", initi
         setPassword("")
         setConfirmPassword("")
         setNsrpUpload(null)
+        onComplete?.()
       }
       setComplete(true)
     } catch (submitError) {
@@ -1120,11 +1128,21 @@ export default function ApplicantSignupWizard({ onCancel, mode = "signup", initi
                     if (index >= 0) next[index] = updated
                     else next.push(updated)
                     updateAnswer("languages", next)
+                    if (!Object.keys(validateNsrpLanguages(next)).length) setFieldErrors((current) => ({ ...current, 'languages[Others].otherName': undefined }))
                   }
-                  return <div key={name} className="flex flex-wrap items-center gap-3 text-xs text-slate-700">
-                    <span className="w-16 font-medium">{name}</span>
-                    {name === "Others" && <input value={row.otherName || ""} maxLength={NSRP_ROW_LIMITS.languages.name} onChange={(event) => setLanguage("otherName", event.target.value)} placeholder="Other language" className="rounded border border-slate-300 px-2 py-1" />}
-                    {["read", "write", "speak", "understand"].map((key) => <label key={key} className="flex items-center gap-1"><input type="checkbox" checked={Boolean(row[key])} onChange={(event) => setLanguage(key, event.target.checked)} />{key}</label>)}
+                  const otherError = name === 'Others' ? fieldErrors['languages[Others].otherName'] : undefined
+                  return <div key={name} role="group" aria-label={`${name} proficiency`} className="grid grid-cols-1 gap-2 text-xs text-slate-700 sm:grid-cols-[4rem_minmax(0,1fr)]">
+                    <span className="font-medium sm:pt-1">{name}</span>
+                    <div className="min-w-0 space-y-2">
+                      {name === "Others" && <label className="block">
+                        <span className="sr-only">Other language</span>
+                        <input id="field-languages-Others-otherName" value={row.otherName || ""} maxLength={NSRP_ROW_LIMITS.languages.name} onChange={(event) => setLanguage("otherName", event.target.value)} placeholder="Specify other language" aria-invalid={Boolean(otherError)} aria-describedby={otherError ? 'other-language-error' : undefined} className={`shared-form-control w-full min-w-0 rounded border border-slate-300 px-2 py-1${inputErrorClass(otherError)}`} />
+                      </label>}
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-2 min-[480px]:grid-cols-4">
+                        {["read", "write", "speak", "understand"].map((key) => <label key={key} className="inline-flex items-center gap-1.5 whitespace-nowrap"><input type="checkbox" checked={Boolean(row[key])} onChange={(event) => setLanguage(key, event.target.checked)} className="shrink-0" />{key}</label>)}
+                      </div>
+                      {otherError && <p id="other-language-error" role="alert" className="text-xs text-rose-700">{otherError}</p>}
+                    </div>
                   </div>
                 })}
               </div>
@@ -1158,7 +1176,6 @@ export default function ApplicantSignupWizard({ onCancel, mode = "signup", initi
       )}
       {step === 7 && !isUpdate && (
         <>
-          <p className="text-xs text-slate-500">A resume is optional — you can add it later from My Documents.</p>
           <VerificationDocumentsForm docs={docs} setDocs={setDocs} disabled={busy} fieldErrors={fieldErrors} />
         </>
       )}

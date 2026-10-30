@@ -74,6 +74,12 @@ export const YES_NO = ['Yes', 'No']
 export const DISABILITY_OPTIONS = ['Visual', 'Hearing', 'Speech', 'Physical', 'Others']
 export const EDUCATION_LEVELS = ['Elementary', 'Secondary', 'Tertiary', 'Graduate Studies']
 export const LANGUAGE_ROWS = ['English', 'Filipino', 'Others']
+export function validateNsrpLanguages(languages) {
+  const needsName = Array.isArray(languages) && languages.some((row) => row?.name === 'Others'
+    && ['read', 'write', 'speak', 'understand'].some((key) => Boolean(row[key]))
+    && !String(row.otherName || '').trim())
+  return needsName ? { 'languages[Others].otherName': 'Enter the other language when selecting its proficiency.' } : {}
+}
 export const WORK_STATUS_OPTIONS = ['Permanent', 'Contractual', 'Part-time', 'Probationary']
 
 // Enum-style fields: only these values may reach the database.

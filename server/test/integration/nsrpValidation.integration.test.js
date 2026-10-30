@@ -32,6 +32,23 @@ beforeEach(async () => {
 const validate = (step, overrides) => request(app).post('/api/nsrp/validate-signup').send({ step, answers: validNsrpAnswers({ email: 'validator@example.com', ...overrides }) })
 const signup = (email, answers) => signupRequest(request(app).post('/api/signup'), { email, answers })
 
+describe('Other language proficiency', () => {
+  it.each(['read', 'write', 'speak', 'understand'])('requires a name when %s is selected', async (proficiency) => {
+    const res = await validate(3, { languages: [{ name: 'Others', otherName: '   ', [proficiency]: true }] })
+    expect(res.status).toBe(422)
+    expect(res.body.fieldErrors['languages[Others].otherName']).toBe('Enter the other language when selecting its proficiency.')
+  })
+  it('accepts a named language and accepts an unused blank Others row', async () => {
+    expect((await validate(3, { languages: [{ name: 'Others', otherName: 'Bikol', understand: true }] })).status).toBe(200)
+    expect((await validate(3, { languages: [{ name: 'Others', otherName: '' }] })).status).toBe(200)
+  })
+  it('rejects final signup too, even if step validation was bypassed', async () => {
+    const res = await signup('language-required@example.com', validNsrpAnswers({ languages: [{ name: 'Others', speak: true }] }))
+    expect(res.status).toBe(422)
+    expect(res.body.fieldErrors['languages[Others].otherName']).toBeTruthy()
+  })
+})
+
 describe('NSRP validator: numeric ID fields (step 1)', () => {
   it.each([
     ['tin', '12345678', '9 or 12 digits'],

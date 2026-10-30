@@ -4,7 +4,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest'
 import request from 'supertest'
 import mongoose from 'mongoose'
-import jwt from 'jsonwebtoken'
 
 vi.mock('../../mailer.js', async (importOriginal) => {
   const actual = await importOriginal()
@@ -19,8 +18,6 @@ const { app } = await import('../../index.js')
 const { Applicant } = await import('../../models/collections.js')
 const { startTestDb, stopTestDb, clearDb, signupRequest, signupUploadRequest, validBasicInfo, pdfBuffer, FIVE_MB } = await import('./helpers.js')
 
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret'
-const applicantToken = (email) => jwt.sign({ email, role: 'Applicant' }, JWT_SECRET)
 
 const applicantCount = () => mongoose.connection.db.collection('applicants').countDocuments()
 const documentFileCount = () => mongoose.connection.db.collection('document_files').countDocuments()
@@ -131,9 +128,9 @@ describe('online path without a resume', () => {
   }, 60000)
 
   it('counts only the 3 required documents and ignores a missing resume', async () => {
-    await signupRequest(request(app).post('/api/signup'), { email: 'counted@example.com', resume: false })
+    const signup = await signupRequest(request(app).post('/api/signup'), { email: 'counted@example.com', resume: false })
     // All 3 required pending (not rejected/missing): nothing needs attention
-    const res = await request(app).get('/api/profile').set('Authorization', `Bearer ${applicantToken('counted@example.com')}`)
+    const res = await request(app).get('/api/profile').set('Authorization', `Bearer ${signup.body.token}`)
     expect(res.status).toBe(200)
     expect(res.body.attentionCount).toBe(0)
     const resumeDoc = res.body.verificationDocuments.find((d) => d.docKey === 'resume')
@@ -143,7 +140,7 @@ describe('online path without a resume', () => {
   }, 60000)
 
   it('reaches verified status and can apply for a job without a resume', async () => {
-    await signupRequest(request(app).post('/api/signup'), { email: 'apply-no-resume@example.com', resume: false })
+    const signup = await signupRequest(request(app).post('/api/signup'), { email: 'apply-no-resume@example.com', resume: false })
     // Admin approves the 3 required documents
     await Applicant.updateOne(
       { email: 'apply-no-resume@example.com' },
@@ -157,7 +154,7 @@ describe('online path without a resume', () => {
     const job = await JobPosting.create({ title: 'Clerk', company: 'Acme', status: 'approved', createdBy: 'boss@example.com' })
     const res = await request(app)
       .post(`/api/jobs/${job._id}/apply`)
-      .set('Authorization', `Bearer ${applicantToken('apply-no-resume@example.com')}`)
+      .set('Authorization', `Bearer ${signup.body.token}`)
       .send({})
     expect(res.status).toBe(200)
   }, 60000)

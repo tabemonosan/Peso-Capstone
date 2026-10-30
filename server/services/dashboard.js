@@ -61,7 +61,7 @@ export function createDashboardService({ Applicant, Employer, JobPosting, JobApp
       Employer.countDocuments({}),
       countJobsByStatus(JobPosting),
       Applicant.aggregate(pendingDocsPipeline),
-      HireReport.countDocuments({}),
+      HireReport.countDocuments({ status: { $in: ['hired', 'deployed'] }, $or: [{ reportedByRole: 'Employer' }, { reportedByRole: { $exists: false } }] }),
       Referral.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
       Applicant.aggregate(perDay('createdAt', since)),
       Employer.aggregate(perDay('createdAt', since)),
@@ -102,7 +102,7 @@ export function createDashboardService({ Applicant, Employer, JobPosting, JobApp
       JobApplication.countDocuments({ jobId: { $in: jobIds } }),
       JobApplication.aggregate(perDay('submittedAt', since, { jobId: { $in: jobIds } })),
       Referral.aggregate([{ $match: { employerId: user.objectId } }, { $group: { _id: '$status', count: { $sum: 1 } } }]),
-      HireReport.countDocuments({ employerId: user.objectId }),
+      HireReport.countDocuments({ employerId: user.objectId, status: { $in: ['hired', 'deployed'] }, $or: [{ reportedByRole: 'Employer' }, { reportedByRole: { $exists: false } }] }),
       recentActivity(user),
     ])
     const jobCounts = countBy(jobStatus)

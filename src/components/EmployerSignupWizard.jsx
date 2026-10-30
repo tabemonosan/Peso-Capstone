@@ -58,7 +58,7 @@ function EmployerPrintWarnings({ warnings, onFix }) {
   )
 }
 
-export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCancel }) {
+export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCancel, onComplete }) {
   const saved = useMemo(readDraft, [])
   const [email, setEmail] = useState(saved.email || "")
   const [password, setPassword] = useState("")
@@ -446,6 +446,7 @@ export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCance
       setSignature("")
       setRegistrationFile(null)
       setComplete(true)
+      onComplete?.()
     } catch (submitError) {
       console.error("Employer registration submit failed:", submitError)
       setError(submitError?.message || "Employer account creation failed.")

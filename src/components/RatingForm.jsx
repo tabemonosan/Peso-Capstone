@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { API_URL } from "../config"
 
 function RatingForm({ token, toUserId, toRole, hireReportId, onCreated }) {
   const [score, setScore] = useState(5)
@@ -17,7 +18,7 @@ function RatingForm({ token, toUserId, toRole, hireReportId, onCreated }) {
     setError("")
 
     try {
-      const response = await fetch("${API_URL}/api/ratings", {
+      const response = await fetch(`${API_URL}/api/ratings`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

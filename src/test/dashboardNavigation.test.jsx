@@ -15,12 +15,50 @@ function mockRole(role, overrides = {}) {
     if (url.endsWith('/api/login')) data = { token: 'token', user }
     else if (url.endsWith('/api/profile')) data = user
     else if (url.endsWith('/api/dashboard')) data = dashboard(role)
+    else if (url.includes('/api/admin/employment-updates')) data = { items: [], total: 0 }
     else if (url.includes('/api/notifications')) data = { items: [], unreadCount: 0 }
     else if (url.endsWith('/api/employer/verification')) data = { verificationStatus: 'approved' }
     return { ok: true, json: async () => data }
   }))
 }
 describe('one dashboard per role', () => {
+  it('opens the admin hiring updates window from the Hires card', async () => {
+    mockRole('Admin')
+    localStorage.setItem('peso-token', 'token')
+    localStorage.setItem('peso-active-role', 'Admin')
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Hires 2' }))
+    expect(await screen.findByRole('dialog', { name: 'Hiring updates' })).toBeInTheDocument()
+    expect(await screen.findByText('No hiring updates submitted yet.')).toBeInTheDocument()
+  })
+  it('keeps documents inside Profile and off the applicant sidebar and landing page', async () => {
+    mockRole('Applicant', { verificationStatus: 'under_review', attentionCount: 1 })
+    localStorage.setItem('peso-token', 'token')
+    localStorage.setItem('peso-active-view', 'home')
+    render(<App />)
+    expect(await screen.findByRole('heading', { name: 'Dashboard', exact: true })).toBeInTheDocument()
+    const nav = screen.getByRole('navigation', { name: 'Applicant navigation' })
+    expect(within(nav).queryByRole('button', { name: /My Documents/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'My Documents' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Documents awaiting review')).not.toBeInTheDocument()
+    expect(screen.queryByText(/document.*need.*attention/)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Profile', exact: true }))
+    expect(await screen.findByRole('heading', { name: 'Documents submitted to PESO' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Manage my documents' }))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+  it.each(['saved', 'link'])('opens the profile documents modal for a %s document destination', async (destination) => {
+    mockRole('Applicant')
+    localStorage.setItem('peso-token', 'token')
+    if (destination === 'saved') localStorage.setItem('peso-active-view', 'documents')
+    else window.history.replaceState({}, '', '/profile?documents=1')
+    render(<App />)
+    expect(await screen.findByRole('heading', { name: 'Applicant Profile' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
+    expect(localStorage.getItem('peso-active-view')).toBe('profile')
+  })
   it.each(['Admin', 'Employer', 'Applicant'])('gives %s one Dashboard with role-relevant information', async (role) => {
     mockRole(role)
     render(<App />)
@@ -39,7 +77,7 @@ describe('one dashboard per role', () => {
       expect(screen.queryByRole('button', { name: /Account status/ })).not.toBeInTheDocument()
     }
     if (role === 'Applicant') {
-      expect(screen.getByRole('button', { name: /Account status approved/ })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Account status/ })).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: /Jobs pending/ })).not.toBeInTheDocument()
     }
   })

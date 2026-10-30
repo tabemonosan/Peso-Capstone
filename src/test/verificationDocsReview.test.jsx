@@ -54,6 +54,34 @@ async function renderModal(props = {}) {
 }
 
 describe('VerificationDocsReviewModal confirm step', () => {
+  it.each(['restrict', 'unrestrict'])('confirms %s, supports cancellation, and updates the available action', async (action) => {
+    let currentStatus = action === 'restrict' ? 'approved' : 'restricted'
+    const change = vi.fn(async () => { currentStatus = action === 'restrict' ? 'restricted' : 'approved'; return { ok: true, verificationStatus: currentStatus } })
+    mockFetch.mockImplementation(async () => ({ ok: true, json: async () => ({ ...docsResponse, verificationStatus: currentStatus }) }))
+    render(<VerificationDocsReviewModal applicant={{ ...applicant, verificationStatus: currentStatus }} token="token" onClose={() => {}} onReviewed={() => {}} onRestrict={action === 'restrict' ? change : vi.fn()} onUnrestrict={action === 'unrestrict' ? change : vi.fn()} />)
+    const label = action === 'restrict' ? 'Restrict applicant' : 'Unrestrict applicant'
+    fireEvent.click(await screen.findByRole('button', { name: label }))
+    expect(change).not.toHaveBeenCalled()
+    let dialog = screen.getByRole('alertdialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    expect(change).not.toHaveBeenCalled()
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: label }))
+    dialog = screen.getByRole('alertdialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: `Yes, ${action}` }))
+    await waitFor(() => expect(change).toHaveBeenCalledExactlyOnceWith('app1'))
+    await screen.findByRole('button', { name: action === 'restrict' ? 'Unrestrict applicant' : 'Restrict applicant' })
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+  })
+
+  it('keeps the restriction confirmation open when the request fails', async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ ...docsResponse, verificationStatus: 'approved' }) })
+    render(<VerificationDocsReviewModal applicant={{ ...applicant, verificationStatus: 'approved' }} token="token" onClose={() => {}} onRestrict={async () => ({ error: 'Could not update account' })} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Restrict applicant' }))
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Yes, restrict' }))
+    await waitFor(() => expect(within(screen.getByRole('alertdialog')).getByText('Could not update account')).toBeInTheDocument())
+  })
+
   it('shows front/back controls only for uploaded Valid ID sides and opens the corresponding signed URLs', async () => {
     const open = vi.spyOn(window, 'open').mockImplementation(() => null)
     const docs = [

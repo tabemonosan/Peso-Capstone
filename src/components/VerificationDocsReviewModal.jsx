@@ -13,13 +13,14 @@ const QUICK_REJECT_REASONS = ["Blurry or unreadable", "Wrong document type", "Na
 // - Resubmitted documents (new pending version after a rejection) are flagged.
 // - Version history is expandable so admins can compare with previous versions.
 // - Reject requires a reason; the applicant only has to re-upload that document.
-export default function VerificationDocsReviewModal({ applicant, token, onClose, onReviewed, onRestrict }) {
+export default function VerificationDocsReviewModal({ applicant, token, onClose, onReviewed, onRestrict, onUnrestrict, readOnly = false }) {
   const [documents, setDocuments] = useState(null)
   const [status, setStatus] = useState(null)
   const [details, setDetails] = useState(null)
   const [expanded, setExpanded] = useState({}) // docKey -> bool
   // confirmAction: { docKey, action: 'approved' | 'rejected' | 'revert' } | null
   const [confirmAction, setConfirmAction] = useState(null)
+  const [accountAction, setAccountAction] = useState(null)
   const [actionBusy, setActionBusy] = useState(false)
   const [actionError, setActionError] = useState("")
   const [toast, setToast] = useState("")
@@ -109,6 +110,27 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
   }
 
   const applicantName = applicant.displayName || formatFullName(applicant.profile) || applicant.companyName || applicant.email
+  const accountStatus = status?.verificationStatus || applicant.verificationStatus
+  const changeRestriction = async () => {
+    if (inFlightRef.current) return
+    inFlightRef.current = true
+    setActionBusy(true)
+    setActionError('')
+    try {
+      const change = accountAction === 'unrestrict' ? onUnrestrict : onRestrict
+      const result = await change(applicant.id || applicant._id)
+      if (result?.error) { setActionError(result.error); return }
+      setAccountAction(null)
+      await load()
+      onReviewed?.()
+      showToast(accountAction === 'unrestrict' ? 'Applicant unrestricted' : 'Applicant restricted')
+    } catch (err) {
+      setActionError(err?.message || 'Failed to update applicant')
+    } finally {
+      inFlightRef.current = false
+      setActionBusy(false)
+    }
+  }
   const profile = applicant.profile || {}
   const basic = details?.basic || {}
   const nsrp = details?.nsrpData || profile.nsrp || {}
@@ -219,10 +241,14 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
               </dd>
             </div>
           </dl>
-          {applicant.verificationStatus === "approved" && onRestrict && (
-            <button type="button" onClick={() => onRestrict(applicant.id)} className="mt-3 rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-white">
+          {readOnly && <p className="mt-3 text-sm font-semibold text-slate-700">Account closed. This retained PESO record is read-only and separate from any new registration.</p>}
+          {!readOnly && accountStatus === "approved" && onRestrict && (
+            <button type="button" onClick={() => { setActionError(''); setAccountAction('restrict') }} className="mt-3 rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-white">
               Restrict applicant
             </button>
+          )}
+          {!readOnly && accountStatus === 'restricted' && onUnrestrict && (
+            <button type="button" onClick={() => { setActionError(''); setAccountAction('unrestrict') }} className="mt-3 rounded-lg bg-cyan-700 px-3 py-1.5 text-xs font-semibold text-white">Unrestrict applicant</button>
           )}
         </section>
 
@@ -248,6 +274,7 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
                   {doc.resubmitted && (
                     <span className="rounded-full border border-cyan-300 bg-cyan-100 px-2 py-0.5 text-xs font-semibold text-cyan-800">resubmitted</span>
                   )}
+                  {doc.correctionRequest && <p className="w-full rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">Applicant correction request: {doc.correctionRequest.reason}. Use Revert to pending to reopen this document for review.</p>}
                   {doc.docKey.startsWith("validId") ? (
                     (doc.latest?.url || doc.latest?.back?.url) && (
                       <div role="group" aria-label={`${doc.label} file views`} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1">
@@ -270,7 +297,7 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
                       </button>
                     )
                   )}
-                  {doc.status === "pending" && (
+                  {!readOnly && doc.status === "pending" && (
                     <>
                       <button
                         type="button"
@@ -288,7 +315,7 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
                       </button>
                     </>
                   )}
-                  {doc.status === "approved" && (
+                  {!readOnly && doc.status === "approved" && (
                     <button
                       type="button"
                       onClick={() => { setActionError(""); setConfirmAction({ docKey: doc.docKey, action: "revert" }) }}
@@ -375,6 +402,17 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
           </p>
         )}
 
+        {accountAction && <ConfirmDialog
+          title={`${accountAction === 'unrestrict' ? 'Unrestrict' : 'Restrict'} ${applicantName}?`}
+          note={accountAction === 'unrestrict' ? 'The restriction will be removed. Access will follow the applicant’s document verification status.' : 'This applicant will be unable to sign in or use protected employment features until an admin removes the restriction.'}
+          confirmLabel={accountAction === 'unrestrict' ? 'Yes, unrestrict' : 'Yes, restrict'}
+          confirmTone={accountAction === 'unrestrict' ? 'primary' : 'danger'}
+          busyLabel={accountAction === 'unrestrict' ? 'Unrestricting...' : 'Restricting...'}
+          busy={actionBusy}
+          error={actionError}
+          onConfirm={changeRestriction}
+          onCancel={() => { if (!actionBusy) setAccountAction(null) }}
+        />}
         {confirmAction && (() => {
           const doc = documents?.find((item) => item.docKey === confirmAction.docKey)
           const docLabel = doc ? `${doc.label}${doc.idType ? ` (${doc.idType})` : ""}` : confirmAction.docKey
