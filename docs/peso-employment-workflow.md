@@ -11,6 +11,11 @@ Hiring communication takes place directly between employer and applicant.
 Accepting a referral is not confirmation that the applicant was hired.
 Declined referrals remain available to the employer for outcome reporting.
 
+Applicants may apply only after PESO approves their required documents. The API
+also rejects applications after the posting's deadline, using the Philippine
+calendar date (applications remain open throughout the deadline date). Referrals
+require an approved posting and approved applicants with active accounts.
+
 Employers report Hired, Not hired, or Deployed from Reports. Applicants report
 Hired or Deployed from Employment updates only after the employer accepts the
 PESO referral. Pending/declined referrals and direct applications do not expose

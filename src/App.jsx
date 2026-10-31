@@ -23,7 +23,7 @@ import ReferralList from "./components/ReferralList"
 import ApplicantEmploymentReports from "./components/ApplicantEmploymentReports"
 import ApplicantAccountSettings from "./components/ApplicantAccountSettings"
 import AdminAccountDeletionRequests from "./components/AdminAccountDeletionRequests"
-import AdminEmploymentUpdatesModal from "./components/AdminEmploymentUpdatesModal"
+import AdminEmploymentUpdatesPage from "./components/AdminEmploymentUpdatesPage"
 import PortalNavIcon from "./components/PortalNavIcon"
 import ReviewQuestionnaires from "./components/ReviewQuestionnaires"
 import AdminCsmFeedbackModal from "./components/AdminCsmFeedbackModal"
@@ -506,7 +506,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
   }, [confirmDialog, confirmBusy, closeConfirmDialog])
   const [showVerificationModal, setShowVerificationModal] = useState(false)
   const [reviewDocsApplicant, setReviewDocsApplicant] = useState(null)
-  const [hiringUpdates, setHiringUpdates] = useState(null)
+  const [hiringUpdates, setHiringUpdates] = useState({})
   const [clientFeedbackOpen, setClientFeedbackOpen] = useState(false)
   const [jobSubmittedOpen, setJobSubmittedOpen] = useState(false)
   const [verificationEmail, setVerificationEmail] = useState('')
@@ -1427,6 +1427,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
     if (activeRole === 'Admin' && notification?.type === 'hire_report_submitted') {
       setSelectedNotification(null)
       setHiringUpdates({ applicantId: notification.metadata?.applicantId, jobId: notification.metadata?.jobId })
+      setActiveView('employment-updates')
       return
     }
     setSelectedNotification(notification)
@@ -2211,7 +2212,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
                 type="button"
                 onClick={() => {
                   if (activeRole === 'Admin' && item.id === 'employment-updates') setHiringUpdates({})
-                  else setActiveView(item.id)
+                  setActiveView(item.id)
                 }}
                 className={`portal-nav-item ${
                   activeView === item.id ? "is-active" : ""
@@ -2316,7 +2317,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
               )}
               <RoleDashboard token={getToken()} applicantOverview={activeRole === 'Applicant' ? { openJobs: availableJobs.length, notifications: notifTotal } : undefined} onNavigate={(target) => {
                 if (activeRole === 'Admin' && target === 'employment-updates') setHiringUpdates({})
-                else setActiveView(target)
+                setActiveView(target)
               }} />
               {activeRole === 'Applicant' && applicantApproved && (
                 <section className="applicant-home-guide" aria-labelledby="applicant-home-guide-title">
@@ -2588,8 +2589,8 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
               readOnly={Boolean(reviewDocsApplicant.deletedAt)}
             />
           )}
-          {activeRole === 'Admin' && hiringUpdates && (
-            <AdminEmploymentUpdatesModal token={getToken()} applicantId={hiringUpdates.applicantId} jobId={hiringUpdates.jobId} onClose={() => setHiringUpdates(null)} />
+          {activeRole === 'Admin' && activeView === 'employment-updates' && (
+            <AdminEmploymentUpdatesPage key={`${hiringUpdates.applicantId || ''}:${hiringUpdates.jobId || ''}`} token={getToken()} applicantId={hiringUpdates.applicantId} jobId={hiringUpdates.jobId} />
           )}
           {activeRole === 'Admin' && clientFeedbackOpen && <AdminCsmFeedbackModal token={getToken()} onClose={() => setClientFeedbackOpen(false)} />}
           {jobSubmittedOpen && <Modal onClose={() => setJobSubmittedOpen(false)} labelledBy="job-submitted-title" maxWidth="max-w-md"><h2 id="job-submitted-title" className="text-xl font-bold text-slate-900">Job request submitted for review</h2><p className="mt-3 text-sm text-slate-600">PESO will review your job posting. You can track its status in Job Postings.</p><button type="button" onClick={() => setJobSubmittedOpen(false)} className="mt-5 rounded-full bg-blue-600 px-5 py-2 text-sm font-semibold text-white">Done</button></Modal>}
@@ -3586,7 +3587,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
               onLoadApplicants={fetchAdminUsers}
               initialJobId={referralPrefill.jobId}
               initialApplicantIds={referralPrefill.applicantIds}
-              onViewUpdates={() => setHiringUpdates({})}
+              onViewUpdates={() => { setHiringUpdates({}); setActiveView('employment-updates') }}
               onViewClientFeedback={() => setClientFeedbackOpen(true)}
             />
           )}

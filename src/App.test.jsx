@@ -96,7 +96,7 @@ describe('PESO Portal prototype', () => {
     expect(await screen.findByText(/Online Employment Services Platform/i)).toBeInTheDocument()
     expect(screen.queryByText(/Access Control/i)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Apply Role/i })).not.toBeInTheDocument()
-    expect(await screen.findByText(/All Dashboard/i)).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Dashboard', exact: true })).toBeInTheDocument()
   })
 
   it('keeps the applicant table compact and opens review from the name or Review action', async () => {

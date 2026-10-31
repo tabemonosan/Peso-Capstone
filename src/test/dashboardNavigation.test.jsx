@@ -22,14 +22,39 @@ function mockRole(role, overrides = {}) {
   }))
 }
 describe('one dashboard per role', () => {
-  it('opens the admin hiring updates window from the Hires card', async () => {
+  it('opens the admin hiring updates page from the Hires card', async () => {
     mockRole('Admin')
     localStorage.setItem('peso-token', 'token')
     localStorage.setItem('peso-active-role', 'Admin')
     render(<App />)
     fireEvent.click(await screen.findByRole('button', { name: 'Hires 2' }))
-    expect(await screen.findByRole('dialog', { name: 'Hiring updates' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Hiring updates' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Hiring Updates', exact: true })).toHaveClass('is-active')
     expect(await screen.findByText('No hiring updates submitted yet.')).toBeInTheDocument()
+  })
+  it('opens Hiring Updates through the sidebar and returns to Dashboard normally', async () => {
+    mockRole('Admin')
+    localStorage.setItem('peso-token', 'token')
+    localStorage.setItem('peso-active-role', 'Admin')
+    render(<App />)
+    const nav = await screen.findByRole('navigation', { name: 'Admin navigation' })
+    fireEvent.click(within(nav).getByRole('button', { name: 'Hiring Updates', exact: true }))
+    expect(await screen.findByRole('region', { name: 'Hiring updates' })).toBeInTheDocument()
+    expect(localStorage.getItem('peso-active-view')).toBe('employment-updates')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    fireEvent.click(within(nav).getByRole('button', { name: 'Dashboard', exact: true }))
+    expect(await screen.findByRole('heading', { name: 'Dashboard', exact: true })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Hiring updates' })).not.toBeInTheDocument()
+  })
+  it('restores the Hiring Updates page on refresh', async () => {
+    mockRole('Admin')
+    localStorage.setItem('peso-token', 'token')
+    localStorage.setItem('peso-active-role', 'Admin')
+    localStorage.setItem('peso-active-view', 'employment-updates')
+    render(<App />)
+    expect(await screen.findByRole('heading', { name: 'Hiring updates' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
   it('keeps documents inside Profile and off the applicant sidebar and landing page', async () => {
     mockRole('Applicant', { verificationStatus: 'under_review', attentionCount: 1 })

@@ -450,6 +450,10 @@ describe('legacy applicants (uploaded NSRP file, no structured data)', () => {
 
   it('can still apply for a job with the uploaded NSRP file attached', async () => {
     const legacy = await createLegacyApplicant('legacy-apply@example.com')
+    // Migrate and review the retained documents before this legacy applicant applies.
+    await request(app).get(`/api/applicants/${legacy._id}/verification-documents`).set('Authorization', `Bearer ${applicantToken(legacy.email)}`)
+    const review = await request(app).put(`/api/applicants/${legacy._id}/verification-documents/nsrpForm`).set('Authorization', `Bearer ${adminToken()}`).send({ status: 'approved' })
+    expect(review.status).toBe(200)
     const JobPosting = mongoose.model('JobPosting')
     const JobApplication = mongoose.model('JobApplication')
     const job = await JobPosting.create({ title: 'Clerk', company: 'Acme', status: 'approved', createdBy: 'boss@example.com' })

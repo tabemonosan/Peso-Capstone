@@ -2706,9 +2706,15 @@ app.post('/api/jobs/:id/apply', requireVerifiedEmail, applicationUpload.single('
     const job = await JobPosting.findById(req.params.id)
     if (!job) return res.status(404).json({ error: 'Job not found' })
     if (job.status !== 'approved') return res.status(400).json({ error: 'Job is not available' })
+    if (job.deadline && job.deadline.toISOString().slice(0, 10) < todayInManila()) {
+      return res.status(410).json({ code: 'APPLICATION_CLOSED', error: 'The application deadline for this job has passed.' })
+    }
 
     const applicant = await loadApplicantWithCurrentResume(decoded.email)
     if (!applicant) return res.status(404).json({ error: 'Applicant not found' })
+    if (applicant.verificationStatus !== 'approved') {
+      return res.status(403).json({ code: 'APPLICANT_NOT_VERIFIED', error: 'PESO must approve your registration and documents before you apply for a job.' })
+    }
     // A resume is optional and never blocks applying.
     if (job.applicants.some((existingApplicant) => existingApplicant.email === decoded.email)) {
       return res.status(409).json({ error: 'You have already applied for this job' })
@@ -2868,6 +2874,7 @@ app.post('/api/referrals', async (req, res) => {
 
     const employer = await Employer.findOne({ email: job.createdBy }).lean()
     if (!employer) return res.status(404).json({ error: 'Employer for job not found' })
+    if (job.status !== 'approved') return res.status(409).json({ error: 'PESO must approve the job posting before creating referrals.' })
 
     const admin = await Admin.findOne({ email: decoded.email }).lean()
     if (!admin) return res.status(404).json({ error: 'Admin not found' })
@@ -2880,7 +2887,10 @@ app.post('/api/referrals', async (req, res) => {
       return res.status(400).json({ error: 'No valid applicantIds provided' })
     }
 
-    const existingApplicants = await Applicant.find({ _id: { $in: normalizedApplicantIds } }).select('_id').lean()
+    const existingApplicants = await Applicant.find({ _id: { $in: normalizedApplicantIds } }).select('_id verificationStatus deletedAt').lean()
+    if (existingApplicants.some((applicant) => applicant.deletedAt || applicant.verificationStatus !== 'approved')) {
+      return res.status(403).json({ error: 'Only approved applicants with active accounts can be referred. Review the selected applicants before continuing.' })
+    }
     const existingApplicantIds = new Set(existingApplicants.map((a) => String(a._id)))
 
     const existingReferrals = await Referral.find({

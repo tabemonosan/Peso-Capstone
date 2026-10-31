@@ -30,6 +30,16 @@ beforeEach(async () => {
 })
 
 describe('PESO employment reporting', () => {
+  it('rejects referrals to unapproved jobs or restricted applicants before creating records', async () => {
+    await JobPosting.updateOne({ _id: job._id }, { status: 'pending' })
+    const url = '/api/referrals'
+    const body = { jobId: String(job._id), applicantIds: [String(applicant._id)] }
+    expect((await request(app).post(url).set(auth('Admin')).send(body)).status).toBe(409)
+    await JobPosting.updateOne({ _id: job._id }, { status: 'approved' })
+    await Applicant.updateOne({ _id: applicant._id }, { verificationStatus: 'restricted' })
+    expect((await request(app).post(url).set(auth('Admin')).send(body)).status).toBe(403)
+    expect(await Referral.countDocuments()).toBe(1)
+  })
   it('resolves admin tracking details without depending on a separately loaded user or jobs page', async () => {
     await HireReport.create({ applicantId: applicant._id, employerId: employer._id, jobId: job._id, status: 'hired', reportedByRole: 'Employer' })
     for (const suffix of ['', '?page=1&limit=1']) {

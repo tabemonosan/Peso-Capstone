@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { API_URL } from '../config'
 import { outcomeLabel } from '../../shared/employmentReporting.js'
-import Modal from './Modal'
 import Pagination from './Pagination'
 
 const dateLabel = (value, withTime = false) => {
@@ -35,7 +34,7 @@ function Statement({ title, report }) {
   </section>
 }
 
-export default function AdminEmploymentUpdatesModal({ token, onClose, applicantId, jobId }) {
+export default function AdminEmploymentUpdatesPage({ token, applicantId, jobId }) {
   const [filter, setFilter] = useState({ applicantId, jobId })
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
@@ -61,13 +60,13 @@ export default function AdminEmploymentUpdatesModal({ token, onClose, applicantI
     return () => { cancelled = true }
   }, [token, filter, page, pageSize, refresh])
 
-  return <Modal onClose={onClose} labelledBy="admin-employment-updates-title" describedBy="admin-employment-updates-description" maxWidth="max-w-5xl">
+  return <section aria-labelledby="admin-employment-updates-title" className="portal-card min-w-0 rounded-2xl border border-slate-300 bg-white p-6 text-slate-900">
     <div className="flex items-start justify-between gap-4">
       <div>
+        <p className="portal-page-eyebrow">Employment reports</p>
         <h2 id="admin-employment-updates-title" className="text-xl font-bold">Hiring updates</h2>
         <p id="admin-employment-updates-description" className="mt-2 text-sm text-slate-600">Compare updates submitted to PESO by the applicant and employer. Each statement is recorded separately.</p>
       </div>
-      <button type="button" onClick={onClose} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold">Close</button>
     </div>
     <div className="mt-4 flex flex-wrap gap-2">
       <button type="button" disabled={loading} onClick={() => setRefresh((current) => current + 1)} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold disabled:opacity-50">Refresh updates</button>
@@ -88,5 +87,5 @@ export default function AdminEmploymentUpdatesModal({ token, onClose, applicantI
       </div>
     </article>)}
     {!loading && !error && data.total > 0 && <Pagination page={page} pageSize={pageSize} totalItems={data.total} onPageChange={setPage} onPageSizeChange={(value) => { setPageSize(value); setPage(1) }} itemLabel="employment records" ariaLabel="Hiring updates pagination" />}
-  </Modal>
+  </section>
 }

@@ -20,14 +20,14 @@ function onChecklistKeyDown(event) {
 function Checklist({ options, selected, onToggle, namePrefix }) {
   return (
     <ul className="max-h-52 space-y-1 overflow-y-auto" onKeyDown={onChecklistKeyDown}>
-      {options.length === 0 && <li className="px-1 py-2 text-sm text-slate-500">No options found.</li>}
+      {options.length === 0 && <li className="px-1 py-2 text-sm text-black">No options found.</li>}
       {options.map((option) => {
         const value = typeof option === 'string' ? option : option.value
         const count = typeof option === 'string' ? undefined : option.count
         const checked = selected.includes(value)
         return (
           <li key={value}>
-            <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-slate-200 hover:bg-slate-800">
+            <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-black hover:bg-blue-50">
               <input
                 type="checkbox"
                 checked={checked}
@@ -37,7 +37,7 @@ function Checklist({ options, selected, onToggle, namePrefix }) {
                 className="h-4 w-4 accent-cyan-500"
               />
               <span className="flex-1 truncate">{value}</span>
-              {count !== undefined && <span className="text-xs text-slate-500">({count})</span>}
+              {count !== undefined && <span className="text-xs text-black">({count})</span>}
             </label>
           </li>
         )
@@ -51,12 +51,12 @@ function Popover({ title, onClear, onClose, children }) {
     <div
       role="dialog"
       aria-label={title}
-      className="absolute left-0 top-full z-40 mt-2 w-72 rounded-2xl border border-slate-700 bg-slate-900 p-3 shadow-2xl"
+      className="absolute left-0 top-full z-40 mt-2 w-72 rounded-2xl border border-slate-200 bg-white p-3 text-black shadow-xl"
     >
-      <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">{title}</p>
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-black">{title}</p>
       {children}
-      <div className="mt-3 flex items-center justify-between border-t border-slate-800 pt-3">
-        <button type="button" onClick={onClear} className="text-xs font-medium text-cyan-300 hover:text-cyan-200">
+      <div className="mt-3 flex items-center justify-between border-t border-slate-200 pt-3">
+        <button type="button" onClick={onClear} className="text-xs font-medium text-black hover:underline">
           Clear
         </button>
         <button type="button" onClick={onClose} className="rounded-xl bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-slate-950">
@@ -72,9 +72,9 @@ function SkillChips({ skills, onToggle }) {
   return (
     <div className="mb-2 flex flex-wrap gap-1.5">
       {skills.map((skill) => (
-        <span key={skill} className="inline-flex items-center gap-1 rounded-full bg-cyan-500/15 px-2 py-0.5 text-xs text-cyan-200">
+        <span key={skill} className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-xs text-black">
           {skill}
-          <button type="button" aria-label={`Remove ${skill}`} onClick={() => onToggle(skill)} className="hover:text-white">×</button>
+          <button type="button" aria-label={`Remove ${skill}`} onClick={() => onToggle(skill)} className="hover:text-blue-700">×</button>
         </span>
       ))}
     </div>
@@ -121,10 +121,10 @@ export default function JobFiltersBar({ filters, facets, resultCount, mySkills =
   const pillCls = (active, open) =>
     `rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
       active
-        ? 'border-cyan-500 bg-cyan-500 text-slate-950'
+        ? 'border-blue-500 bg-white text-black ring-1 ring-blue-500'
         : open
-          ? 'border-cyan-400 bg-slate-800 text-cyan-200'
-          : 'border-slate-600 bg-slate-800 text-slate-200 hover:border-cyan-400'
+          ? 'border-blue-500 bg-white text-black'
+          : 'border-slate-300 bg-white text-black hover:border-blue-500 hover:bg-blue-50'
     }`
 
   const skillOptions = facets.skills
@@ -160,7 +160,7 @@ export default function JobFiltersBar({ filters, facets, resultCount, mySkills =
           onChange={(event) => onKeyword(event.target.value)}
           placeholder="Keyword (title, company)"
           aria-label="Keyword search"
-          className="w-44 rounded-full border border-slate-300 px-3.5 py-1.5 text-sm"
+          className="w-44 rounded-full border border-slate-300 bg-white px-3.5 py-1.5 text-sm text-black"
         />
 
         {sections.map((section) => {
@@ -192,7 +192,7 @@ export default function JobFiltersBar({ filters, facets, resultCount, mySkills =
                           onClick={() => {
                             mySkills.forEach((skill) => { if (!filters.skills.includes(skill)) onToggle('skills', skill) })
                           }}
-                          className="mb-2 w-full rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-2 py-1.5 text-xs font-semibold text-cyan-200 hover:bg-cyan-500/20"
+                          className="mb-2 w-full rounded-xl border border-blue-200 bg-white px-2 py-1.5 text-xs font-semibold text-black hover:bg-blue-50"
                         >
                           Use my skills ({mySkills.length})
                         </button>
@@ -206,7 +206,7 @@ export default function JobFiltersBar({ filters, facets, resultCount, mySkills =
                       onChange={(event) => (section.id === 'skills' ? setSkillQuery(event.target.value) : setLocationQuery(event.target.value))}
                       placeholder={`Search ${section.title.toLowerCase()}…`}
                       aria-label={`Search ${section.title}`}
-                      className="mb-2 w-full rounded-xl border border-slate-300 px-2.5 py-1.5 text-sm"
+                      className="mb-2 w-full rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-black"
                     />
                   )}
                   <Checklist
@@ -237,7 +237,7 @@ export default function JobFiltersBar({ filters, facets, resultCount, mySkills =
               <ul className="space-y-1" onKeyDown={onChecklistKeyDown}>
                 {Object.entries(DATE_POSTED_LABELS).map(([value, label]) => (
                   <li key={value}>
-                    <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-slate-200 hover:bg-slate-800">
+                    <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-black hover:bg-blue-50">
                       <input
                         type="radio"
                         name="date-posted"
@@ -277,10 +277,10 @@ export default function JobFiltersBar({ filters, facets, resultCount, mySkills =
       {/* Mobile bottom sheet */}
       {sheetOpen && (
         <div className="fixed inset-0 z-[60] flex flex-col justify-end bg-slate-950/60 sm:hidden" role="dialog" aria-modal="true" aria-label="Job filters" onMouseDown={(event) => { if (event.target === event.currentTarget) setSheetOpen(false) }}>
-          <div className="max-h-[85vh] overflow-y-auto rounded-t-3xl border-t border-slate-700 bg-slate-900 p-5 pb-24">
+          <div className="max-h-[85vh] overflow-y-auto rounded-t-3xl border-t border-slate-200 bg-white p-5 pb-24 text-black">
             <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-white">Filters</h3>
-              <button type="button" onClick={onClearAll} className="text-sm font-medium text-cyan-300">Clear all</button>
+              <h3 className="text-lg font-semibold text-black">Filters</h3>
+              <button type="button" onClick={onClearAll} className="text-sm font-medium text-black hover:underline">Clear all</button>
             </div>
             <input
               type="search"
@@ -288,20 +288,20 @@ export default function JobFiltersBar({ filters, facets, resultCount, mySkills =
               onChange={(event) => onKeyword(event.target.value)}
               placeholder="Keyword (title, company)"
               aria-label="Keyword search"
-              className="mb-4 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+              className="mb-4 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-black"
             />
             {sections.map((section) => (
               <div key={section.id} className="mb-5">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">{section.title}</p>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-black">{section.title}</p>
                 <Checklist options={section.options} selected={section.selected} onToggle={(value) => onToggle(section.id, value)} namePrefix={`sheet-${section.id}`} />
               </div>
             ))}
             <div className="mb-5">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">Date posted</p>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-black">Date posted</p>
               <ul className="space-y-1">
                 {Object.entries(DATE_POSTED_LABELS).map(([value, label]) => (
                   <li key={value}>
-                    <label className="flex items-center gap-2 py-1.5 text-sm text-slate-200">
+                    <label className="flex items-center gap-2 py-1.5 text-sm text-black">
                       <input type="radio" name="sheet-date-posted" checked={filters.datePosted === value} onChange={() => onDatePosted(value)} className="h-4 w-4 accent-cyan-500" />
                       {label}
                     </label>
@@ -310,7 +310,7 @@ export default function JobFiltersBar({ filters, facets, resultCount, mySkills =
               </ul>
             </div>
           </div>
-          <div className="sticky bottom-0 border-t border-slate-700 bg-slate-900 p-4">
+          <div className="sticky bottom-0 border-t border-slate-200 bg-white p-4 text-black">
             <button type="button" onClick={() => setSheetOpen(false)} className="w-full rounded-2xl bg-cyan-500 px-4 py-3 text-sm font-semibold text-slate-950">
               Show {resultCount} job{resultCount === 1 ? '' : 's'}
             </button>
