@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { API_URL } from "../config"
+import { digits, mobileInput, validMobile, validLandline, MOBILE_ERROR, LANDLINE_ERROR } from '../../shared/employerNumbers.js'
 import { EMPLOYER_VERIFICATION_STATUS as STATUS } from "../../shared/employerVerification.js"
 import { NSRP_SOURCE_LABELS } from "../../shared/verificationDocs.js"
 import NsrpSignatureInput from "./NsrpSignatureInput"
@@ -191,6 +192,8 @@ export default function EmployerVerificationPage({ token, onStatusChange }) {
   const submitOnline = async (event) => {
     event.preventDefault()
     const tin = form.taxIdentificationNumber.trim()
+    if (!validMobile(form.phone)) { setError(MOBILE_ERROR); return }
+    if (!validLandline(form.telephone) || !validLandline(form.fax)) { setError(LANDLINE_ERROR); return }
     if (tin && !/^(?:\d{9}|\d{12})$/.test(tin)) {
       setFieldErrors({ taxIdentificationNumber: TIN_ERROR })
       return
@@ -411,9 +414,9 @@ export default function EmployerVerificationPage({ token, onStatusChange }) {
                 {form.contactTitle === "Others" && <FormField label="Specify title *"><input required value={form.otherContactTitle} onChange={(event) => updateForm("otherContactTitle", event.target.value)} className="shared-form-control" /></FormField>}
                 <FormField label="Contact person full name *"><input required value={form.contactName} onChange={(event) => updateForm("contactName", event.target.value)} className="shared-form-control" /></FormField>
                 <FormField label="Position *"><input required value={form.contactPosition} onChange={(event) => updateForm("contactPosition", event.target.value)} className="shared-form-control" /></FormField>
-                <FormField label="Mobile number *"><input required pattern="09[0-9]{9}" maxLength={11} value={form.phone} onChange={(event) => updateForm("phone", event.target.value.replace(/\D/g, "").slice(0, 11))} className="shared-form-control" /></FormField>
-                <FormField label="Telephone number"><input value={form.telephone} onChange={(event) => updateForm("telephone", event.target.value)} className="shared-form-control" /></FormField>
-                <FormField label="Fax number"><input value={form.fax} onChange={(event) => updateForm("fax", event.target.value)} className="shared-form-control" /></FormField>
+                <FormField label="Mobile number *"><input required type="tel" pattern="(09[0-9]{9}|\+639[0-9]{9})" maxLength={13} placeholder="09XXXXXXXXX or +639XXXXXXXXX" value={form.phone} onChange={(event) => updateForm("phone", mobileInput(event.target.value))} className="shared-form-control" /></FormField>
+                <FormField label="Telephone number"><input inputMode="tel" maxLength={15} placeholder="7–15 digits including area code" value={form.telephone} onChange={(event) => updateForm("telephone", digits(event.target.value, 15))} className="shared-form-control" /></FormField>
+                <FormField label="Fax number"><input inputMode="tel" maxLength={15} placeholder="7–15 digits including area code" value={form.fax} onChange={(event) => updateForm("fax", digits(event.target.value, 15))} className="shared-form-control" /></FormField>
                 <FormField label="Authorized representative full name *"><input required value={form.representativeName} onChange={(event) => updateForm("representativeName", event.target.value)} className="shared-form-control" /></FormField>
                 <label className="flex items-start gap-2 text-sm text-slate-700 sm:col-span-2"><input type="checkbox" checked={certified} onChange={(event) => setCertified(event.target.checked)} /><span>I certify that this information is true and correct. *</span></label>
                 <div className="sm:col-span-2">

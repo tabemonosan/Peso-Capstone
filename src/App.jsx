@@ -24,6 +24,11 @@ import ApplicantEmploymentReports from "./components/ApplicantEmploymentReports"
 import ApplicantAccountSettings from "./components/ApplicantAccountSettings"
 import AdminAccountDeletionRequests from "./components/AdminAccountDeletionRequests"
 import AdminEmploymentUpdatesModal from "./components/AdminEmploymentUpdatesModal"
+import PortalNavIcon from "./components/PortalNavIcon"
+import ReviewQuestionnaires from "./components/ReviewQuestionnaires"
+import AdminCsmFeedbackModal from "./components/AdminCsmFeedbackModal"
+import pesoLogo from './assets/peso-logo.png'
+import Modal from './components/Modal'
 import Pagination from "./components/Pagination"
 import SortControl, { SortableTh } from "./components/SortControl"
 import ConfirmDialog from "./components/ConfirmDialog"
@@ -76,8 +81,7 @@ const navigationByRole = {
   ],
   Applicant: [
     { id: "complete", label: "Complete Registration" },
-    { id: "dashboard", label: "Dashboard" },
-    { id: "home", label: "Home" },
+    { id: "dashboard", label: "Home" },
     { id: "employment-reports", label: "Employment updates" },
     { id: "jobs", label: "Jobs" },
     { id: "reputation", label: "Reviews" },
@@ -503,6 +507,8 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
   const [showVerificationModal, setShowVerificationModal] = useState(false)
   const [reviewDocsApplicant, setReviewDocsApplicant] = useState(null)
   const [hiringUpdates, setHiringUpdates] = useState(null)
+  const [clientFeedbackOpen, setClientFeedbackOpen] = useState(false)
+  const [jobSubmittedOpen, setJobSubmittedOpen] = useState(false)
   const [verificationEmail, setVerificationEmail] = useState('')
   const [verificationCode, setVerificationCode] = useState('')
   const [showSkillPrompt, setShowSkillPrompt] = useState(false)
@@ -941,7 +947,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
       setShowCreateJobPosting(false)
       fetchJobs()
       fetchNotifications()
-      alert('Job request submitted for review')
+      setJobSubmittedOpen(true)
     } catch (err) {
       console.error(err)
       alert('Failed to submit job request')
@@ -1413,6 +1419,11 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
       requestAnimationFrame(() => document.getElementById('account-settings')?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }))
       return
     }
+    if (activeRole === 'Admin' && notification?.type === 'csm_response_submitted') {
+      setSelectedNotification(null)
+      setClientFeedbackOpen(true)
+      return
+    }
     if (activeRole === 'Admin' && notification?.type === 'hire_report_submitted') {
       setSelectedNotification(null)
       setHiringUpdates({ applicantId: notification.metadata?.applicantId, jobId: notification.metadata?.jobId })
@@ -1787,9 +1798,9 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
     }
   }, [isLoggedIn, activeRole])
 
-  // Keep documents off the landing page; applicants open them inside Profile.
+  // Old Home destinations now open the applicant's combined Home overview.
   useEffect(() => {
-    if (isLoggedIn && activeRole === 'Applicant' && currentUser?.verificationStatus && currentUser.verificationStatus !== 'approved' && activeView === 'home') {
+    if (isLoggedIn && activeRole === 'Applicant' && activeView === 'home') {
       setActiveView('dashboard')
     }
   }, [isLoggedIn, activeRole, currentUser?.verificationStatus, activeView])
@@ -1815,11 +1826,21 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
 
   if (!isLoggedIn) {
     return (
-      <div className="auth-page">
+      <div className={`auth-page ${authView === 'login' ? 'auth-page-login' : 'auth-page-signup'}`}>
+        {authView === 'login' && <aside className="auth-intro" aria-labelledby="auth-intro-title">
+          <p className="auth-intro-eyebrow"><PortalNavIcon name="jobs" /> PESO · ALBAY</p>
+          <h2 id="auth-intro-title">Your next<br />opportunity<br /><span>starts here.</span></h2>
+          <p className="auth-intro-description">Connecting local talent with employers. Find your next role, build your profile, and take the next step with PESO.</p>
+          <div className="auth-intro-features">
+            <div><span className="auth-feature-icon"><PortalNavIcon name="applicants" /></span><div><strong>For job seekers</strong><p>Explore opportunities that fit your skills.</p></div></div>
+            <div><span className="auth-feature-icon auth-feature-icon-mint"><PortalNavIcon name="employers" /></span><div><strong>For employers</strong><p>Connect with local talent through PESO.</p></div></div>
+          </div>
+          <p className="auth-intro-footer">LOCAL TALENT. SHARED OPPORTUNITY.</p>
+        </aside>}
         <div className={`auth-card${authView === 'login' ? '' : ' auth-card-wide'}`}>
           <div className="auth-logo" aria-label="Public Employment Service Office">
             <img
-              src="/peso-logo.png"
+              src={pesoLogo}
               alt="Public Employment Service Office logo"
               onError={(event) => { event.currentTarget.style.display = 'none' }}
             />
@@ -2116,7 +2137,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
           <div className="portal-brand">
             <span className="portal-brand-fallback" aria-hidden="true">P</span>
             <img
-              src="/peso-logo.png"
+              src={pesoLogo}
               alt="PESO logo"
               onLoad={(event) => { event.currentTarget.previousElementSibling.style.display = 'none' }}
               onError={(event) => { event.currentTarget.style.display = 'none' }}
@@ -2196,7 +2217,8 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
                   activeView === item.id ? "is-active" : ""
                 }`}
               >
-                {item.label}
+                <PortalNavIcon name={activeRole === 'Applicant' && item.id === 'dashboard' ? 'home' : item.id} />
+                <span>{item.label}</span>
               </button>
             ))}
           </nav>
@@ -2266,149 +2288,49 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
               onUpdated={updateRegistrationUser}
             />
           )}
-          {activeView === "home" && activeRole !== 'Employer' && (
-            <section className="portal-card rounded-2xl border border-slate-300 bg-white p-8 text-black">
-              <p className="text-sm font-semibold uppercase tracking-wide text-cyan-600">
-                PESO Job Portal
-              </p>
-              <h2 className="mt-2 text-3xl font-bold text-black">
-                {activeRole === 'Employer'
-                  ? `Welcome back, ${profileData.companyName || currentUser?.companyName || 'Employer'}`
-                  : `Welcome back, ${formatFullName(profileData) || profileData.name || currentUser?.email || 'Applicant'}`}
-              </h2>
-              <p className="mt-3 max-w-2xl text-slate-600">
-                {activeRole === 'Employer'
-                  ? 'Post job openings, track admin approvals, and connect with qualified applicants in Albay.'
-                  : 'Browse approved job openings from verified employers and track your applications in one place.'}
-              </p>
-
-              <div className="mt-6 flex flex-wrap gap-3">
-                {activeRole === 'Employer' ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => setActiveView('employer')}
-                      className="rounded-2xl bg-cyan-500 px-5 py-2.5 text-sm font-semibold text-slate-950"
-                    >
-                      Manage Job Postings
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveView('notify')}
-                      className="rounded-2xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-black"
-                    >
-                      View Notifications
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    {applicantApproved && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => setActiveView('jobs')}
-                          className="rounded-2xl bg-cyan-500 px-5 py-2.5 text-sm font-semibold text-slate-950"
-                        >
-                          Browse Jobs
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setActiveView('profile')}
-                          className="rounded-2xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-black"
-                        >
-                          Update My Profile
-                        </button>
-                      </>
-                    )}
-                  </>
-                )}
-              </div>
-
-              {activeRole === 'Applicant' && !applicantApproved && (
-                <div className="mt-6 rounded-2xl border border-amber-300 bg-amber-50 p-5">
-                  <h3 className="text-lg font-semibold text-black">Account verification in progress</h3>
-                  <p className="mt-2 text-sm text-slate-700">
-                    Your NSRP registration form was submitted with your sign up. Once an admin approves it, you'll be able to browse jobs and apply. You can check the status or resubmit from your Profile page.
-                  </p>
-                  <p className="mt-2 text-sm font-medium text-amber-700">
-                    Status: {(currentUser?.verificationStatus || 'under_review').replace('_', ' ')}
-                  </p>
-                  {currentUser?.verificationStatus === 'declined' && currentUser?.verificationReason && (
-                    <p className="mt-2 rounded-lg border border-rose-300 bg-rose-50 p-2 text-sm text-rose-700">
-                      {currentUser.verificationReason}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
-                {activeRole === 'Employer' ? (
-                  <>
-                    <div className="rounded-2xl border border-slate-300 bg-slate-50 p-5">
-                      <p className="text-sm text-slate-600">My job requests</p>
-                      <p className="mt-2 text-3xl font-bold text-black">{myJobs.length}</p>
-                    </div>
-                    <div className="rounded-2xl border border-slate-300 bg-slate-50 p-5">
-                      <p className="text-sm text-slate-600">Approved postings</p>
-                      <p className="mt-2 text-3xl font-bold text-black">{myJobs.filter((job) => job.status === 'approved').length}</p>
-                    </div>
-                    <div className="rounded-2xl border border-slate-300 bg-slate-50 p-5">
-                      <p className="text-sm text-slate-600">Total applicants</p>
-                      <p className="mt-2 text-3xl font-bold text-black">{myJobs.reduce((acc, j) => acc + (j.applicants ? j.applicants.length : 0), 0)}</p>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="rounded-2xl border border-slate-300 bg-slate-50 p-5">
-                      <p className="text-sm text-slate-600">Open jobs</p>
-                      <p className="mt-2 text-3xl font-bold text-black">{availableJobs.length}</p>
-                    </div>
-                    <div className="rounded-2xl border border-slate-300 bg-slate-50 p-5">
-                      <p className="text-sm text-slate-600">My applications</p>
-                      <p className="mt-2 text-3xl font-bold text-black">{appliedJobs.length}</p>
-                    </div>
-                    <div className="rounded-2xl border border-slate-300 bg-slate-50 p-5">
-                      <p className="text-sm text-slate-600">Notifications</p>
-                      <p className="mt-2 text-3xl font-bold text-black">{notifications.length}</p>
-                    </div>
-                  </>
-                )}
-              </div>
-
-              <div className="mt-8 rounded-2xl border border-slate-200 bg-slate-50 p-5">
-                <h3 className="text-lg font-semibold text-black">Getting started</h3>
-                <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-600">
-                  {activeRole === 'Employer' ? (
-                    <>
-                      <li>Create and manage job postings for your establishment.</li>
-                      <li>Review applicants and send referrals from the Job Postings tab.</li>
-                      <li>Track your posting requests and notifications from your dashboard.</li>
-                    </>
-                  ) : (
-                    <>
-                      <li>Fill out your profile and upload your resume so employers can find you.</li>
-                      <li>Browse open jobs and apply with your NSRP registration.</li>
-                      <li>Watch your notifications for application updates and referrals.</li>
-                    </>
-                  )}
-                </ul>
-              </div>
-            </section>
-          )}
           {activeView === "dashboard" && (
-            <section className="portal-card rounded-2xl border border-slate-300 bg-white p-6 text-black">
-              <h2 className="text-xl font-semibold text-black">Dashboard</h2>
-              <p className="mb-6 mt-2 text-sm text-slate-600">
-                {activeRole === 'Admin'
-                  ? 'Monitor registrations, job requests, document reviews, referrals, and hiring across the portal.'
-                  : activeRole === 'Employer'
-                    ? 'Track your job postings, applicants, referrals, hiring, and recent activity.'
-                    : 'Track your applications, referrals, document reviews, and account status.'}
-              </p>
-              <RoleDashboard token={getToken()} onNavigate={(target) => {
+            <section className="portal-dashboard portal-card rounded-2xl border border-slate-300 bg-white p-6 text-black">
+              <div className="portal-page-heading">
+                <p className="portal-page-eyebrow">Your workspace</p>
+                <h2 className="text-xl font-semibold text-black">{activeRole === 'Applicant' ? 'Home' : 'Dashboard'}</h2>
+                <p className="mb-6 mt-2 text-sm text-slate-600">
+                  {activeRole === 'Admin'
+                    ? 'Monitor registrations, job requests, document reviews, referrals, and hiring across the portal.'
+                    : activeRole === 'Employer'
+                      ? 'Track your job postings, applicants, referrals, hiring, and recent activity.'
+                      : 'Track your applications, referrals, document reviews, and account status.'}
+                </p>
+              </div>
+              {activeRole === 'Applicant' && (
+                <section className="applicant-home-welcome" aria-labelledby="applicant-home-welcome-title">
+                  <div>
+                    <p className="portal-page-eyebrow">PESO Job Portal</p>
+                    <h3 id="applicant-home-welcome-title">Welcome back, {formatFullName(profileData) || profileData.name || currentUser?.email || 'Applicant'}</h3>
+                    <p>{applicantApproved ? 'Discover local opportunities, track your applications, and keep your next step in view.' : 'Your registration is being reviewed by PESO. You can manage your profile while verification is in progress.'}</p>
+                  </div>
+                  <div className="applicant-home-actions">
+                    {applicantApproved && <button type="button" onClick={() => setActiveView('jobs')} className="rounded-full bg-cyan-600 px-5 py-3 text-sm font-semibold text-white">Browse Jobs</button>}
+                    <button type="button" onClick={() => setActiveView('profile')} className="rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-900">{applicantApproved ? 'Update My Profile' : 'View My Profile'}</button>
+                  </div>
+                </section>
+              )}
+              <RoleDashboard token={getToken()} applicantOverview={activeRole === 'Applicant' ? { openJobs: availableJobs.length, notifications: notifTotal } : undefined} onNavigate={(target) => {
                 if (activeRole === 'Admin' && target === 'employment-updates') setHiringUpdates({})
                 else setActiveView(target)
               }} />
+              {activeRole === 'Applicant' && applicantApproved && (
+                <section className="applicant-home-guide" aria-labelledby="applicant-home-guide-title">
+                  <div className="applicant-home-guide-icon"><PortalNavIcon name="verification" /></div>
+                  <div>
+                    <h3 id="applicant-home-guide-title">Make the most of your PESO account</h3>
+                    <ul>
+                      <li>Keep your skills, contact details, and profile information up to date.</li>
+                      <li>Browse approved jobs and watch your notifications for referrals.</li>
+                      <li>After an employer accepts your referral, report official hiring or deployment to PESO.</li>
+                    </ul>
+                  </div>
+                </section>
+              )}
               {activeRole === 'Employer' && employerApproved && (
                 <>
                   <div className="employer-dashboard-postings">
@@ -2669,6 +2591,8 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
           {activeRole === 'Admin' && hiringUpdates && (
             <AdminEmploymentUpdatesModal token={getToken()} applicantId={hiringUpdates.applicantId} jobId={hiringUpdates.jobId} onClose={() => setHiringUpdates(null)} />
           )}
+          {activeRole === 'Admin' && clientFeedbackOpen && <AdminCsmFeedbackModal token={getToken()} onClose={() => setClientFeedbackOpen(false)} />}
+          {jobSubmittedOpen && <Modal onClose={() => setJobSubmittedOpen(false)} labelledBy="job-submitted-title" maxWidth="max-w-md"><h2 id="job-submitted-title" className="text-xl font-bold text-slate-900">Job request submitted for review</h2><p className="mt-3 text-sm text-slate-600">PESO will review your job posting. You can track its status in Job Postings.</p><button type="button" onClick={() => setJobSubmittedOpen(false)} className="mt-5 rounded-full bg-blue-600 px-5 py-2 text-sm font-semibold text-white">Done</button></Modal>}
 
           {activeView === "profile" && (<section className={`${activeRole === 'Employer' ? 'employer-profile-card portal-card' : activeRole === 'Applicant' ? 'applicant-profile-card portal-card' : ''} rounded-2xl border border-slate-800 bg-slate-900/70 p-6`}>
               {activeRole === 'Applicant' ? (
@@ -3304,6 +3228,10 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
             />
           )}
 
+          {((activeView === 'reviews' && activeRole === 'Employer') || (activeView === 'reputation' && activeRole === 'Applicant')) && (
+            <ReviewQuestionnaires token={getToken()} onSubmitted={(text) => setAppMessage({ type: 'success', text })} />
+          )}
+
           {activeView === 'account-deletions' && activeRole === 'Admin' && (
             <AdminAccountDeletionRequests token={getToken()} onMessage={(text) => { setAppMessage({ type: 'success', text }); fetchAdminUsers(); fetchAdminApplicants() }} onViewRetained={(record) => setReviewDocsApplicant({ id: record.applicantId, email: record.email, displayName: record.applicantName, deletedAt: true })} />
           )}
@@ -3659,6 +3587,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
               initialJobId={referralPrefill.jobId}
               initialApplicantIds={referralPrefill.applicantIds}
               onViewUpdates={() => setHiringUpdates({})}
+              onViewClientFeedback={() => setClientFeedbackOpen(true)}
             />
           )}
             </>

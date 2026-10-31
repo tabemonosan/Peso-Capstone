@@ -1,4 +1,5 @@
 import CityProvinceFields from './CityProvinceFields'
+import { digits, mobileInput, validMobile, normalizeMobile, validLandline, TIN_ERROR, MOBILE_ERROR, LANDLINE_ERROR } from '../../shared/employerNumbers.js'
 import { PH_LOCATIONS, provinceForCity } from '../../shared/phLocations.js'
 import { useEffect, useMemo, useRef, useState } from "react"
 import { API_URL } from "../config"
@@ -265,6 +266,7 @@ export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCance
         nextErrors.registrationFile = "Choose a PDF file no larger than 10 MB."
       }
     } else if (step === "establishment") {
+      if (establishment.tin && !/^(?:\d{9}|\d{12})$/.test(establishment.tin)) nextErrors.tin = TIN_ERROR
       for (const [key, label] of [["companyName", "Establishment name"], ["employerType", "Employer type"], ["workforceSize", "Total work force"], ["lineOfBusiness", "Line of business/industry"]]) {
         if (!establishment[key]?.trim()) nextErrors[key] = `${label} is required.`
       }
@@ -276,7 +278,8 @@ export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCance
       if (contact.title === "Others" && !contact.otherTitle?.trim()) nextErrors.otherTitle = "Specify the contact title."
       if (!contact.name?.trim()) nextErrors.contactName = "Contact name is required."
       if (!contact.position?.trim()) nextErrors.position = "Position is required."
-      if (!/^09\d{9}$/.test(contact.mobile || "")) nextErrors.mobile = "Enter an 11-digit mobile number starting with 09."
+      if (!validMobile(contact.mobile)) nextErrors.mobile = MOBILE_ERROR
+      for (const key of ['telephone', 'fax']) if (!validLandline(contact[key])) nextErrors[key] = LANDLINE_ERROR
     } else if (step === "certification") {
       if (!representative.trim()) nextErrors.representative = "Authorized representative name is required."
       if (!certified) nextErrors.certified = "Certification is required."
@@ -284,7 +287,7 @@ export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCance
     } else if (step === "basic") {
       if (!basic.companyName?.trim()) nextErrors.companyName = "Establishment name is required."
       if (!basic.contactName?.trim()) nextErrors.contactName = "Contact name is required."
-      if (!/^09\d{9}$/.test(basic.phone || "")) nextErrors.phone = "Enter an 11-digit mobile number starting with 09."
+      if (!validMobile(basic.phone)) nextErrors.phone = MOBILE_ERROR
       if (!provinceForCity(basic.municipality)) nextErrors.municipality = "Choose a city/municipality from the location list."
       if (!basic.barangay) nextErrors.barangay = "Barangay is required."
     }
@@ -316,7 +319,7 @@ export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCance
   }
   const companyName = mode === "upload" ? basic.companyName || "" : establishment.companyName || ""
   const contactName = mode === "upload" ? basic.contactName || "" : contact.name || ""
-  const phone = mode === "upload" ? basic.phone || "" : contact.mobile || ""
+  const phone = normalizeMobile(mode === "upload" ? basic.phone || "" : contact.mobile || "")
   const location = mode === "upload"
     ? [basic.street, basic.subdivision, basic.barangay && `Brgy. ${basic.barangay}`, basic.municipality, "Albay", basic.landmark && `Landmark: ${basic.landmark}`].filter(Boolean).join(", ")
     : [address.street, address.subdivision, address.barangay && `Brgy. ${address.barangay}`, address.municipality, "Albay", address.landmark && `Landmark: ${address.landmark}`].filter(Boolean).join(", ")
@@ -472,6 +475,7 @@ export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCance
       disabled={options.disabled}
       maxLength={options.maxLength || 200}
       inputMode={options.inputMode}
+      placeholder={options.placeholder}
       aria-invalid={Boolean(errors[id]) || undefined}
       aria-describedby={errors[id] ? `employer-${id}-error` : undefined}
       className={controlClass}
@@ -629,7 +633,7 @@ export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCance
           <div className="grid gap-3 sm:grid-cols-2">
             {field("Establishment name", "companyName", establishment.companyName, (value) => updateValue(setEstablishment, "companyName", value), { required: true })}
             {field("Acronym/abbreviation", "acronym", establishment.acronym, (value) => updateValue(setEstablishment, "acronym", value))}
-            {field("Tax identification number (TIN)", "tin", establishment.tin, (value) => updateValue(setEstablishment, "tin", value), { maxLength: 30 })}
+            {field("Tax identification number (TIN)", "tin", establishment.tin, (value) => updateValue(setEstablishment, "tin", digits(value, 12)), { inputMode: "numeric", maxLength: 12, placeholder: "9 or 12 digits" })}
             {selectField("Employer type", "employerType", establishment.employerType, EMPLOYER_TYPES, (value) => updateValue(setEstablishment, "employerType", value), "Select employer type")}
             {selectField("Total work force", "workforceSize", establishment.workforceSize, WORKFORCE_SIZES, (value) => updateValue(setEstablishment, "workforceSize", value), "Select workforce size")}
             {field("Line of business/industry", "lineOfBusiness", establishment.lineOfBusiness, (value) => updateValue(setEstablishment, "lineOfBusiness", value), { required: true })}
@@ -652,9 +656,9 @@ export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCance
             {contact.title === "Others" && field("Specify title", "otherTitle", contact.otherTitle, (value) => updateValue(setContact, "otherTitle", value), { required: true })}
             {field("Contact person full name", "contactName", contact.name, (value) => updateValue(setContact, "name", value, "contactName"), { required: true })}
             {field("Position", "position", contact.position, (value) => updateValue(setContact, "position", value), { required: true })}
-            {field("Mobile number", "mobile", contact.mobile, (value) => updateValue(setContact, "mobile", value.replace(/\D/g, "").slice(0, 11)), { required: true, inputMode: "numeric", maxLength: 11 })}
-            {field("Telephone number", "telephone", contact.telephone, (value) => updateValue(setContact, "telephone", value), { maxLength: 30 })}
-            {field("Fax number", "fax", contact.fax, (value) => updateValue(setContact, "fax", value), { maxLength: 30 })}
+            {field("Mobile number", "mobile", contact.mobile, (value) => updateValue(setContact, "mobile", mobileInput(value)), { required: true, inputMode: "tel", maxLength: 13, placeholder: "09XXXXXXXXX or +639XXXXXXXXX" })}
+            {field("Telephone number", "telephone", contact.telephone, (value) => updateValue(setContact, "telephone", digits(value, 15)), { inputMode: "tel", maxLength: 15, placeholder: "7–15 digits including area code" })}
+            {field("Fax number", "fax", contact.fax, (value) => updateValue(setContact, "fax", digits(value, 15)), { inputMode: "tel", maxLength: 15, placeholder: "7–15 digits including area code" })}
           </div>
         )}
 
@@ -662,7 +666,7 @@ export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCance
           <div className="grid gap-3 sm:grid-cols-2">
             {field("Establishment name", "companyName", basic.companyName, (value) => updateValue(setBasic, "companyName", value), { required: true })}
             {field("Contact name", "contactName", basic.contactName, (value) => updateValue(setBasic, "contactName", value), { required: true })}
-            {field("Mobile number", "phone", basic.phone, (value) => updateValue(setBasic, "phone", value.replace(/\D/g, "").slice(0, 11)), { required: true, inputMode: "numeric", maxLength: 11 })}
+            {field("Mobile number", "phone", basic.phone, (value) => updateValue(setBasic, "phone", mobileInput(value)), { required: true, inputMode: "tel", maxLength: 13, placeholder: "09XXXXXXXXX or +639XXXXXXXXX" })}
             {field("House/unit no. & street", "street", basic.street, (value) => updateValue(setBasic, "street", value))}
             {field("Subdivision/village/building", "subdivision", basic.subdivision, (value) => updateValue(setBasic, "subdivision", value))}
             <CityProvinceFields id="employer-address" cityLabel="City/municipality" locations={locations} city={basic.municipality || ""} province={provinceForCity(basic.municipality)} errors={{ city: errors.municipality, province: errors.province }} onChange={({ city }) => { setBasic((current) => ({ ...current, municipality: city, barangay: "" })); setErrors((current) => ({ ...current, municipality: undefined, province: undefined, barangay: undefined })); setStepValidity((current) => ({ ...current, basic: false })); }} />

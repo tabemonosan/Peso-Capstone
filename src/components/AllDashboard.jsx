@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { API_URL } from '../config'
+import PortalNavIcon from './PortalNavIcon'
+
+const metricIcons = { Applicants: 'applicants', Employers: 'employers', 'Jobs pending': 'clock', 'Jobs approved': 'check', 'Jobs declined': 'jobs', 'Documents awaiting review': 'requests', Hires: 'check', Referrals: 'referrals', 'Hires reported': 'check', 'Account status': 'verification', Applications: 'jobs', 'Open jobs': 'jobs', Notifications: 'notify' }
 
 // Read-only: cards only navigate to list pages, nothing here modifies data.
-const cardsFor = (role, stats) => {
+const cardsFor = (role, stats, applicantOverview) => {
   if (role === 'Admin') {
     return [
       { label: 'Applicants', value: stats.applicants, to: 'applicants' },
@@ -29,8 +32,10 @@ const cardsFor = (role, stats) => {
   const accountStatus = { label: 'Account status', value: String(stats.verificationStatus).replace('_', ' '), to: 'profile' }
   if (stats.verificationStatus !== 'approved') return [accountStatus]
   return [
+    ...(applicantOverview ? [{ label: 'Open jobs', value: applicantOverview.openJobs, to: 'jobs' }] : []),
     { label: 'Applications', value: stats.applications, to: 'jobs' },
     { label: 'Referrals', value: stats.referrals.total, to: 'jobs' },
+    ...(applicantOverview ? [{ label: 'Notifications', value: applicantOverview.notifications, to: 'notify' }] : []),
   ]
 }
 
@@ -54,7 +59,7 @@ function Skeleton() {
 
 const shortDate = (value) => String(value).slice(5)
 
-export default function AllDashboard({ token, onNavigate }) {
+export default function AllDashboard({ token, onNavigate, applicantOverview }) {
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
 
@@ -77,7 +82,7 @@ export default function AllDashboard({ token, onNavigate }) {
   if (error) return <p role="alert" className="text-rose-700">{error}</p>
   if (!data) return <Skeleton />
 
-  const cards = cardsFor(data.role, data.stats)
+  const cards = cardsFor(data.role, data.stats, applicantOverview)
   const isAdmin = data.role === 'Admin'
   const showActivity = data.role !== 'Applicant' || data.stats.verificationStatus === 'approved'
   const chartData = isAdmin
@@ -85,23 +90,24 @@ export default function AllDashboard({ token, onNavigate }) {
     : data.charts.applications.map((row) => ({ date: row.date, applications: row.count }))
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="dashboard-overview space-y-6">
+      <div className="dashboard-metrics grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {cards.map((card) => (
           <button
             key={card.label}
             type="button"
             onClick={() => onNavigate(card.to)}
-            className="rounded-2xl border border-slate-300 bg-white p-4 text-left transition hover:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+            className="dashboard-metric rounded-2xl border border-slate-300 bg-white p-4 text-left transition hover:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500"
           >
-            <p className="text-sm text-black">{card.label}</p>
-            <p className="mt-2 text-2xl font-semibold capitalize text-black">{card.value}</p>
+            <span className="dashboard-metric-icon"><PortalNavIcon name={metricIcons[card.label]} /></span>
+            <p className="dashboard-metric-label text-sm text-black">{card.label}</p>
+            <p className="dashboard-metric-value mt-2 text-2xl font-semibold capitalize text-black">{card.value}</p>
           </button>
         ))}
       </div>
 
       {showActivity && <>
-      <section className="rounded-2xl border border-slate-300 bg-white p-4">
+      <section className="dashboard-panel rounded-2xl border border-slate-300 bg-white p-4">
         <h3 className="text-base font-semibold text-black">{isAdmin ? 'Registrations and applications' : 'Applications'} &bull; last 30 days</h3>
         <div className="mt-4 h-64 w-full">
           <ResponsiveContainer width="100%" height="100%" minWidth={0}>
@@ -111,8 +117,8 @@ export default function AllDashboard({ token, onNavigate }) {
                 <XAxis dataKey="date" tickFormatter={shortDate} minTickGap={24} />
                 <YAxis allowDecimals={false} />
                 <Tooltip />
-                <Line type="monotone" dataKey="registrations" stroke="#0891b2" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="applications" stroke="#7c3aed" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="registrations" stroke="#2457d6" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="applications" stroke="#9682d0" strokeWidth={2} dot={false} />
               </LineChart>
             ) : (
               <BarChart data={chartData}>
@@ -120,14 +126,14 @@ export default function AllDashboard({ token, onNavigate }) {
                 <XAxis dataKey="date" tickFormatter={shortDate} minTickGap={24} />
                 <YAxis allowDecimals={false} />
                 <Tooltip />
-                <Bar dataKey="applications" fill="#0891b2" />
+                <Bar dataKey="applications" fill="#2457d6" />
               </BarChart>
             )}
           </ResponsiveContainer>
         </div>
       </section>
 
-      <section className="rounded-2xl border border-slate-300 bg-white p-4">
+      <section className="dashboard-panel dashboard-activity rounded-2xl border border-slate-300 bg-white p-4">
         <h3 className="text-base font-semibold text-black">Recent activity</h3>
         {data.activity.length === 0 ? (
           <p className="mt-3 text-sm text-black">No recent activity.</p>

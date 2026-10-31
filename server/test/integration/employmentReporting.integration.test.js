@@ -30,6 +30,23 @@ beforeEach(async () => {
 })
 
 describe('PESO employment reporting', () => {
+  it('resolves admin tracking details without depending on a separately loaded user or jobs page', async () => {
+    await HireReport.create({ applicantId: applicant._id, employerId: employer._id, jobId: job._id, status: 'hired', reportedByRole: 'Employer' })
+    for (const suffix of ['', '?page=1&limit=1']) {
+      const result = await request(app).get(`/api/hire-reports${suffix}`).set(auth('Admin'))
+      expect(result.status).toBe(200)
+      const record = suffix ? result.body.items[0] : result.body[0]
+      expect(record).toMatchObject({ applicant: { name: 'Juan Cruz', email: applicant.email }, employer: { name: 'Example Works', email: employer.email }, job: { title: 'Office Clerk' } })
+      expect(JSON.stringify(record)).not.toContain('private-government-id')
+    }
+    const own = await request(app).get('/api/hire-reports').set(auth('Employer'))
+    expect(own.body[0]).not.toHaveProperty('applicant')
+  })
+
+  it('does not allow an employer to open an applicant NSRP document', async () => {
+    const result = await request(app).get(`/api/job-applications/view?jobId=${job._id}&email=${applicant.email}`).set(auth('Employer'))
+    expect(result.status).toBe(403)
+  })
   it('pairs employer and applicant statements for the admin window, with names and history', async () => {
     await HireReport.create({ applicantId: applicant._id, employerId: employer._id, jobId: job._id, status: 'deployed', reportedByRole: 'Employer', employmentDate: '2026-02-01', notes: 'Started work', history: [{ status: 'hired', employmentDate: '2026-01-01', reportedAt: new Date('2026-01-01') }] })
     await HireReport.create({ applicantId: applicant._id, employerId: employer._id, jobId: job._id, status: 'hired', reportedByRole: 'Applicant', employmentDate: '2026-01-01', notes: 'I accepted the offer' })

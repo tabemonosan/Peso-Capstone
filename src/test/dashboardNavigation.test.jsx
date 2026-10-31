@@ -14,7 +14,7 @@ function mockRole(role, overrides = {}) {
     let data = []
     if (url.endsWith('/api/login')) data = { token: 'token', user }
     else if (url.endsWith('/api/profile')) data = user
-    else if (url.endsWith('/api/dashboard')) data = dashboard(role)
+    else if (url.endsWith('/api/dashboard')) data = { ...dashboard(role), stats: { ...dashboard(role).stats, verificationStatus: user.verificationStatus } }
     else if (url.includes('/api/admin/employment-updates')) data = { items: [], total: 0 }
     else if (url.includes('/api/notifications')) data = { items: [], unreadCount: 0 }
     else if (url.endsWith('/api/employer/verification')) data = { verificationStatus: 'approved' }
@@ -36,13 +36,17 @@ describe('one dashboard per role', () => {
     localStorage.setItem('peso-token', 'token')
     localStorage.setItem('peso-active-view', 'home')
     render(<App />)
-    expect(await screen.findByRole('heading', { name: 'Dashboard', exact: true })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Home', exact: true })).toBeInTheDocument()
     const nav = screen.getByRole('navigation', { name: 'Applicant navigation' })
     expect(within(nav).queryByRole('button', { name: /My Documents/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'My Documents' })).not.toBeInTheDocument()
     expect(screen.queryByText('Documents awaiting review')).not.toBeInTheDocument()
     expect(screen.queryByText(/document.*need.*attention/)).not.toBeInTheDocument()
+    await screen.findByRole('button', { name: /Account status under review/ })
+    expect(screen.queryByRole('button', { name: /^(Applications|Referrals|Open jobs|Notifications) \d/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Recent activity' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Browse Jobs' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Profile', exact: true }))
     expect(await screen.findByRole('heading', { name: 'Documents submitted to PESO' })).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
@@ -59,16 +63,17 @@ describe('one dashboard per role', () => {
     expect(await screen.findByRole('dialog')).toBeInTheDocument()
     expect(localStorage.getItem('peso-active-view')).toBe('profile')
   })
-  it.each(['Admin', 'Employer', 'Applicant'])('gives %s one Dashboard with role-relevant information', async (role) => {
+  it.each(['Admin', 'Employer', 'Applicant'])('gives %s one overview with role-relevant information', async (role) => {
     mockRole(role)
     render(<App />)
     fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: 'user@example.com' } })
     fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'Password123!' } })
     fireEvent.submit(screen.getByRole('button', { name: /Sign in/i }).closest('form'))
     const nav = await screen.findByRole('navigation', { name: `${role} navigation` })
-    expect(within(nav).getAllByRole('button', { name: 'Dashboard', exact: true })).toHaveLength(1)
+    const overviewName = role === 'Applicant' ? 'Home' : 'Dashboard'
+    expect(within(nav).getAllByRole('button', { name: overviewName, exact: true })).toHaveLength(1)
     expect(screen.queryByText('All Dashboard', { exact: true })).not.toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Dashboard', exact: true })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: overviewName, exact: true })).toBeInTheDocument()
     await screen.findByText('Recent activity')
     if (role === 'Admin') expect(screen.getByRole('button', { name: /Employers 2/ })).toBeInTheDocument()
     if (role === 'Employer') {
@@ -77,8 +82,21 @@ describe('one dashboard per role', () => {
       expect(screen.queryByRole('button', { name: /Account status/ })).not.toBeInTheDocument()
     }
     if (role === 'Applicant') {
+      expect(within(nav).queryByRole('button', { name: 'Dashboard', exact: true })).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Browse Jobs' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Update My Profile' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Open jobs 0' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Applications 5' })).toBeInTheDocument()
       expect(screen.queryByRole('button', { name: /Account status/ })).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: /Jobs pending/ })).not.toBeInTheDocument()
+    }
+    if (role !== 'Admin') {
+      fireEvent.click(within(nav).getByRole('button', { name: 'Reviews', exact: true }))
+      expect(screen.getByRole('heading', { name: 'Reviews', exact: true })).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: /Open English PDF/ })).toHaveAttribute('href', '/CSM-Questionnaire-English-Online-v2.pdf')
+      expect(screen.getByRole('link', { name: /Open Tagalog PDF/ })).toHaveAttribute('href', '/CSM-Questionnaire-TAGALOG-Online-v2.pdf')
+      expect(screen.getByRole('link', { name: 'Download English PDF' })).toHaveAttribute('download', 'CSM-Questionnaire-English-Online-v2.pdf')
+      expect(screen.getByRole('link', { name: 'Download Tagalog PDF' })).toHaveAttribute('download', 'CSM-Questionnaire-TAGALOG-Online-v2.pdf')
     }
   })
   it.each(['Employer', 'Applicant'])('keeps Complete Registration hidden for a completed %s after refresh', async (role) => {
@@ -89,14 +107,14 @@ describe('one dashboard per role', () => {
     const nav = await screen.findByRole('navigation', { name: `${role} navigation` })
     await screen.findByText('Recent activity')
     expect(within(nav).queryByRole('button', { name: 'Complete Registration' })).not.toBeInTheDocument()
-    expect(within(nav).getByRole('button', { name: 'Dashboard', exact: true })).toBeInTheDocument()
+    expect(within(nav).getByRole('button', { name: role === 'Applicant' ? 'Home' : 'Dashboard', exact: true })).toBeInTheDocument()
   })
   it.each(['Employer', 'Applicant'])('moves a completed %s off a saved registration checklist on refresh', async (role) => {
     mockRole(role)
     localStorage.setItem('peso-token', 'token')
     localStorage.setItem('peso-active-view', 'complete')
     render(<App />)
-    expect(await screen.findByRole('heading', { name: 'Dashboard', exact: true })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: role === 'Applicant' ? 'Home' : 'Dashboard', exact: true })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Complete Registration' })).not.toBeInTheDocument()
   })
   it('still shows Complete Registration when the server reports an incomplete account', async () => {

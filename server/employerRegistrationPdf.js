@@ -1,5 +1,6 @@
 import fs from 'fs/promises'
 import path from 'path'
+import { validLandline, LANDLINE_ERROR } from '../shared/employerNumbers.js'
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
 
 const TEMPLATE_PATH = path.join(process.cwd(), 'public', 'NSRP-Form-2-Employer-Reg-Form.pdf')
@@ -29,6 +30,10 @@ export function normalizeEmployerRegistrationDetails(input) {
     return { error: 'Employer registration details must be text' }
   }
   const details = Object.fromEntries(keys.map((key) => [key, String(input[key] || '').trim()]))
+  for (const key of ['telephone', 'fax']) {
+    if (!validLandline(details[key])) return { error: LANDLINE_ERROR, fieldErrors: { [key]: LANDLINE_ERROR } }
+    details[key] = details[key].replace(/\D/g, '')
+  }
   if (Object.values(details).some((value) => value.length > 200)) {
     return { error: 'Employer registration fields must be 200 characters or fewer' }
   }
@@ -130,6 +135,14 @@ export async function generateEmployerRegistrationPdf({
   drawValue(page, font, email, 108, 242, 438, 9, warnings, "email", "contact")
 
   drawValue(certificationPage, font, representativeName, 82, 168, 220, 8, warnings, "representative", "certification")
+  // Registration does not create a vacancy. Make this explicit on the original
+  // form's vacancy page instead of leaving its sections apparently unfinished.
+  certificationPage.drawText('N/A - Submit vacancy and qualification details separately in Job Postings.', { x: 40, y: 807, size: 8, font, color: INK })
+  certificationPage.drawText('N/A - No vacancy is created during account registration.', { x: 40, y: 550, size: 8, font, color: INK })
+  certificationPage.drawText('Work type and qualification selections apply when a job is posted.', { x: 40, y: 293, size: 8, font, color: INK })
+  for (const [x, y] of [[115, 771], [40, 735], [390, 687], [350, 667], [390, 646], [195, 608], [360, 608], [145, 456], [370, 456], [90, 437], [350, 437], [110, 420], [480, 420], [155, 390], [200, 332], [200, 313]]) {
+    certificationPage.drawText('N/A', { x, y, size: 8, font, color: INK })
+  }
   const certificationDate = new Date().toLocaleDateString('en-US', { timeZone: 'Asia/Manila' })
   drawValue(certificationPage, font, certificationDate, 398, 168, 118, 8, warnings, "certificationDate", "certification")
   if (certified) certificationPage.drawText('X', { x: 65, y: 170, size: 8, font, color: INK })

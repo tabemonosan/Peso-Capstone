@@ -82,7 +82,7 @@ afterEach(() => {
 })
 
 describe('POST /api/signup (real database)', () => {
-  it('allows the unauthenticated employer Form 2 preview before account creation', async () => {
+  it.each(['09171234567', '+639171234567'])('allows the employer Form 2 preview with mobile %s before account creation', async (phone) => {
     const signature = new PNG({ width: 1, height: 1 })
     signature.data = Buffer.from([0, 0, 0, 255])
     const signatureDataUrl = `data:image/png;base64,${PNG.sync.write(signature).toString('base64')}`
@@ -90,7 +90,7 @@ describe('POST /api/signup (real database)', () => {
       companyName: 'Example Works',
       contactName: 'Jamie Cruz',
       email: 'employer-preview@example.com',
-      phone: '09171234567',
+      phone,
       representativeName: 'Jamie Cruz',
       certified: true,
       signatureDataUrl,

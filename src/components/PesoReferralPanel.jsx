@@ -5,7 +5,7 @@ import { usePagination } from "../hooks/usePagination"
 import { formatFullName } from "../../shared/nameFields.js"
 import { outcomeLabel } from "../../shared/employmentReporting.js"
 
-function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, initialApplicantIds = [], onViewUpdates }) {
+function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, initialApplicantIds = [], onViewUpdates, onViewClientFeedback }) {
   const [jobs, setJobs] = useState([])
   const [referredApplicantIdsByJob, setReferredApplicantIdsByJob] = useState({})
   const [referralStatusByJob, setReferralStatusByJob] = useState({})
@@ -165,6 +165,7 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
     <section className="admin-referrals-card portal-card rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
       <h2 className="text-xl font-semibold text-white">PESO Referral Panel</h2>
       <p className="mt-3 text-slate-400">Create referrals for applicants who applied to approved postings and monitor hire reports.</p>
+      {onViewClientFeedback && <button type="button" onClick={onViewClientFeedback} className="mt-4 rounded-full border border-cyan-300 bg-white px-4 py-2 text-sm font-semibold text-cyan-900">View client feedback</button>}
 
       {loading && <p className="mt-4 text-slate-300">Loading referral panel data...</p>}
       {!loading && error && <p className="mt-4 text-sm text-rose-300">{error}</p>}
@@ -351,9 +352,9 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
                     <td className="px-2 py-2">{report.reportedByRole || 'Employer'}</td>
                     <td className="px-2 py-2">{report.employmentDate || 'Not provided'}</td>
                     <td className="px-2 py-2">{report.notes || '—'}</td>
-                    <td className="px-2 py-2">{(() => { const account = (adminUsers || []).find((user) => String(user.id || user._id) === String(report.applicantId)); return formatFullName(account?.profile) || account?.email || String(report.applicantId || '') })()}</td>
-                    <td className="px-2 py-2">{(() => { const account = (adminUsers || []).find((user) => String(user.id || user._id) === String(report.employerId)); return account?.companyName || account?.email || String(report.employerId || '') })()}</td>
-                    <td className="px-2 py-2">{jobs.find((job) => String(job._id) === String(report.jobId))?.title || String(report.jobId || '')}</td>
+                    <td className="px-2 py-2"><span className="block font-semibold">{report.applicant?.name || report.applicant?.email || 'Applicant record unavailable'}</span>{report.applicant?.name && <span className="text-xs">{report.applicant.email}</span>}</td>
+                    <td className="px-2 py-2"><span className="block font-semibold">{report.employer?.name || report.employer?.email || 'Employer record unavailable'}</span>{report.employer?.name && <span className="text-xs">{report.employer.email}</span>}</td>
+                    <td className="px-2 py-2">{report.job?.title || 'Job record unavailable'}</td>
                     <td className="px-2 py-2">{report.reportedAt ? new Date(report.reportedAt).toLocaleString() : "N/A"}</td>
                     <td className="px-2 py-2">{report.history?.length > 0 ? <details><summary>{report.history.length} previous update(s)</summary><ul>{report.history.map((entry, index) => <li key={index} className="mt-2">{outcomeLabel(entry.status)}{entry.employmentDate ? ` · ${entry.employmentDate}` : ''}{entry.notes ? ` · ${entry.notes}` : ''}{entry.reportedAt ? ` · reported ${new Date(entry.reportedAt).toLocaleString()}` : ''}</li>)}</ul></details> : 'None'}</td>
                   </tr>

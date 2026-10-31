@@ -19,10 +19,13 @@ import { startHireReportReminders } from './services/hireReminders.js'
 import { createNotificationsRouter } from './routes/notifications.js'
 import { createAccountDeletionRouter } from './routes/accountDeletion.js'
 import { createEmploymentUpdatesHandler } from './routes/employmentUpdates.js'
+import { createCsmRouter } from './routes/csm.js'
+import { CsmResponse } from './models/collections.js'
 import { applicantSessionGuard } from './utils/applicantSessions.js'
 import { AccountDeletionRequest } from './models/collections.js'
 import { generateNsrpPdf } from './nsrpPdf.js'
 import { generateEmployerRegistrationPdf, normalizeEmployerRegistrationDetails } from './employerRegistrationPdf.js'
+import { validMobile, normalizeMobile, MOBILE_ERROR } from '../shared/employerNumbers.js'
 import { parseSignatureImage, resolveCertification, SignatureValidationError } from './nsrpSignature.js'
 import { createDashboardService } from './services/dashboard.js'
 import { normalizeEmail, generateVerifyToken, hashVerifyToken, VERIFY_TOKEN_TTL_MS, RESEND_COOLDOWN_MS } from './utils/emailVerification.js'
@@ -3211,13 +3214,28 @@ app.get('/api/hire-reports', async (req, res) => {
       filter.reportedAt = reportedAt
     }
 
+    const attachDetails = async (reports) => {
+      if (decoded.role !== 'Admin' || !reports.length) return reports
+      const [applicants, employers, jobs] = await Promise.all([
+        Applicant.find({ _id: { $in: reports.map((report) => report.applicantId) } }).select('email profile.firstName profile.middleName profile.lastName profile.suffix profile.name').lean(),
+        Employer.find({ _id: { $in: reports.map((report) => report.employerId) } }).select('companyName email').lean(),
+        JobPosting.find({ _id: { $in: reports.map((report) => report.jobId) } }).select('title').lean(),
+      ])
+      const index = (items) => new Map(items.map((item) => [String(item._id), item]))
+      const a = index(applicants), e = index(employers), j = index(jobs)
+      return reports.map((report) => {
+        const applicant = a.get(String(report.applicantId)), employer = e.get(String(report.employerId)), job = j.get(String(report.jobId))
+        return { ...report, applicant: applicant ? { name: applicantFullName(applicant), email: applicant.email } : null, employer: employer ? { name: employer.companyName, email: employer.email } : null, job: job ? { title: job.title } : null }
+      })
+    }
     if (req.query.page !== undefined || req.query.limit !== undefined) {
       const { page, limit } = parsePagination(req.query)
       const result = await paginateQuery(HireReport, filter, { page, limit, sort: { reportedAt: -1 } })
+      result.items = await attachDetails(result.items)
       return res.json(result)
     }
-    const hireReports = await HireReport.find(filter).sort({ reportedAt: -1 })
-    res.json(hireReports)
+    const hireReports = await HireReport.find(filter).sort({ reportedAt: -1 }).lean()
+    res.json(await attachDetails(hireReports))
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Server error' })
@@ -3225,6 +3243,7 @@ app.get('/api/hire-reports', async (req, res) => {
 })
 
 app.get('/api/admin/employment-updates', createEmploymentUpdatesHandler({ HireReport, Applicant, Employer, JobPosting, authenticate: authenticateRequest }))
+app.use('/api/csm', requireVerifiedEmail, requireApprovedEmployer, createCsmRouter({ CsmResponse, Applicant, Employer, authenticate: authenticateRequest, notifyAdmins }))
 
 app.post('/api/ratings', requireApprovedEmployer, async (req, res) => {
   try {
@@ -3346,13 +3365,14 @@ app.use('/api/notifications', createNotificationsRouter({
 
 app.post('/api/employer-registration/preview', async (req, res) => {
   try {
-    const { companyName, contactName, email, phone, representativeName, certified, signatureDataUrl } = req.body || {}
+    const { companyName, contactName, email, phone: rawPhone, representativeName, certified, signatureDataUrl } = req.body || {}
+    const phone = normalizeMobile(rawPhone)
     const normalized = normalizeEmployerRegistrationDetails(req.body?.registrationDetails)
     if (normalized.error) return res.status(422).json({ error: normalized.error, fieldErrors: normalized.fieldErrors })
     if (![companyName, contactName, representativeName].every((value) => typeof value === 'string' && value.trim())) {
       return res.status(422).json({ error: 'Complete the establishment, contact, and representative names.' })
     }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim()) || !/^\d{11}$/.test(String(phone || ''))) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim()) || !validMobile(rawPhone)) {
       return res.status(422).json({ error: 'Enter a valid email and 11-digit mobile number.' })
     }
     let signatureImage
@@ -3400,14 +3420,15 @@ app.post('/api/employer-requests', requirementsUpload.single('requirements'), as
   try {
     const {
       email, emailProof: proofToken, password, consent, mode, companyName, contactName,
-      location, phone, registrationDetails: rawDetails, representativeName, certified, signatureDataUrl,
+      location, phone: rawPhone, registrationDetails: rawDetails, representativeName, certified, signatureDataUrl,
     } = req.body || {}
+    const phone = normalizeMobile(rawPhone)
     const hasText = (value) => typeof value === 'string' && value.trim().length > 0
     if (!hasText(email) || !hasText(password) || !hasText(companyName) || !hasText(contactName) || !hasText(location)) {
       return reject(400, { error: 'Email, password, establishment name, contact name, and address are required' })
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) return reject(400, { error: 'Enter a valid email address' })
-    if (!/^\d{11}$/.test(String(phone || ''))) return reject(400, { error: 'Enter an 11-digit mobile number' })
+    if (!validMobile(rawPhone)) return reject(400, { error: MOBILE_ERROR, fieldErrors: { phone: MOBILE_ERROR } })
     if (consent !== 'true') return reject(400, { error: 'Data privacy consent is required' })
     if (!['online', 'upload'].includes(mode)) return reject(400, { error: 'Choose how to provide Form 2' })
     const emailProof = verifyEmailProof(proofToken)
@@ -3699,8 +3720,9 @@ app.post('/api/employer-requirements', requirementsUpload.single('requirements')
       ? req.body.contactName.trim()
       : request.contactName
     const phone = typeof req.body?.phone === 'string' && req.body.phone.trim()
-      ? req.body.phone.trim()
+      ? normalizeMobile(req.body.phone.trim())
       : request.phone
+    if (!validMobile(phone)) return res.status(422).json({ error: MOBILE_ERROR, fieldErrors: { phone: MOBILE_ERROR } })
     const location = typeof req.body?.location === 'string' && req.body.location.trim()
       ? req.body.location.trim()
       : request.location

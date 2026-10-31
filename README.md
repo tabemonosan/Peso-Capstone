@@ -28,7 +28,8 @@ Then open http://localhost:5173 (frontend). The backend API is on http://localho
 Notes:
 - `docker-compose.yml` starts a local MongoDB container by default. To use your own database (e.g. MongoDB Atlas), set `MONGODB_URI` in your `.env` or environment before running compose.
 - Other backend settings (`JWT_SECRET`, SMTP/email vars) are also read from `.env`.
-- The frontend build reads `VITE_API_URL` (default `http://localhost:4000`) to know where the API is.
+- Production frontend builds use the same origin by default. Nginx forwards `/api/` requests to the Docker `backend:4000` service, including POST requests. Set `VITE_API_URL` only when the API is hosted at a separate browser-accessible address. Local Vite development defaults to `http://localhost:4000`.
+- After changing the API build setting or Nginx routing, rebuild/restart the containers with `docker compose up --build -d`. A previous build still contains its old API address.
 
 You can also build the images individually:
 

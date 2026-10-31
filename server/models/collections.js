@@ -316,6 +316,18 @@ const usedEmailProofSchema = new Schema({
 })
 
 const Applicant = mongoose.models.Applicant || mongoose.model('Applicant', applicantSchema)
+const csmResponseSchema = new Schema({
+  submitterId: { type: Schema.Types.ObjectId, required: true, select: false },
+  submitterRole: { type: String, enum: ['Applicant', 'Employer'], required: true },
+  language: { type: String, enum: ['en', 'tl'], required: true },
+  questionnaireVersion: { type: String, required: true },
+  answers: { type: Schema.Types.Mixed, required: true },
+  submissionKey: { type: String, required: true, select: false },
+  payloadHash: { type: String, required: true, select: false },
+}, { collection: 'csm_responses', timestamps: true })
+csmResponseSchema.index({ submissionKey: 1 }, { unique: true })
+csmResponseSchema.index({ createdAt: -1, _id: 1 })
+const CsmResponse = mongoose.models.CsmResponse || mongoose.model('CsmResponse', csmResponseSchema)
 const accountDeletionRequestSchema = new Schema({
   applicantId: { type: Schema.Types.ObjectId, ref: 'Applicant', required: true },
   activeApplicant: { type: Schema.Types.ObjectId },
@@ -388,6 +400,7 @@ async function updateUserProfileByEmail(email, profile) {
 }
 
 export {
+  CsmResponse,
   AccountDeletionRequest,
   Applicant,
   Employer,

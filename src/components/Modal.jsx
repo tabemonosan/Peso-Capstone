@@ -19,7 +19,7 @@ export default function Modal({ onClose, labelledBy, describedBy, maxWidth = "ma
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/75 p-0 sm:items-center sm:p-4"
+      className="peso-modal-overlay fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/75 p-0 sm:items-center sm:p-4"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose?.()
       }}
@@ -54,7 +54,7 @@ export default function Modal({ onClose, labelledBy, describedBy, maxWidth = "ma
             first.focus()
           }
         }}
-        className={`max-h-[92dvh] w-full ${maxWidth} overflow-y-auto rounded-t-2xl border border-slate-300 bg-white p-5 text-slate-900 shadow-2xl sm:rounded-2xl sm:p-6`}
+        className={`peso-modal-panel max-h-[92dvh] w-full ${maxWidth} overflow-y-auto rounded-t-2xl border border-slate-300 bg-white p-5 text-slate-900 shadow-2xl sm:rounded-2xl sm:p-6`}
       >
         {children}
       </div>

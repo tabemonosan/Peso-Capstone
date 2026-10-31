@@ -3,12 +3,21 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import HireReportForm from '../components/HireReportForm'
 import ApplicantEmploymentReports from '../components/ApplicantEmploymentReports'
 import ReferralList from '../components/ReferralList'
+import PesoReferralPanel from '../components/PesoReferralPanel'
 import { API_URL } from '../config'
 
 const response = (body, ok = true) => ({ ok, json: async () => body })
 beforeEach(() => { vi.restoreAllMocks(); global.fetch = vi.fn() })
 
 describe('employment updates', () => {
+  it('shows admin tracking names and job titles even without loaded directory records', async () => {
+    fetch.mockImplementation(async (url) => response(url.endsWith('/api/hire-reports') ? [{ _id: 'report1', applicantId: 'private-applicant-id', employerId: 'private-employer-id', jobId: 'private-job-id', status: 'hired', applicant: { name: 'Juan Cruz', email: 'juan@example.com' }, employer: { name: 'Example Works', email: 'hr@example.com' }, job: { title: 'Office Clerk' } }] : []))
+    render(<PesoReferralPanel token="token" adminUsers={[]} />)
+    await screen.findByText('Juan Cruz')
+    expect(screen.getByText('Example Works')).toBeTruthy()
+    expect(screen.getByText('Office Clerk')).toBeTruthy()
+    expect(screen.queryByText('private-applicant-id')).toBeNull()
+  })
   it('hides pending, declined, and direct-application reports until referral acceptance', async () => {
     fetch.mockImplementation(async (url) => response(url.endsWith('/api/hire-reports') ? [] : ['pending', 'declined', 'applied'].map((status) => ({ _id: status, referralId: status === 'applied' ? null : status, status, jobId: { _id: status, title: `Hidden ${status}` } }))))
     render(<ApplicantEmploymentReports token="token" applicantId="a1" />)

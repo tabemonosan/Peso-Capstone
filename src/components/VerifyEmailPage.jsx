@@ -45,7 +45,7 @@ export default function VerifyEmailPage({ onDone }) {
     <div className="auth-page">
       <div className="auth-card">
         <div className="auth-logo" aria-label="Public Employment Service Office">
-          <img src="/peso-logo.png" alt="Public Employment Service Office logo" onError={(e) => { e.currentTarget.style.display = 'none' }} />
+          <img src={new URL('../assets/peso-logo.png', import.meta.url).href} alt="Public Employment Service Office logo" />
         </div>
         <div className="auth-heading">
           <h1>Email verification</h1>

@@ -205,5 +205,12 @@ describe('create job posting address and errors', () => {
     await waitFor(() => expect(max).toHaveFocus())
     expect(max).toHaveAttribute('aria-invalid', 'true')
     expect(max.parentElement).toHaveTextContent(serverErrors.salaryMax)
+    serverErrors = null
+    fireEvent.change(max, { target: { value: '21000' } })
+    fireEvent.click(form.getByRole('button', { name: 'Submit Job Request' }))
+    const confirmation = await screen.findByRole('dialog', { name: 'Job request submitted for review' })
+    expect(within(confirmation).getByText(/PESO will review your job posting/)).toBeInTheDocument()
+    fireEvent.click(within(confirmation).getByRole('button', { name: 'Done' }))
+    expect(screen.queryByRole('dialog', { name: 'Job request submitted for review' })).not.toBeInTheDocument()
   })
 })

@@ -10,6 +10,7 @@ RUN npm ci --omit=dev
 # Copy backend source and shared modules
 COPY server ./server
 COPY shared ./shared
+COPY public ./public
 COPY src/utils ./src/utils
 
 ENV NODE_ENV=production

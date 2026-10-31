@@ -34,6 +34,13 @@ describe("employer sign-up wizard", () => {
     fireEvent.click(screen.getByRole("radio", { name: /Fill it out online/i }))
     fireEvent.click(screen.getByRole("button", { name: /3\. Establishment details/i }))
     await screen.findByRole("heading", { name: "Establishment details" })
+    const tin = screen.getByLabelText(/Tax identification number/)
+    expect(tin.maxLength).toBe(12)
+    fireEvent.change(tin, { target: { value: '123-456-789-012345' } })
+    expect(tin.value).toBe('123456789012')
+    fireEvent.change(tin, { target: { value: '12345' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
+    expect(await screen.findByText('Enter a TIN with 9 or 12 digits.')).toBeTruthy()
 
     const draft = localStorage.getItem("peso-employer-signup-draft")
     expect(draft).toContain("employer@example.com")
