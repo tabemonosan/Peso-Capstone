@@ -54,6 +54,7 @@
     "oxlint": "^1.75.0",
     "pdf-to-img": "^7.0.1",
     "pngjs": "^7.0.0",
+    "qrcode": "^1.5.4",
     "supertest": "^7.3.1",
     "tailwindcss": "^4.3.3",
     "vite": "^8.2.0",

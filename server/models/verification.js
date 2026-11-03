@@ -11,6 +11,8 @@ const findingSchema = new mongoose.Schema({
   dismissedBy: String, note: { type: String, maxlength: 500 },
 }, { _id: false })
 export const verificationVersionFields = {
+  provider: String, assurance: String, rulesVersion: String,
+  technicalAttempts: { type: Number, default: 0 },
   quality: { passed: Boolean, width: Number, height: Number, pages: Number, warnings: [String] },
   declaredDetails: { type: mongoose.Schema.Types.Mixed },
   qr: { found: Boolean, domain: String, allowlisted: Boolean },
@@ -26,6 +28,7 @@ export const verificationVersionFields = {
   verificationAudit: { type: [{ action: String, reason: String, by: String, at: Date, ruleId: String, checklist: { type: mongoose.Schema.Types.Mixed } }], default: [] },
 }
 export const verificationAccountFields = {
+  verificationFailureCounts: { type: mongoose.Schema.Types.Mixed, select: false },
   holdAutoApproval: { type: Boolean, default: false, select: false },
   autoApprovalHoldHistory: { type: [{ action: String, reason: String, by: String, at: Date }], select: false },
 }

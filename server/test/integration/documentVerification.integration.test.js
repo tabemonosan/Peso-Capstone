@@ -141,6 +141,8 @@ describe('Document verification foundations', () => {
     const stored = await EmployerRequest.findOne({ email: employer.email })
     expect(stored.requirementsVersions[0].verificationAudit[0].action).toBe('approve')
     expect((await Employer.findById(employer._id)).verificationStatus).toBe('under_review')
+    const access = await request(app).get('/api/employer/verification').set('Authorization', `Bearer ${sign('Employer', employer)}`).expect(200)
+    expect(access.body.verificationStatus).toBe('under_review')
   })
   it('never sends findings, evidence, holds or internal audit notes to the applicant', async () => {
     const account = await applicant({ findings: [flag], autoApprovalSummary: [{ ruleId: 'private_rule', level: 'review' }], reviewReasons: ['Audit sample'] })

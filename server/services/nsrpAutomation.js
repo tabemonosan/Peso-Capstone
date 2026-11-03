@@ -24,6 +24,7 @@ export function manualReason({ sourceType, version, emailVerified, enabledAtCrea
 }
 
 export function createNsrpAutomation({ Applicant, Employer, EmployerRequest, notify, notifyAdmins, recomputeApplicant, random = () => crypto.randomInt(1000000) / 1000000, runCheck, beforeApproval } = {}) {
+  let documentEngine
   const db = () => mongoose.connection.db
   const decisions = () => db().collection('nsrp_auto_decisions')
   const settings = () => db().collection('nsrp_auto_settings')
@@ -148,6 +149,7 @@ export function createNsrpAutomation({ Applicant, Employer, EmployerRequest, not
       if (!reason && version.explanation?.status && version.explanation.status !== 'reviewed') reason = 'Explanation'
       // No independent reader exists in Phase 1. Typed data cannot satisfy the default.
       if (!reason && config.minimumEvidence === 'independent') reason = 'Not independent'
+      if (documentEngine && !reason) reason = 'Engine review'
       let sampled = false
       if (!reason && random() * 100 < config.auditPercent) { reason = 'Audit sample'; sampled = true }
       if (!reason && !await reserveRate(key, ip, role === 'Applicant' ? data.cellphone || account.phone : record.phone, config.rateLimit)) reason = 'Rate guard'
@@ -223,5 +225,8 @@ export function createNsrpAutomation({ Applicant, Employer, EmployerRequest, not
     return true
   }
 
-  return { getSettings, updateSettings, creationEnabled, process: processSubmission, revoke, decisions }
+  return { getSettings, updateSettings, creationEnabled, process: async payload => {
+    await processSubmission(payload)
+    if (documentEngine) await documentEngine.process({ ...payload, docKey: payload.role === 'Applicant' ? 'nsrpForm' : 'employerNsrpForm' })
+  }, attachEngine: engine => { documentEngine = engine }, revoke, decisions, reserveRate, hash }
 }

@@ -20,8 +20,8 @@ export function createDocumentVerificationRouter({ service, authenticate, automa
   router.get('/counts', async (_req, res) => {
     try {
       if (!(await automation.getSettings()).reviewToolsEnabled) return res.json({ flagged: 0, automatic: 0 })
-      const [flagged, automatic] = await Promise.all([service.list({ limit: 1 }), service.list({ queue: 'auto', limit: 1 })])
-      res.json({ flagged: flagged.total, automatic: automatic.total })
+      const [flagged, automatic, samples, revoked] = await Promise.all([service.list({ limit: 1 }), service.list({ queue: 'auto', limit: 1 }), automation.decisions().countDocuments({ result: 'Manual', reason: 'Audit sample' }), automation.decisions().countDocuments({ result: 'Revoked' })])
+      res.json({ flagged: flagged.total, automatic: automatic.total, samples, revoked })
     } catch { res.status(503).json({ error: 'Review counts unavailable' }) }
   })
   router.get('/details', async (req, res) => {

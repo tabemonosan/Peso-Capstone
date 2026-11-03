@@ -29,6 +29,8 @@ import { prepareDocument, parseDocumentDetails, saveAuthorization } from './serv
 import { processApplicantImages } from './services/imageChecks.js'
 import { EXPLANATION_CATEGORIES } from '../shared/crossChecks.js'
 import { inspectDocument } from './services/imageQuality.js'
+import { createVerificationEngine } from './services/verificationEngine.js'
+import { enqueueVerification } from './services/verificationJobs.js'
 import { applicantSkillQuery } from './utils/jobSkillMatching.js'
 import { jobSkillMatchCount } from '../shared/jobSkills.js'
 import { rankEmployerReferrals } from './services/applicantRanking.js'
@@ -353,6 +355,7 @@ const EmployerRequest = mongoose.model('EmployerRequest', employerRequestSchema)
 async function refreshApplicantVerification(id) {
   const account = await Applicant.findById(id)
   if (!account) return
+  const previousStatus = account.verificationStatus
   recomputeVerificationStatus(account)
   const match = { _id: id, verificationStatus: { $ne: 'restricted' }, deletedAt: { $exists: false } }
   for (const key of REQUIRED_DOC_KEYS) {
@@ -360,9 +363,12 @@ async function refreshApplicantVerification(id) {
     match[`verificationDocuments.${key}.versions`] = { $size: versions.length }
     if (versions.length) match[`verificationDocuments.${key}.versions.${versions.length - 1}.status`] = versions.at(-1).status
   }
-  await Applicant.updateOne(match, { $set: { verificationStatus: account.verificationStatus, ...(account.verificationReason ? { verificationReason: account.verificationReason } : {}) }, ...(!account.verificationReason ? { $unset: { verificationReason: '' } } : {}) })
+  const result = await Applicant.updateOne(match, { $set: { verificationStatus: account.verificationStatus, ...(account.verificationReason ? { verificationReason: account.verificationReason } : {}) }, ...(!account.verificationReason ? { $unset: { verificationReason: '' } } : {}) })
+  return { becameVerified: previousStatus !== 'approved' && account.verificationStatus === 'approved' && result.modifiedCount === 1 }
 }
 export const nsrpAutomation = createNsrpAutomation({ Applicant, Employer, EmployerRequest, notify, notifyAdmins, recomputeApplicant: refreshApplicantVerification })
+export const verificationEngine = createVerificationEngine({ Applicant, Employer, EmployerRequest, automation: nsrpAutomation, notify, notifyAdmins, recomputeApplicant: refreshApplicantVerification })
+nsrpAutomation.attachEngine(verificationEngine)
 app.use('/api/admin/nsrp-automation', createNsrpAutomationRouter({ automation: nsrpAutomation, authenticate: authenticateRequest, Admin, review: (...args) => documentVerification.act(...args) }))
 export const documentVerification = createDocumentVerification({ Applicant, Employer, EmployerRequest, automation: nsrpAutomation, notify, recomputeApplicant: refreshApplicantVerification })
 app.use('/api/admin/document-verification', createDocumentVerificationRouter({ service: documentVerification, authenticate: authenticateRequest, automation: nsrpAutomation, Admin }))
@@ -699,7 +705,7 @@ async function loadEmployerVerification(email) {
   if (!employer) return { employer: null, request, status: null, reason: '' }
 
   const latestVersion = request?.requirementsVersions?.at(-1)
-  const documentStatus = latestVersion?.reviewedBy === SYSTEM_REVIEWER && request?.adminDecision !== 'approved' ? 'pending' : request?.requirementsFile?.status || latestVersion?.status
+  const documentStatus = latestVersion?.status === 'approved' && request?.adminDecision !== 'approved' && request?.status !== 'approved' ? 'pending' : request?.requirementsFile?.status || latestVersion?.status
     || (request?.status === EMPLOYER_VERIFICATION_STATUS.APPROVED ? 'approved' : undefined)
   const decision = request?.adminDecision
     || ([EMPLOYER_VERIFICATION_STATUS.APPROVED, EMPLOYER_VERIFICATION_STATUS.DECLINED, EMPLOYER_VERIFICATION_STATUS.NEEDS_RESUBMISSION].includes(request?.status)
@@ -1174,7 +1180,11 @@ app.post('/api/signup', applicantSignupUpload.fields([
     user = await Applicant.findById(user._id)
     {
       const imageSettings = await nsrpAutomation.getSettings()
-      for (const slot of ['birthCertificate', 'validId1', 'validId2']) if (user.verificationDocuments?.[slot]?.versions?.length && !documentReviews[slot]?.quality?.pages) setImmediate(() => processApplicantImages({ accountId: user._id, docKey: slot, version: 1, settings: imageSettings }))
+      for (const slot of ['birthCertificate', 'validId1', 'validId2']) if (user.verificationDocuments?.[slot]?.versions?.length) enqueueVerification(async () => {
+        await processApplicantImages({ accountId: user._id, docKey: slot, version: 1, settings: imageSettings })
+        await verificationEngine.process({ role: 'Applicant', accountId: user._id, docKey: slot, ip: req.ip })
+        await verificationEngine.process({ role: 'Applicant', accountId: user._id, docKey: 'nsrpForm', ip: req.ip })
+      })
     }
 
     // No link-verification email is sent: these accounts are verified by code.
@@ -1202,6 +1212,7 @@ app.post('/api/signup', applicantSignupUpload.fields([
   } catch (err) {
     // One redacted line, matchable by the client-visible errorId. Never log the
     // email, password, code, token, or file contents.
+    if (err.status === 422) return res.status(422).json({ error: err.message, fieldErrors: { verificationDocuments: err.message } })
     const errorId = crypto.randomBytes(6).toString('hex')
     console.error(`signup: failed at ${stage} (errorId=${errorId}) ${err?.name || 'Error'}: ${redactString(String(err?.message || err))}`)
     res.status(500).json({ error: 'Server error', errorId })
@@ -1483,6 +1494,7 @@ app.post('/api/profile/verification-documents/:docKey', verificationUpload.singl
 
     // Ownership + account state checks: restricted accounts cannot upload
     if (applicant.verificationStatus === 'restricted') return res.status(403).json({ error: 'This account is restricted. Please contact PESO support.' })
+    if (currentDocStatus(applicant.verificationDocuments?.[docKey]) === 'approved') return res.status(409).json({ error: 'This document is approved and locked. Request a correction first.' })
 
     const declared = parseDocumentDetails(req.body?.verificationDetails)
     if (docKey !== 'nsrpForm' && (await nsrpAutomation.getSettings()).imageChecks) req.file.verificationReview = docKey === 'supportingExplanation' ? { quality: await inspectDocument(req.file) } : await prepareDocument(req.file, docKey, idType, declared, applicant.verificationDocuments?.[docKey === 'validId1' ? 'validId2' : 'validId1']?.versions?.at(-1)?.declaredDetails?.number, applicant.profile?.nsrp)
@@ -1497,7 +1509,11 @@ app.post('/api/profile/verification-documents/:docKey', verificationUpload.singl
 
     if (docKey === 'nsrpForm') await nsrpAutomation.process({ role: 'Applicant', accountId: applicant._id, ip: req.ip })
     await saveAuthorization(applicant._id, docKey, version.version, declared)
-    if (docKey !== 'nsrpForm') { const imageSettings = await nsrpAutomation.getSettings(); setImmediate(() => processApplicantImages({ accountId: applicant._id, docKey, version: version.version, settings: imageSettings })) }
+    if (docKey !== 'nsrpForm') { const imageSettings = await nsrpAutomation.getSettings(); enqueueVerification(async () => {
+      await processApplicantImages({ accountId: applicant._id, docKey, version: version.version, settings: imageSettings })
+      await verificationEngine.process({ role: 'Applicant', accountId: applicant._id, docKey, ip: req.ip })
+      await verificationEngine.process({ role: 'Applicant', accountId: applicant._id, docKey: 'nsrpForm', ip: req.ip })
+    }) }
 
     await notifyAdmins({
       type: 'document_resubmitted',
@@ -1509,7 +1525,23 @@ app.post('/api/profile/verification-documents/:docKey', verificationUpload.singl
 
     res.json({ ok: true, docKey, version: version.version, status: 'pending', uploadsRemaining: MAX_UPLOADS_PER_DOC - slot.uploads, document: { originalName: version.originalName, size: version.size, uploadedAt: version.uploadedAt } })
   } catch (err) {
-    if (err.status) return res.status(err.status).json({ error: err.message })
+    if (err.status) {
+      if (err.status === 422) {
+        try {
+          const actor = authenticateRequest(req), key = req.params.docKey
+          if (actor?.role === 'Applicant' && ['birthCertificate', 'validId1', 'validId2'].includes(key)) {
+            const account = await Applicant.findOneAndUpdate({ email: actor.email }, { $inc: { [`verificationFailureCounts.${key}`]: 1 } }, { returnDocument: 'after' }).select('+verificationFailureCounts')
+            const attempts = account?.verificationFailureCounts?.[key] || 0
+            if (attempts >= 3) {
+              const versions = account.verificationDocuments?.[key]?.versions || []
+              if (versions.length) await Applicant.collection.updateOne({ _id: account._id }, { $addToSet: { [`verificationDocuments.${key}.versions.${versions.length - 1}.reviewReasons`]: 'Technical attempts: admin review' } })
+              if (attempts === 3) await notifyAdmins({ type: 'document_exception', title: 'Document upload needs review', message: 'An account needs assistance submitting a document.', link: '/verification-flagged', metadata: { applicantId: String(account._id) } })
+            }
+          }
+        } catch { console.error('[verification] upload exception recording unavailable') }
+      }
+      return res.status(err.status).json({ error: err.message, fieldErrors: { [req.params.docKey]: err.message } })
+    }
     console.error(err)
     res.status(500).json({ error: 'Server error' })
   }
@@ -4333,6 +4365,8 @@ export async function purgeExpiredVerificationDocuments() {
   }
 }
 if (!isTestEnv) {
+  setInterval(() => verificationEngine.digest(), 24 * 60 * 60 * 1000).unref()
+  verificationEngine.digest()
   setInterval(purgeExpiredVerificationDocuments, 24 * 60 * 60 * 1000).unref()
   purgeExpiredVerificationDocuments()
 

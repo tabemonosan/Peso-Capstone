@@ -45,6 +45,12 @@ export function AdminNsrpAccountDecision({ token, accountId, role, onChanged, co
 }
 
 export default function AdminNsrpAutomation({ token, bannerOnly = false }) {
+  const [counts, setCounts] = useState(null)
+  useEffect(() => {
+    let active = true
+    fetch(`${API_URL}/api/admin/document-verification/counts`, { headers: { Authorization: `Bearer ${token}` } }).then(async response => { if (response.ok && active) setCounts(await response.json()) }).catch(() => {})
+    return () => { active = false }
+  }, [token])
   const [settings, setSettings] = useState(null)
   const [items, setItems] = useState([])
   const [total, setTotal] = useState(0)
@@ -97,6 +103,7 @@ export default function AdminNsrpAutomation({ token, bannerOnly = false }) {
   return <section className="rounded-xl border border-slate-200 bg-white p-4 text-slate-900">
     {settings && <p className="rounded-lg border border-cyan-200 bg-cyan-50 p-3 font-semibold">Auto-approval is {enabled ? 'ON' : 'OFF'} · Applicant: {settings.applicant ? 'ON' : 'OFF'} · Employer: {settings.employer ? 'ON' : 'OFF'}</p>}
     {error && <p role="alert" className="text-rose-700">{error}</p>}
+    {counts && <p className="my-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">Auto-approved: {counts.automatic || 0} · Flagged: {counts.flagged || 0} · Audit samples: {counts.samples || 0} · Revoked: {counts.revoked || 0}</p>}
     {!bannerOnly && <>
       <h2 className="mt-4 text-xl font-semibold">Verification rules</h2>
       {settings && <form onSubmit={save} className="my-4 grid gap-4 sm:grid-cols-2">
@@ -107,7 +114,9 @@ export default function AdminNsrpAutomation({ token, bannerOnly = false }) {
         <label><input type="checkbox" checked={settings.dataChecks} onChange={event => setSettings({ ...settings, dataChecks: event.target.checked })} /> Additional NSRP consistency and duplicate checks</label>
         <label><input type="checkbox" checked={settings.imageChecks} onChange={event => setSettings({ ...settings, imageChecks: event.target.checked })} /> Document image quality and declared-detail checks</label>
         <label><input type="checkbox" checked={settings.crossChecks} onChange={event => setSettings({ ...settings, crossChecks: event.target.checked })} /> Cross-document comparisons and explanation form</label>
-        <p className="text-sm text-slate-600 sm:col-span-2">Checks assess consistency and evidence, not authenticity. Image reading and supporting-document automatic approval will be available in later phases. The independent evidence default keeps typed-only submissions pending.</p>
+        <label><input type="checkbox" checked={settings.verificationEngineEnabled} onChange={event => setSettings({ ...settings, verificationEngineEnabled: event.target.checked })} /> Verification decision engine</label>
+        <label><input type="checkbox" checked={settings.philsysQrVerification} onChange={event => setSettings({ ...settings, philsysQrVerification: event.target.checked })} /> Local PhilSys signature checks (requires configured keys)</label>
+        <p className="text-sm text-slate-600 sm:col-span-2">Checks assess consistency and evidence, not authenticity. Independent document evidence is required by default. The PhilSys signature provider is unavailable without configured issuer keys; unsupported QR formats stay inconclusive.</p>
         <label>Audit sample percentage<input type="number" min="0" max="100" required className={`${control} block`} value={settings.auditPercent} onChange={(event) => setSettings({ ...settings, auditPercent: event.target.value })} /></label>
         <label>Rate guard per IP and mobile / 24 hours<input type="number" min="1" max="5" required className={`${control} block`} value={settings.rateLimit} onChange={(event) => setSettings({ ...settings, rateLimit: event.target.value })} /></label>
         <button disabled={busy} type="submit" className="rounded-lg border border-cyan-500 bg-cyan-50 px-4 py-2">Save verification rules</button>

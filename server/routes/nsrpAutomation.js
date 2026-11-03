@@ -49,7 +49,7 @@ export function createNsrpAutomationRouter({ automation, authenticate, review, A
         if (!decision) return res.status(409).json({ error: 'Approval already changed; refresh the record.' })
         const admin = await Admin.findOne({ email: req.nsrpAdmin.email }).select('_id').lean()
         if (!admin) return res.status(403).json({ error: 'Admins only' })
-        return res.json(await review({ role: decision.role, accountId: String(decision.accountId), docKey: decision.role === 'Applicant' ? 'nsrpForm' : 'employerNsrpForm' }, { ...req.nsrpAdmin, id: String(admin._id) }, { action: 'revoke', version: decision.version, reason: req.body?.reason }))
+        return res.json(await review({ role: decision.role, accountId: String(decision.accountId), docKey: decision.docKey || (decision.role === 'Applicant' ? 'nsrpForm' : 'employerNsrpForm') }, { ...req.nsrpAdmin, id: String(admin._id) }, { action: 'revoke', version: decision.version, reason: req.body?.reason }))
       }
       const revoked = await automation.revoke(req.body?.id, req.nsrpAdmin.email, req.body?.reason)
       res.status(revoked ? 200 : 409).json(revoked ? { ok: true } : { error: 'Approval already changed; refresh the record.' })

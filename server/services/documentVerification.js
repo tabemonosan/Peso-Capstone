@@ -53,6 +53,7 @@ export function createDocumentVerification({ Applicant, Employer, EmployerReques
       adminConfirmedBy: '$entry.document.adminConfirmedBy', adminConfirmedAt: '$entry.document.adminConfirmedAt',
       at: { $ifNull: ['$entry.document.uploadedAt', '$createdAt'] },
       approvedAt: '$entry.document.reviewedAt', findings: { $ifNull: ['$entry.document.findings', []] },
+      provider: '$entry.document.provider', assurance: '$entry.document.assurance', rulesVersion: '$entry.document.rulesVersion',
       reasons: { $ifNull: ['$entry.document.reviewReasons', []] }, explanation: '$entry.document.explanation',
       audit: { $concatArrays: [{ $ifNull: ['$entry.document.verificationAudit', []] }, { $ifNull: [role === 'Applicant' ? '$autoApprovalHoldHistory' : '$account.autoApprovalHoldHistory', []] }] }, autoApprovalSummary: '$entry.document.autoApprovalSummary',
     } }
@@ -150,7 +151,7 @@ export function createDocumentVerification({ Applicant, Employer, EmployerReques
       set[`${base}.reviewReason`] = action === 'approve' ? '' : action === 'resubmit' ? 'Please upload a clearer or corrected document for PESO review.' : 'PESO could not approve this document. Please contact the office for assistance.'
       set[`${base}.reviewReasons`] = action === 'resubmit' ? ['Resubmission requested'] : []
       if (action === 'approve') { set[`${base}.approvedBy`] = by; set[`${base}.autoApproved`] = false }
-      if (document.explanation?.status === 'submitted') set[`${base}.explanation.status`] = 'reviewed'
+      if (['submitted', 'requested'].includes(document.explanation?.status)) set[`${base}.explanation.status`] = 'reviewed'
     } else if (action === 'resolve') {
       const finding = document.findings?.find(f => f.ruleId === input.ruleId && f.status !== 'dismissed')
       if (!finding) fail(409, 'Open finding unavailable')
@@ -190,7 +191,7 @@ export function createDocumentVerification({ Applicant, Employer, EmployerReques
       await notify({ recipient: { id: account._id, role: 'Applicant' }, type: 'account_verified', title: 'Account verified', message: 'All your required documents were approved. Your account is now verified.', link: '/jobs', email: true })
     }
     if (target.role === 'Employer' && ['revoke', 'decline', 'resubmit'].includes(action)) await Employer.updateOne({ _id: account._id }, { $set: { verificationStatus: set.status, approvalNoticePending: false, verificationReason: set[`${base}.reviewReason`] || '' } })
-    if (action === 'revoke' && ['nsrpForm', 'employerNsrpForm'].includes(target.docKey)) await nsrpDecisions().updateOne({ accountId: account._id, version: document.version, result: 'Auto-approved' }, { $set: { result: 'Revoked', revokedBy: by, revokedAt: at, revokeReason: reason } })
+    if (action === 'revoke') await nsrpDecisions().updateOne({ _id: ['nsrpForm', 'employerNsrpForm'].includes(target.docKey) ? `${target.role}:${account._id}:${document.version}` : `${target.role}:${account._id}:${target.docKey}:${document.version}`, result: 'Auto-approved' }, { $set: { result: 'Revoked', revokedBy: by, revokedAt: at, revokeReason: reason } })
     if (action === 'resolve' && ['nsrpForm', 'employerNsrpForm'].includes(target.docKey)) await nsrpDecisions().updateOne({ accountId: account._id, version: document.version }, {
       $push: { dismissals: { code: input.ruleId, reason, by, at } },
       ...(document.findings.find(f => f.ruleId === input.ruleId)?.severity === 'critical' ? { $set: { dismissedCritical: true } } : {}),

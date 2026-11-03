@@ -43,7 +43,7 @@ export async function processApplicantImages({ accountId, docKey, version, setti
       }
     }
     const index = versions.length - 1, base = `verificationDocuments.${docKey}.versions.${index}`
-    await Applicant.collection.updateOne({ _id: account._id, [`${base}.version`]: version, [`${base}.status`]: 'pending', [`verificationDocuments.${docKey}.versions`]: { $size: versions.length } }, { $set: { [`${base}.qr`]: qr, [`${base}.imageComparisons`]: comparisons, [`${base}.findings`]: document.findings || [] } })
+    await Applicant.collection.updateOne({ _id: account._id, [`${base}.version`]: version, [`${base}.status`]: 'pending', [`verificationDocuments.${docKey}.versions`]: { $size: versions.length }, $or: [{ [`${base}.reviewRevision`]: document.reviewRevision || 0 }, ...(!document.reviewRevision ? [{ [`${base}.reviewRevision`]: { $exists: false } }] : [])] }, { $set: { [`${base}.qr`]: qr, [`${base}.imageComparisons`]: comparisons, [`${base}.findings`]: document.findings || [] } })
     await onFinished()
   } catch { console.error('[verification] local image check unavailable; document remains pending') }
 }

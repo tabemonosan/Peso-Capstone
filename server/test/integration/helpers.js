@@ -4,6 +4,7 @@ import mongoose from 'mongoose'
 import crypto from 'crypto'
 import jwt from 'jsonwebtoken'
 import { normalizeEmail } from '../../utils/emailVerification.js'
+import { drainVerificationJobs } from '../../services/verificationJobs.js'
 
 let mongod
 
@@ -14,11 +15,13 @@ export async function startTestDb() {
 }
 
 export async function stopTestDb() {
+  await drainVerificationJobs()
   await mongoose.disconnect()
   if (mongod) await mongod.stop()
 }
 
 export async function clearDb() {
+  await drainVerificationJobs()
   const collections = await mongoose.connection.db.collections()
   for (const collection of collections) await collection.deleteMany({})
 }

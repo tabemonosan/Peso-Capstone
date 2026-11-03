@@ -88,6 +88,7 @@ export default function AdminDocumentVerification({ token, queue = 'flagged' }) 
     {data.items.map(item => <article key={`${item.role}:${item.accountId}:${item.docKey}`} className={`my-3 rounded-xl border p-4 ${queue !== 'auto' && item.overdue ? 'border-amber-400 bg-amber-50' : 'border-slate-200 bg-white'}`}>
       <p className="font-semibold">{item.email} · {item.label} · v{item.version}</p>
       <p className="text-sm text-slate-600">{item.role} · {new Date(item.at).toLocaleString('en-PH', { timeZone: 'Asia/Manila' })} · {item.status}</p>
+      {item.provider && <p className="text-sm text-slate-600">{item.provider} · {item.assurance} assurance · Rules {item.rulesVersion}</p>}
       {queue !== 'auto' && item.overdue && <p className="text-sm font-semibold text-amber-900">Waiting at least 7 days</p>}
       <div className="my-2 flex flex-wrap gap-2">{item.reasons.map(reason => <span key={reason} className="rounded-full border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-900">{reason}</span>)}</div>
       {item.adminConfirmedAt && <p className="text-sm text-green-800">Checked by {item.adminConfirmedBy}</p>}

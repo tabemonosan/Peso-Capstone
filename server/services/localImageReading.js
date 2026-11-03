@@ -14,7 +14,7 @@ export async function readQr(buffer, consume = async () => {}) {
       resolve(qrSummary(text))
     }
     const timer = setTimeout(() => finish(''), IMAGE_LIMITS.qrTimeout)
-    worker.once('message', finish); worker.once('error', () => finish('')); worker.once('exit', () => { if (!done) finish('') })
+    worker.once('message', finish); worker.once('error', error => { console.error('[verification] QR worker unavailable (' + (error.code || 'worker error') + ')'); finish('') }); worker.once('exit', () => { if (!done) finish('') })
   })
 }
 let active = 0

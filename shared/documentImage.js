@@ -1,3 +1,4 @@
+import { NSRP_FIELD_VALIDATORS, NSRP_NUMERIC_SPECS } from './nsrpValidation.js'
 export const IMAGE_LIMITS = Object.freeze({ minWidth: 600, minHeight: 380, maxPages: 5, maxPixels: 20000000, blankDeviation: 2, darkMean: 45, glareMean: 245, blurDeviation: 8, qrTimeout: 2000, ocrTimeout: 20000, ocrDailyCap: 200, ocrConcurrency: 1 })
 export const PHILSYS_TYPE = 'PhilSys National ID'
 export const PHILSYS_FORMATS = ['Card', 'Paper (ePhilID)', 'Digital screenshot']
@@ -26,8 +27,9 @@ export function validateDeclaredDetails(input = {}, { docKey, idType, otherNumbe
       details.number = String(input.number || '').replace(/[\s-]/g, '').toUpperCase().slice(0, 40)
       if (!details.number) errors.number = 'Enter the ID number.'
       if (details.number && otherNumber && details.number === String(otherNumber).replace(/[\s-]/g, '').toUpperCase()) errors.number = 'Use a different ID number for each ID.'
-      const lengths = { SSS: [10], Passport: [9], PRC: [7], 'Pag-IBIG': [12], UMID: [12], "Voter's ID": [16], 'Philippine Postal ID': [12] }
+      const lengths = { SSS: NSRP_NUMERIC_SPECS.gsisSss.lengths, PRC: [7], 'Pag-IBIG': NSRP_NUMERIC_SPECS.pagibig.lengths, UMID: [12], "Voter's ID": [16], 'Philippine Postal ID': [12] }
       if (details.number && lengths[idType] && !lengths[idType].includes(details.number.length)) warnings.push('id_number_format')
+      if (idType === 'Passport' && NSRP_FIELD_VALIDATORS.passportNo(details.number)) warnings.push('id_number_format')
       details.expiry = String(input.expiry || '').slice(0, 10)
       if (idType === 'Passport' && !/^\d{4}-\d{2}-\d{2}$/.test(details.expiry)) errors.expiry = 'Enter the passport expiry date.'
       if (details.expiry && details.expiry < today) warnings.push('id_expired')
