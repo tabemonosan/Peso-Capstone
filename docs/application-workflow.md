@@ -1,5 +1,10 @@
 # Application, interview and trust workflow
 
+Applicants can now view their own [reputation points and history](reputation.md)
+in **My reputation**. The existing 100-point ledger and PESO-confirmed event
+rules are reused. Employer ratings are one-time per applicant across jobs and
+do not affect points; saved ratings hide the rating form after refresh.
+
 This update extends the existing application, automatic/manual referral,
 employment outcome, notification, dashboard, RatingForm, CSM reviews, shared
 confirmation dialogs and pagination. No live records were seeded or migrated.
@@ -13,8 +18,15 @@ Actions are derived on the server from the application, interview and report:
 
 - Future invitation: Confirm, Request reschedule, Decline; suspension removes
   Confirm while leaving the other responses available.
-- Active application before the interview: Withdraw. The server blocks
-  withdrawal once the interview starts or an employment outcome is recorded.
+- Active application before accepting an invitation: Withdraw remains available.
+  Accepting the interview starts a 24-hour withdrawal countdown, shown in both
+  My applications and inline application history. It updates every second and
+  disables withdrawal at zero. The server enforces the same deadline even for
+  direct requests. Withdrawal also closes when the interview starts or an
+  employment outcome is recorded, whichever happens first. The original
+  acceptance timestamp comes from existing interview history; rescheduling or
+  reconfirming does not restart the window. Historical records without an
+  acceptance event retain the prior rules. No database migration is required.
 - Pending employer no-show report: Respond within seven calendar days of the
   report timestamp; the deadline appears on the card.
 - Delivered application: Report a problem to PESO.
@@ -28,6 +40,28 @@ for the applicant and the applicant's own report response are visible. Admin
 histories retain reasons. Withdrawn records remain in applicant history.
 
 ### Application stage graph and declining invitations
+
+Employers may assign an [optional pre-employment document task](post-interview-documents.md)
+after recording interview completion. Applicants upload background-check
+authorization, qualification proof, and/or identity documents privately in My
+applications; the employer reviews the files and marks the task complete.
+Hiring outcomes remain independent of this optional task.
+
+Employers see **Record interview result** once the invitation is accepted.
+**Interview completed** means the applicant attended and the interview took
+place; recording it advances both views to step 3 and notifies the applicant.
+**Report no-show** requires an explanation and shows step 3 as **Interview
+result review** while PESO reviews the report and the applicant can respond.
+Both actions are clickable before the scheduled time. Early decisions require
+an explicit **Yes, record early** confirmation and a reason, enforced on the
+server with `confirmEarly: true`. The server records its own confirmation time,
+actor and early-decision reason in the existing interview history. The employer
+sees **Decision confirmed** in Philippine time, with an early-decision label.
+No-show reports retain their server timestamp and PESO review; there is no
+automatic applicant penalty. Employers can send an updated invitation to
+reschedule. Existing ownership, confirmation,
+attendance review, and no-show response rules still apply. No schema changes or
+new dependencies are required.
 
 My applications now shows a responsive four-stage graph: invitation received,
 invitation accepted, post-interview task, and hiring outcome. Confirmation moves
@@ -60,6 +94,14 @@ job-board return, successful and concurrent reapplication, closed jobs,
 suspension, quota, manual routing, and rollback after publication failure.
 
 ## Existing ratings and reviews
+
+Employer employment reports are final once submitted. The editable form is
+removed immediately and remains hidden after reopening or refreshing; a
+read-only outcome/date/notes summary remains. The API rejects attempts to
+change an existing employer report, including legacy reports, with
+`EMPLOYER_REPORT_LOCKED`. Corrections require contacting PESO. Applicant
+statements remain separate and retain their existing hiring/deployment update
+flow. No database migration or change to existing reports is required.
 
 `RatingForm` remains the employer's 1-5 rating and optional comment after an
 employer hiring/deployment report. It submits to `/api/ratings`; the existing

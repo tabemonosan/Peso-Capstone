@@ -2,6 +2,9 @@ import { EMPLOYMENT_TYPES, formatSalary, formatLocation, mapEmploymentType, norm
 import { jobSkillMatchCount } from '../../shared/jobSkills.js'
 import { rankJobApplicants } from '../../shared/applicantSuitability.js'
 import ApplicantSuitability from './ApplicantSuitability'
+import JobModerationSettings from './JobModerationSettings'
+import JobScreeningSummary from './JobScreeningSummary'
+import { showNotice } from '../utils/portalNotice'
 import ApplicantApplicationHistory from './ApplicantApplicationHistory'
 import ApplicantJobBrowser from './ApplicantJobBrowser'
 import JobApplicationWizard from './JobApplicationWizard'
@@ -294,12 +297,12 @@ function JobsView({
   }
 
   const handleViewApplicantNsrp = async (jobId, applicantEmail) => {
-    if (!token) return alert('Not authenticated')
+    if (!token) return showNotice('Not authenticated')
     const response = await fetch(`${API_URL}/api/job-applications/view?jobId=${encodeURIComponent(jobId)}&email=${encodeURIComponent(applicantEmail)}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
     if (!response.ok) {
-      return alert('Application NSRP file could not be opened')
+      return showNotice('Application NSRP file could not be opened')
     }
     const contentType = response.headers.get('Content-Type') || ''
     const disposition = response.headers.get('Content-Disposition') || ''
@@ -324,6 +327,7 @@ function JobsView({
   return (
     <section className={`${activeRole === 'Admin' ? 'admin-jobs-card portal-card' : activeRole === 'Applicant' ? 'applicant-jobs-card portal-card' : 'employer-jobs-card'} rounded-2xl border ${activeRole === 'Employer' ? 'border-slate-300 bg-white text-black' : 'border-slate-800 bg-slate-900/70'} p-6`}>
       <h2 className={`text-xl font-semibold ${activeRole === 'Employer' ? 'text-black' : 'text-white'}`}>Job Offers</h2>
+      {activeRole === 'Admin' && <JobModerationSettings token={token} />}
       <p className={`mt-3 ${activeRole === 'Employer' ? 'text-black' : 'text-slate-400'}`}>{activeRole === 'Applicant' ? 'Find jobs that fit you.' : 'View postings and manage approvals.'}</p>
 
       {jobLoading && <p className="mt-4 text-slate-300">Loading jobs…</p>}
@@ -817,6 +821,7 @@ function JobsView({
                 <h3 className="text-sm font-semibold">Requirements</h3>
                 <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">{reviewJob.requirements || 'No additional requirements provided.'}</p>
               </div>
+              <JobScreeningSummary moderation={reviewJob.moderation} />
               <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4"><h3 className="text-sm font-semibold">Notes to PESO Admin</h3><p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">{reviewJob.notesToAdmin || 'No private notes provided.'}</p></div>
               <div className="rounded-xl bg-slate-50 p-3 sm:col-span-2">
                 <h3 className="text-sm font-semibold">Employer details</h3>
@@ -895,19 +900,24 @@ function JobsView({
                   reviewInFlightRef.current = true
                   setReviewSubmitting(true)
                   setReviewError('')
-                  const result = jobReviewConfirm === 'approved'
-                    ? await handleAdminReviewJob(reviewJob._id, 'approved', { confirm: false, silent: true })
-                    : await handleAdminReviewJob(reviewJob._id, 'declined', { reason, confirm: false, silent: true })
-                  reviewInFlightRef.current = false
-                  setReviewSubmitting(false)
-                  if (result?.error) {
-                    setReviewError(result.error)
-                    return
-                  }
-                  if (result?.ok) {
-                    setJobReviewConfirm(null)
-                    setReviewJob(null)
-                    restoreReviewFocus()
+                  try {
+                    const result = jobReviewConfirm === 'approved'
+                      ? await handleAdminReviewJob(reviewJob._id, 'approved', { confirm: false, silent: true })
+                      : await handleAdminReviewJob(reviewJob._id, 'declined', { reason, confirm: false, silent: true })
+                    if (result?.error) {
+                      setReviewError(result.error)
+                      return
+                    }
+                    if (result?.ok) {
+                      setJobReviewConfirm(null)
+                      setReviewJob(null)
+                      restoreReviewFocus()
+                    }
+                  } catch (error) {
+                    setReviewError(error?.message || 'Job review failed. Please try again.')
+                  } finally {
+                    reviewInFlightRef.current = false
+                    setReviewSubmitting(false)
                   }
                 }}
               />

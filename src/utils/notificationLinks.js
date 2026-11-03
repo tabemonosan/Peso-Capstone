@@ -8,6 +8,7 @@ const destinations = {
   },
   Applicant: {
     '/my-applications': ['my-applications', 'Open My applications'],
+    '/my-reputation': ['my-reputation', 'View my reputation'],
     '/jobs': ['jobs', 'View job applications'],
     '/employment-reports': ['employment-reports', 'View employment updates'],
     '/profile': ['profile', 'View my profile'],

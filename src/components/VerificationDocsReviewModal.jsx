@@ -1,5 +1,7 @@
-﻿import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { API_URL } from "../config"
+import { showNotice } from '../utils/portalNotice'
+import { fetchWithTimeout } from '../utils/fetchWithTimeout'
 import Modal from "./Modal"
 import ConfirmDialog from "./ConfirmDialog"
 import { formatFullName } from "../../shared/nameFields.js"
@@ -56,7 +58,7 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
   }, [load])
 
   const viewVersion = (url) => {
-    if (!url) return alert("Document link unavailable")
+    if (!url) return showNotice("Document link unavailable")
     window.open(`${API_URL}${url}`, "_blank")
   }
 
@@ -74,7 +76,7 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
     setActionError("")
     try {
       const isRevert = decision === "revert"
-      const response = await fetch(`${API_URL}/api/applicants/${applicant.id}/verification-documents/${docKey}`, {
+      const response = await fetchWithTimeout(`${API_URL}/api/applicants/${applicant.id}/verification-documents/${docKey}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify(isRevert ? { action: "revert", reason: reason.trim() } : { status: decision, reason: reason.trim(), ...(decision === 'approved' ? { unresolved: documents?.find(doc => doc.docKey === docKey)?.unresolved || 0, checklist } : {}) }),

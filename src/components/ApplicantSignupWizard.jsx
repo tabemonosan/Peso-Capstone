@@ -15,7 +15,7 @@ import {
   NSRP_TEXT_LIMITS, NSRP_NUMERIC_SPECS, NSRP_SECTION_MAX_ROWS, NSRP_REQUIRED_FIELDS, RELIGION_OPTIONS,
   EMPLOYED_TYPES, UNEMPLOYED_TYPES, EDUCATION_LEVELS, SEX_OPTIONS, CIVIL_STATUS_OPTIONS,
   EMPLOYMENT_STATUS_OPTIONS, YES_NO, DISABILITY_OPTIONS, WORK_STATUS_OPTIONS,
-  digitsOnly, normalizePhMobile, normalizePassportNo, validateNsrpLanguages,
+  digitsOnly, normalizePhMobile, normalizePassportNo, validateNsrpLanguages, requiresPassport,
 } from "../../shared/nsrpValidation.js"
 
 const STORAGE_KEY = "peso-applicant-signup-draft"
@@ -726,6 +726,7 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
     const rule = FIELD_RULES[key] || {}
     const limit = NSRP_TEXT_LIMITS[key]
     const rawValue = answers[key] || ""
+    const required = NSRP_REQUIRED_FIELDS.includes(key) || key === 'passportNo' && requiresPassport(answers) || key === 'passportExpiry' && Boolean(answers.passportNo || requiresPassport(answers))
     // Salary: show thousands separators once the field loses focus; the stored
     // value stays a plain digit string.
     const displayValue = rule.formatOnBlur && focusedField !== key && rawValue
@@ -733,9 +734,9 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
       : rawValue
     return (
       <label key={key} className="block text-sm font-medium text-slate-800">
-        {label}{NSRP_REQUIRED_FIELDS.includes(key) || (key === "passportExpiry" && answers.passportNo) ? <span className="text-rose-600"> *</span> : null}
+        {label}{required ? <span className="text-rose-600"> *</span> : null}
         {type === "select" ? (
-          <select id={`field-${key}`} value={key === "addressCity" ? applicantCityName(rawValue) : rawValue} disabled={key === "addressBarangay" && !applicantCityName(answers.addressCity)} onChange={(event) => updateAnswer(key, event.target.value)} aria-invalid={Boolean(fieldErrors[key]) || undefined} aria-describedby={fieldErrors[key] ? `error-${key}` : undefined} className={`${inputClass}${inputErrorClass(Boolean(fieldErrors[key]))}`}>
+          <select id={`field-${key}`} required={required} value={key === "addressCity" ? applicantCityName(rawValue) : rawValue} disabled={key === "addressBarangay" && !applicantCityName(answers.addressCity)} onChange={(event) => updateAnswer(key, event.target.value)} aria-invalid={Boolean(fieldErrors[key]) || undefined} aria-describedby={fieldErrors[key] ? `error-${key}` : undefined} className={`${inputClass}${inputErrorClass(Boolean(fieldErrors[key]))}`}>
             <option value="">Select…</option>{options.map((option) => <option key={option}>{option}</option>)}
             {key === "religion" && rawValue && !options.includes(rawValue) && <option>{rawValue}</option>}
           </select>
@@ -743,6 +744,7 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
           <span className="relative block">
             <input
               id={`field-${key}`}
+              required={required}
               type={type || "text"}
               readOnly={key === "addressProvince"}
               inputMode={rule.inputMode}
@@ -1164,7 +1166,7 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
                   const setLanguage = (key, value) => {
                     const next = [...(answers.languages || [])]
                     const index = next.findIndex((entry) => entry.name === name)
-                    const updated = { ...row, name, [key]: value }
+                    const updated = key === 'all' ? { ...row, name, read: value, write: value, speak: value, understand: value } : { ...row, name, [key]: value }
                     if (index >= 0) next[index] = updated
                     else next.push(updated)
                     updateAnswer("languages", next)
@@ -1179,6 +1181,7 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
                         <input id="field-languages-Others-otherName" value={row.otherName || ""} maxLength={NSRP_ROW_LIMITS.languages.name} onChange={(event) => setLanguage("otherName", event.target.value)} placeholder="Specify other language" aria-invalid={Boolean(otherError)} aria-describedby={otherError ? 'other-language-error' : undefined} className={`shared-form-control w-full min-w-0 rounded border border-slate-300 px-2 py-1${inputErrorClass(otherError)}`} />
                       </label>}
                       <div className="grid grid-cols-2 gap-x-3 gap-y-2 min-[480px]:grid-cols-4">
+                        <label className="col-span-2 inline-flex items-center gap-1.5 font-medium min-[480px]:col-span-4"><input type="checkbox" aria-label={`Select all ${name} proficiencies`} checked={['read', 'write', 'speak', 'understand'].every(key => Boolean(row[key]))} onChange={event => setLanguage('all', event.target.checked)} />Select all</label>
                         {["read", "write", "speak", "understand"].map((key) => <label key={key} className="inline-flex items-center gap-1.5 whitespace-nowrap"><input type="checkbox" checked={Boolean(row[key])} onChange={(event) => setLanguage(key, event.target.checked)} className="shrink-0" />{key}</label>)}
                       </div>
                       {otherError && <p id="other-language-error" role="alert" className="text-xs text-rose-700">{otherError}</p>}

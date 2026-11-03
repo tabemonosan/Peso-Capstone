@@ -10,6 +10,38 @@ const response = (body, ok = true) => ({ ok, json: async () => body })
 beforeEach(() => { vi.restoreAllMocks(); global.fetch = vi.fn() })
 
 describe('employment updates', () => {
+  it('opens an in-app referral confirmation and makes no change when cancelled', async () => {
+    const nativeConfirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    fetch.mockImplementation(async url => response(url.endsWith('/api/hire-reports') ? [] : [{ _id: 'r1', status: 'pending', applicantId: { _id: 'a1', profile: { firstName: 'Ana', lastName: 'Cruz' } }, jobId: { _id: 'j1', title: 'Office Clerk' } }]))
+    render(<ReferralList token="token" employerId="e1" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Accept', exact: true }))
+    const dialog = screen.getByRole('alertdialog', { name: 'Accept this referral?' })
+    expect(within(dialog).getByText(/Record the final hiring outcome separately/)).toBeInTheDocument()
+    expect(fetch.mock.calls.some(([, options]) => options?.method === 'PUT')).toBe(false)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(fetch.mock.calls.some(([, options]) => options?.method === 'PUT')).toBe(false)
+    expect(nativeConfirm).not.toHaveBeenCalled()
+    expect(document.body.style.overflow).toBe('')
+  })
+  it('keeps referral failures in the styled confirmation and allows a successful retry', async () => {
+    let attempts = 0
+    fetch.mockImplementation(async (url, options) => {
+      if (options?.method === 'PUT') return ++attempts === 1 ? response({ error: 'Please try again.' }, false) : response({ _id: 'r1', status: 'accepted' })
+      return response(url.endsWith('/api/hire-reports') ? [] : [{ _id: 'r1', status: 'pending', applicantId: { _id: 'a1', profile: { firstName: 'Ana', lastName: 'Cruz' } }, jobId: { _id: 'j1', title: 'Office Clerk' } }])
+    })
+    render(<ReferralList token="token" employerId="e1" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Accept', exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: 'Accept referral' }))
+    const dialog = screen.getByRole('alertdialog')
+    await waitFor(() => expect(within(dialog).getByRole('alert')).toHaveTextContent('Please try again.'))
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeEnabled()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    expect(attempts).toBe(2)
+    expect(screen.getByRole('button', { name: 'Send update to PESO' })).toBeInTheDocument()
+    expect(document.body.style.overflow).toBe('')
+  })
   it.each([
     ['invited', null, '1. Invitation sent', /Waiting for the applicant response/],
     ['confirmed', null, '2. Invitation accepted', /The applicant accepted/],
@@ -75,9 +107,11 @@ describe('employment updates', () => {
     fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'not_hired' } })
     fireEvent.change(screen.getByLabelText('Notes to PESO (optional)'), { target: { value: 'Position filled' } })
     fireEvent.click(screen.getByRole('button', { name: 'Send update to PESO' }))
-    await screen.findByText('Your update was sent to PESO.')
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Send update to PESO' })).not.toBeInTheDocument())
     expect(fetch.mock.calls[0][0]).toBe(`${API_URL}/api/hire-reports`)
     expect(JSON.parse(fetch.mock.calls[0][1].body)).toMatchObject({ status: 'not_hired', notes: 'Position filled', employmentDate: '', referralId: 'r1' })
+    expect(screen.queryByRole('button', { name: 'Send update to PESO' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Status')).not.toBeInTheDocument()
   })
 
   it('shows applicant-only outcomes and loads existing reports for updates', () => {
@@ -86,6 +120,16 @@ describe('employment updates', () => {
     expect(screen.getByLabelText('Status').value).toBe('deployed')
     expect(screen.getByLabelText('Actual deployment date (optional)').value).toBe('2026-01-02')
     expect(screen.getByText(/employer decides deployment timing/)).toBeTruthy()
+  })
+  it('hides a stale employer form when the API says its report was already submitted', async () => {
+    const report = { _id: 'report1', status: 'hired', employmentDate: '2026-01-02', notes: 'Original submission' }
+    fetch.mockResolvedValue({ ok: false, status: 409, json: async () => ({ code: 'EMPLOYER_REPORT_LOCKED', report }) })
+    const onCreated = vi.fn()
+    render(<HireReportForm token="token" applicantId="a1" jobId="j1" referralId="r1" onCreated={onCreated} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Send update to PESO' }))
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(report))
+    expect(screen.queryByLabelText('Status')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Send update to PESO' })).not.toBeInTheDocument()
   })
 
   it('loads applicant opportunities and restores a previously submitted report', async () => {
@@ -147,7 +191,6 @@ describe('employment updates', () => {
   })
 
   it('keeps declined referrals available for reporting without replacing populated contact details', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     fetch.mockImplementation(async (url, options) => {
       if (options?.method === 'PUT') return response({ _id: 'r1', status: 'declined', applicantId: 'a1', jobId: 'j1' })
       if (url.endsWith('/api/hire-reports')) return response([])
@@ -156,6 +199,9 @@ describe('employment updates', () => {
     render(<ReferralList token="token" employerId="e1" />)
     await screen.findByText('Juan Cruz')
     fireEvent.click(screen.getByRole('button', { name: 'Decline' }))
+    const decision = screen.getByRole('alertdialog', { name: 'Decline this referral?' })
+    expect(fetch.mock.calls.some(([, options]) => options?.method === 'PUT')).toBe(false)
+    fireEvent.click(within(decision).getByRole('button', { name: 'Confirm decline' }))
     await waitFor(() => expect(screen.getByRole('button', { name: 'Send update to PESO' })).toBeTruthy())
     expect(screen.getByText('Juan Cruz')).toBeTruthy()
     expect(screen.getByRole('option', { name: 'Not hired' })).toBeTruthy()
@@ -166,8 +212,9 @@ describe('employment updates', () => {
       ? [{ _id: 'report1', referralId: 'r1', status: 'deployed', employmentDate: '2026-01-02' }]
       : [{ _id: 'r1', status: 'accepted', applicantId: { _id: 'a1', email: 'juan@example.com', profile: { firstName: 'Juan', lastName: 'Cruz' } }, jobId: { _id: 'j1', title: 'Office Clerk' } }]))
     render(<ReferralList token="token" employerId="e1" />)
-    await screen.findByText(/Last reported: Deployed/)
-    expect(screen.getByLabelText('Status').value).toBe('deployed')
-    expect(screen.getByLabelText('Actual deployment date (optional)').value).toBe('2026-01-02')
+    await screen.findByText(/Reported to PESO: Deployed/)
+    expect(screen.queryByLabelText('Status')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Actual deployment date (optional)')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Send update to PESO' })).not.toBeInTheDocument()
   })
 })

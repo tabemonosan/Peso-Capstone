@@ -8,6 +8,11 @@ const interviewSchema = new Schema({
   city: String, barangay: String, province: String, landmark: String, meetingLink: String,
   status: { type: String, enum: ['invited', 'confirmed', 'reschedule_requested', 'declined', 'cancelled', 'held', 'attended', 'missed'], default: 'invited' },
   cancelledBy: String, cancelledAt: Date, history,
+  postInterviewTask: {
+    status: { type: String, enum: ['requested', 'submitted', 'completed'] },
+    requirements: [String], instructions: String, requestedAt: Date, requestedBy: Schema.Types.ObjectId,
+    completedAt: Date, completedBy: Schema.Types.ObjectId, files: Schema.Types.Mixed,
+  },
 }, { collection: 'interviews', timestamps: true })
 interviewSchema.index({ applicantId: 1, updatedAt: -1 })
 interviewSchema.index({ employerId: 1, scheduledAt: 1 })
@@ -27,3 +32,12 @@ appealSchema.index({ applicantId: 1 }, { unique: true, partialFilterExpression: 
 export const Interview = mongoose.models.Interview || mongoose.model('Interview', interviewSchema)
 export const ApplicationReport = mongoose.models.ApplicationReport || mongoose.model('ApplicationReport', reportSchema)
 export const ApplicationAppeal = mongoose.models.ApplicationAppeal || mongoose.model('ApplicationAppeal', appealSchema)
+const postInterviewFileSchema = new Schema({
+  interviewId: { type: Schema.Types.ObjectId, required: true }, applicantId: { type: Schema.Types.ObjectId, required: true },
+  employerId: { type: Schema.Types.ObjectId, required: true }, requirementKey: { type: String, required: true },
+  version: { type: Number, required: true }, name: String, mimetype: String, size: Number,
+  data: { type: Buffer, select: false }, uploadedAt: Date, expiresAt: Date,
+}, { collection: 'post_interview_files' })
+postInterviewFileSchema.index({ interviewId: 1, requirementKey: 1, version: 1 }, { unique: true })
+postInterviewFileSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 })
+export const PostInterviewFile = mongoose.models.PostInterviewFile || mongoose.model('PostInterviewFile', postInterviewFileSchema)

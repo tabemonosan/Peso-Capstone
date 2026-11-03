@@ -33,6 +33,30 @@ beforeEach(async () => {
 const validate = (step, overrides) => request(app).post('/api/nsrp/validate-signup').send({ step, answers: validNsrpAnswers({ email: 'validator@example.com', ...overrides }) })
 const signup = (email, answers) => signupRequest(request(app).post('/api/signup'), { email, answers })
 
+describe('required signup details', () => {
+  it.each([['religion', 0], ['height', 0], ['employmentTypeDetail', 4]])('requires %s at step validation and final signup', async (field, step) => {
+    const response = await validate(step, { [field]: '   ' })
+    expect(response.status).toBe(422)
+    expect(response.body.fieldErrors[field]).toBeTruthy()
+    const final = await signup(`missing-${field}@example.com`, validNsrpAnswers({ [field]: '' }))
+    expect(final.status).toBe(422)
+    expect(final.body.fieldErrors[field]).toBeTruthy()
+  })
+  it.each(['None', 'Prefer not to say'])('accepts religion choice %s', async religion => {
+    expect((await validate(0, { religion })).status).toBe(200)
+  })
+  it.each(['overseasPref1', 'overseasPref2', 'overseasPref3'])('requires a passport for %s at validation and signup', async field => {
+    const answers = { [field]: 'Japan', passportNo: '' }
+    const response = await validate(4, answers)
+    expect(response.status).toBe(422)
+    expect(response.body.fieldErrors.passportNo).toBeTruthy()
+    const final = await signup(`missing-${field}@example.com`, validNsrpAnswers(answers))
+    expect(final.status).toBe(422)
+    expect(final.body.fieldErrors.passportNo).toBeTruthy()
+    expect((await validate(4, { ...answers, passportNo: 'P1234567A', passportExpiry: '2099-01-01' })).status).toBe(200)
+  })
+})
+
 describe('Albay applicant addresses', () => {
   it('accepts every listed Albay barangay under its own municipality', () => {
     for (const [city, barangays] of Object.entries(PH_LOCATIONS)) {

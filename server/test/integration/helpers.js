@@ -35,6 +35,8 @@ export function validNsrpAnswers(overrides = {}) {
     dob: '1990-01-01',
     placeOfBirth: 'Legazpi City',
     sex: 'Male',
+    religion: 'Prefer not to say',
+    height: '165',
     civilStatus: 'Single',
     addressStreet: '1 Main Street',
     addressBarangay: 'Bgy. 10 - Cabugao',
@@ -42,6 +44,7 @@ export function validNsrpAnswers(overrides = {}) {
     addressProvince: 'Albay',
     cellphone: '09171234567',
     employmentStatus: 'Unemployed',
+    employmentTypeDetail: 'New Entrant/Fresh Graduate',
     activelyLooking: 'Yes',
     willingImmediately: 'Yes',
     fourPs: 'No',
@@ -101,12 +104,12 @@ export function emailProofFor(email, overrides = {}) {
   )
 }
 
-export function signupRequest(req, { email, password = 'Password123!', answers = validNsrpAnswers(), emailProof, resume = false, ...rest } = {}) {
+export function signupRequest(req, { email, password = 'Password123!', answers = validNsrpAnswers(), emailProof, resume = false, id1Type = 'SSS', ...rest } = {}) {
   const withFields = req
     .field('email', email)
     .field('password', password)
     .field('consent', 'true')
-    .field('id1Type', 'SSS')
+    .field('id1Type', id1Type)
     .field('id2Type', 'Passport')
     .field('verificationDetails', DECLARED_DEMO)
     .field('nsrpAnswers', JSON.stringify(answers))

@@ -25,6 +25,27 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('profile editing and NSRP skills', () => {
+  it('opens the skills catalog without typing and supports selection, filtering and dismissal', async () => {
+    render(<App />)
+    const cover = await screen.findByRole('group', { name: 'Profile pictures' })
+    fireEvent.click(within(cover).getByRole('button', { name: 'Edit profile' }))
+    const input = screen.getByRole('combobox', { name: 'Search or select skills' })
+    fireEvent.focus(input)
+    const list = screen.getByRole('listbox', { name: 'Available skills' })
+    expect(within(list).getAllByRole('option').length).toBeGreaterThan(8)
+    expect(within(list).queryByRole('option', { name: 'Computer Literate', exact: true })).not.toBeInTheDocument()
+    const option = within(list).getAllByRole('option')[0]
+    const skill = option.textContent
+    const filterSkill = within(list).getAllByRole('option')[1].textContent
+    fireEvent.click(option)
+    expect(screen.getByRole('button', { name: `Remove ${skill}` })).toBeInTheDocument()
+    fireEvent.change(input, { target: { value: filterSkill } })
+    expect(screen.getByRole('option', { name: filterSkill, exact: true })).toBeInTheDocument()
+    fireEvent.change(input, { target: { value: '' } })
+    expect(screen.getAllByRole('option').length).toBeGreaterThan(8)
+    fireEvent.keyDown(input, { key: 'Escape' })
+    expect(screen.queryByRole('listbox', { name: 'Available skills' })).not.toBeInTheDocument()
+  })
   it('keeps NSRP skills out of About me and puts the edit pencil at the top', async () => {
     render(<App />)
     expect(await screen.findByLabelText('About me')).toHaveValue('')

@@ -74,16 +74,21 @@ export function createApplicationWorkflow({ Applicant, Employer, JobPosting, Job
     await notify({ recipient: { id: referral.employerId, role: 'Employer' }, type: 'interview_response', title: 'Interview response', message: `An applicant ${status === 'confirmed' ? 'confirmed the interview' : status === 'declined' ? 'declined the invitation' : 'requested a reschedule'}.`, link: '/referrals', metadata: { referralId: String(referral._id) } })
     return changed
   }
-  async function held(actor, interviewId) {
+  async function held(actor, interviewId, body = {}) {
     if (actor.role !== 'Employer') fail('FORBIDDEN', 'Employers only.', 403)
     const meeting = await Interview.findById(id(interviewId)).lean()
     if (!meeting) fail('INTERVIEW_UNAVAILABLE', 'Interview unavailable.')
     const { referral } = await ownedReferral(actor, meeting.referralId)
-    if (meeting.status !== 'confirmed' || +meeting.scheduledAt > +now()) fail('INTERVIEW_NOT_DUE', 'Only a confirmed interview that has started can be marked held.')
+    if (meeting.status !== 'confirmed') fail('INTERVIEW_NOT_DUE', 'Only a confirmed interview can be marked completed.')
+    const at = now()
+    const early = +meeting.scheduledAt > +at
+    if (early && body.confirmEarly !== true) fail('EARLY_CONFIRMATION_REQUIRED', 'Confirm that you intend to record the result before the scheduled interview time.')
+    const reason = early ? `Employer confirmed an early decision: ${reasonText(body.reason)}` : ''
     if (await ApplicationReport.exists({ interviewId: meeting._id, type: 'no_show', status: { $in: ['pending', 'responded', 'confirmed'] } })) fail('REPORT_PENDING', 'PESO must review the no-show report first.')
-    const changed = await Interview.findOneAndUpdate({ _id: meeting._id, status: 'confirmed' }, { $set: { status: 'held' }, $push: { history: { action: 'employer_recorded_interview_held', status: 'held', by: 'Employer', at: now() } } }, { returnDocument: 'after' }).lean()
+    const changed = await Interview.findOneAndUpdate({ _id: meeting._id, status: 'confirmed', scheduledAt: meeting.scheduledAt }, { $set: { status: 'held' }, $push: { history: { action: 'employer_recorded_interview_held', status: 'held', by: 'Employer', reason, at } } }, { returnDocument: 'after' }).lean()
     if (!changed) fail('INTERVIEW_CHANGED', 'This interview changed. Refresh and try again.')
-    await event(referral, 'employer_recorded_interview_held', 'interview_held', 'Employer')
+    await event(referral, 'employer_recorded_interview_held', 'interview_held', 'Employer', reason)
+    await messageApplicant(referral, 'interview_completed', 'The employer marked your interview as completed. Open My applications for step 3 and the next steps.')
     await notifyAdmins({ type: 'interview_held', title: 'Interview held awaiting confirmation', message: 'An employer recorded an interview as held. Review it in Referrals and applications.', link: '/peso-referrals' })
     return changed
   }
@@ -94,11 +99,15 @@ export function createApplicationWorkflow({ Applicant, Employer, JobPosting, Job
     let meeting
     if (body.type === 'no_show') {
       meeting = await Interview.findOne({ referralId: referral._id }).lean()
-      if (!meeting || meeting.status !== 'confirmed' || +meeting.scheduledAt > +now()) fail('INTERVIEW_NOT_DUE', 'A no-show report requires a confirmed interview that has started.')
+      if (!meeting || meeting.status !== 'confirmed') fail('INTERVIEW_NOT_DUE', 'A no-show report requires a confirmed interview.')
+      if (+meeting.scheduledAt > +now() && body.confirmEarly !== true) fail('EARLY_CONFIRMATION_REQUIRED', 'Confirm that you intend to report a no-show before the scheduled interview time.')
     }
     const day = now().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' })
-    const entry = await ApplicationReport.create({ _id: `${referral._id}:${actor.role}:${account._id}:${body.type}:${day}`, referralId: referral._id, interviewId: meeting?._id, applicantId: referral.applicantId, employerId: referral.employerId, jobId: referral.jobId, type: body.type, byRole: actor.role, byId: account._id, reason, at: now(), status: 'pending', ...(meeting ? { responseDeadline: new Date(+now() + 7 * DAY) } : {}) })
-    await event(referral, body.type === 'no_show' ? 'employer_reported_no_show' : 'problem_report_submitted', referral.status, actor.role)
+    const at = now()
+    const reportReason = meeting && +meeting.scheduledAt > +at ? `Employer confirmed an early decision: ${reason}` : reason
+    const entry = await ApplicationReport.create({ _id: `${referral._id}:${actor.role}:${account._id}:${body.type}:${day}`, referralId: referral._id, interviewId: meeting?._id, applicantId: referral.applicantId, employerId: referral.employerId, jobId: referral.jobId, type: body.type, byRole: actor.role, byId: account._id, reason: reportReason, at, status: 'pending', ...(meeting ? { responseDeadline: new Date(+at + 7 * DAY) } : {}) })
+    if (meeting) await Interview.updateOne({ _id: meeting._id }, { $push: { history: { action: 'employer_reported_no_show', status: 'no_show_pending', by: 'Employer', reason: reportReason, at: entry.at } } })
+    await event(referral, body.type === 'no_show' ? 'employer_reported_no_show' : 'problem_report_submitted', meeting ? 'no_show_pending' : referral.status, actor.role, meeting ? reportReason : undefined)
     if (meeting) await messageApplicant(referral, 'no_show_response_requested', 'The employer reported a missed interview. You have 7 days to respond in My applications before PESO reviews the report.')
     await notifyAdmins({ type: body.type === 'no_show' ? 'application_no_show' : 'application_problem', title: body.type === 'no_show' ? 'No-show report received' : 'Application problem reported', message: 'A report is ready for PESO review in Referrals and applications.', link: '/peso-referrals', metadata: { referralId: String(referral._id), reportId: entry._id } })
     return { ok: true, id: entry._id, responseDeadline: entry.responseDeadline }
@@ -126,7 +135,8 @@ export function createApplicationWorkflow({ Applicant, Employer, JobPosting, Job
     const changed = await ApplicationReport.findOneAndUpdate({ _id: reportId, status: { $in: ['pending', 'responded'] } }, { $set: { status: body.decision, reviewReason: reason, reviewedBy: admin.email, reviewedAt: now() } }, { returnDocument: 'after' }).lean()
     if (!changed && (await ApplicationReport.findById(reportId).select('status').lean())?.status !== body.decision) fail('REPORT_ALREADY_REVIEWED', 'This report already has a different final decision.')
     if (existing.type === 'no_show' && body.decision === 'confirmed') {
-      await recordTrustEvent(Applicant, { applicantId: existing.applicantId, key: `no-show:${reportId}`, type: 'confirmed_no_show', by: admin.email, reason, at: now() })
+      const applied = await recordTrustEvent(Applicant, { applicantId: existing.applicantId, key: `no-show:${reportId}`, type: 'confirmed_no_show', by: admin.email, reason, at: now() })
+      if (applied) await notify({ recipient: { id: existing.applicantId, role: 'Applicant' }, type: 'reputation_updated', title: 'Reputation points updated', message: 'PESO confirmed a reputation event. Open My reputation to view your points and history.', link: '/my-reputation' })
       await Interview.updateOne({ _id: existing.interviewId }, { $set: { status: 'missed' } })
     }
     if (changed) {
@@ -193,6 +203,7 @@ export function createApplicationWorkflow({ Applicant, Employer, JobPosting, Job
       if (referral) await event(referral, body.type === 'attended_interview' ? 'peso_confirmed_interview_attendance' : 'peso_confirmed_late_cancellation', body.type === 'attended_interview' ? 'interview_attended' : 'interview_cancelled', 'PESO')
     }
     if (applied) await audit({ action: 'applicant_event_confirmed', applicantId: new mongoose.Types.ObjectId(body.applicantId), eventKey: key, type: body.type, by: admin.email, reason })
+    if (applied) await notify({ recipient: { id: body.applicantId, role: 'Applicant' }, type: 'reputation_updated', title: 'Reputation points updated', message: 'PESO confirmed a reputation event. Open My reputation to view your points and history.', link: '/my-reputation' })
     return { ok: true, applied }
   }
   return { actorAccount, ownedReferral, invite, respondInterview, held, report, respondNoShow, reviewReport, suspendApplicant, appeal, reviewApplication, confirmEvent }

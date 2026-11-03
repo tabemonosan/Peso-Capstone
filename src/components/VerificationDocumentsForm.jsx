@@ -1,17 +1,9 @@
 import { useEffect, useRef, useState } from "react"
 import DeclaredDocumentFields from './DeclaredDocumentFields'
 import { IMAGE_LIMITS } from '../../shared/documentImage.js'
+import { PHILIPPINE_ID_TYPES } from '../../shared/philippineIds.js'
 
-export const ID_TYPE_OPTIONS = [
-  "SSS",
-  "Passport",
-  "PRC",
-  "Pag-IBIG",
-  "Voter's ID",
-  "Philippine Postal ID",
-  "UMID",
-  "PhilSys National ID",
-]
+export const ID_TYPE_OPTIONS = PHILIPPINE_ID_TYPES
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024 // 5 MB per file (matches server)
 const COMPRESS_ABOVE_BYTES = 1.5 * 1024 * 1024 // compress images larger than this

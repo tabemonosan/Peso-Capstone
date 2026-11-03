@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { API_URL } from '../config'
 import ConfirmDialog from './ConfirmDialog'
 import { ApplicationTimeline } from './AdminReferralsPage'
+import ApplicationWithdrawal from './ApplicationWithdrawal'
 
 export default function ApplicantApplicationHistory({ application, token, onChanged }) {
   const [confirm, setConfirm] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState('')
@@ -24,7 +25,7 @@ export default function ApplicantApplicationHistory({ application, token, onChan
     <p className="font-semibold">{status}</p>
     {application.message && <p className="mt-2 text-xs">{application.message}</p>}
     <details className="mt-2"><summary>Application timeline</summary><ApplicationTimeline history={publicApplicationHistory(application.history)} /></details>
-    {!withdrawn && (application.actions ? application.actions.includes('withdraw') : !['hired', 'deployed', 'not_hired'].includes(application.status)) && <button type="button" onClick={() => setConfirm(true)} className="mt-3 text-xs underline">Withdraw application</button>}
+    {!withdrawn && <ApplicationWithdrawal application={application} onWithdraw={() => setConfirm(true)} />}
     {confirm && <ConfirmDialog title="Withdraw this application?" note="Your application stays in your history, and the employer will no longer see its profile summary." busy={busy} error={error} onConfirm={withdraw} onCancel={() => setConfirm(false)} />}
   </div>
 }

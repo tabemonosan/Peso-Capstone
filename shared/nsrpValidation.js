@@ -60,9 +60,9 @@ export const NSRP_TEXT_LIMITS = {
 }
 
 export const NSRP_REQUIRED_FIELDS = [
-  'surname', 'firstName', 'dob', 'placeOfBirth', 'sex', 'civilStatus',
+  'surname', 'firstName', 'dob', 'placeOfBirth', 'sex', 'religion', 'height', 'civilStatus',
   'addressStreet', 'addressBarangay', 'addressCity', 'addressProvince',
-  'email', 'cellphone', 'employmentStatus', 'activelyLooking',
+  'email', 'cellphone', 'employmentStatus', 'employmentTypeDetail', 'activelyLooking',
   'willingImmediately', 'fourPs', 'occupation1',
 ]
 
@@ -76,6 +76,9 @@ export const YES_NO = ['Yes', 'No']
 export const DISABILITY_OPTIONS = ['Visual', 'Hearing', 'Speech', 'Physical', 'Others']
 export const EDUCATION_LEVELS = ['Elementary', 'Secondary', 'Tertiary', 'Graduate Studies']
 export const LANGUAGE_ROWS = ['English', 'Filipino', 'Others']
+export function requiresPassport(answers = {}) {
+  return ['overseasPref1', 'overseasPref2', 'overseasPref3'].some(key => typeof answers[key] === 'string' && answers[key].trim())
+}
 export function validateNsrpLanguages(languages) {
   const needsName = Array.isArray(languages) && languages.some((row) => row?.name === 'Others'
     && ['read', 'write', 'speak', 'understand'].some((key) => Boolean(row[key]))

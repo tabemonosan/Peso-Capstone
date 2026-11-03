@@ -103,9 +103,10 @@ describe('connected portal lifecycle', () => {
     for (const token of [employerToken, applicantToken]) {
       expect((await request(app).post('/api/hire-reports').set(auth(token)).send(report)).status).toBe(200)
     }
-    expect((await request(app).post('/api/hire-reports').set(auth(employerToken)).send({ ...report, status: 'deployed', employmentDate: '2026-01-02' })).status).toBe(200)
+    expect((await request(app).post('/api/hire-reports').set(auth(employerToken)).send({ ...report, status: 'deployed', employmentDate: '2026-01-02' })).status).toBe(409)
+    expect((await request(app).post('/api/hire-reports').set(auth(applicantToken)).send({ ...report, status: 'deployed', employmentDate: '2026-01-02' })).status).toBe(200)
     const tracking = await request(app).get('/api/admin/employment-updates').set(auth(adminToken))
-    expect(tracking.body.items[0]).toMatchObject({ applicant: { name: 'Juan Santos Cruz' }, employer: { name: 'Lifecycle Works' }, job: { title: 'Lifecycle Clerk' }, applicantReport: { status: 'hired' }, employerReport: { status: 'deployed', history: [{ status: 'hired' }] } })
+    expect(tracking.body.items[0]).toMatchObject({ applicant: { name: 'Juan Santos Cruz' }, employer: { name: 'Lifecycle Works' }, job: { title: 'Lifecycle Clerk' }, applicantReport: { status: 'deployed', history: [{ status: 'hired' }] }, employerReport: { status: 'hired', history: [] } })
     for (const [token, language] of [[applicantToken, 'en'], [employerToken, 'tl']]) {
       const feedback = { language, date: '2026-01-02', age: 25, sex: 'male', clientType: 'citizen', cc1: '4', ratings: Object.fromEntries(CSM_QUESTION_KEYS.map((key) => [key, 'agree'])) }
       const key = randomUUID()

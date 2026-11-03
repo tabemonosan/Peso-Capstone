@@ -4,6 +4,7 @@ import ApplicantProfileModal from './ApplicantProfileModal'
 import EmployerInterviewPanel from './EmployerInterviewPanel'
 import ApplicationStages from './ApplicationStages'
 import { API_URL } from "../config"
+import { fetchWithTimeout } from '../utils/fetchWithTimeout'
 import HireReportForm from "./HireReportForm"
 import RatingForm from "./RatingForm"
 import Pagination from "./Pagination"
@@ -12,6 +13,8 @@ import { formatFullName } from "../../shared/nameFields.js"
 import { outcomeLabel } from "../../shared/employmentReporting.js"
 import { ApplicationTimeline } from './AdminReferralsPage'
 import ApplicationResumeButton from './ApplicationResumeButton'
+import ConfirmDialog from './ConfirmDialog'
+import { showNotice } from '../utils/portalNotice'
 
 function ReferralList({ token, employerId, profileImage = '' }) {
   const [referrals, setReferrals] = useState([])
@@ -22,6 +25,8 @@ function ReferralList({ token, employerId, profileImage = '' }) {
   const [ratedHireReports, setRatedHireReports] = useState({})
   const [selectedProfile, setSelectedProfile] = useState(null)
   const [selectedJobId, setSelectedJobId] = useState(null)
+  const [decision, setDecision] = useState(null), [responding, setResponding] = useState(false)
+  const responseInFlight = useRef(false)
   const referralsPanelRef = useRef(null)
   useEffect(() => {
     if (!token || !employerId) return undefined
@@ -77,19 +82,13 @@ function ReferralList({ token, employerId, profileImage = '' }) {
   }, [token, employerId])
 
   const handleRespond = async (referralId, status) => {
-    if (!token) return
-    const action = status === 'accepted' ? 'Accept' : 'Decline'
-    if (!window.confirm(`${action} this referral? This response does not report a hiring outcome to PESO.`)) return
-    const previous = referrals
+    if (!token || responseInFlight.current) return
+    responseInFlight.current = true
+    setResponding(true)
     setError("")
 
-    // Keep declined referrals available so the employer can report the outcome.
-    setReferrals((current) =>
-      current.map((item) => (String(item._id) === String(referralId) ? { ...item, status } : item)),
-    )
-
     try {
-      const response = await fetch(`${API_URL}/api/referrals/${referralId}/respond`, {
+      const response = await fetchWithTimeout(`${API_URL}/api/referrals/${referralId}/respond`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -106,10 +105,11 @@ function ReferralList({ token, employerId, profileImage = '' }) {
       setReferrals((current) =>
         current.map((item) => (String(item._id) === String(referralId) ? { ...item, status: data.status, history: data.history || item.history } : item)),
       )
+      setDecision(null)
+      showNotice(status === 'accepted' ? 'Referral accepted.' : 'Referral declined.', 'success')
     } catch (err) {
-      setReferrals(previous)
       setError(err?.message || "Failed to update referral status")
-    }
+    } finally { responseInFlight.current = false; setResponding(false) }
   }
 
   const getStatusClasses = (status) => {
@@ -270,14 +270,14 @@ function ReferralList({ token, employerId, profileImage = '' }) {
                   <div className="mt-4 flex flex-wrap items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => handleRespond(referral._id, "accepted")}
+                      onClick={() => { setError(''); setDecision({ referralId: referral._id, status: 'accepted' }) }}
                       className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
                     >
                       Accept
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleRespond(referral._id, "declined")}
+                      onClick={() => { setError(''); setDecision({ referralId: referral._id, status: 'declined' }) }}
                       className="rounded-2xl border border-slate-300 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-800"
                     >
                       Decline
@@ -306,9 +306,9 @@ function ReferralList({ token, employerId, profileImage = '' }) {
                       />
                     )}
 
-                    {hireReport && <p className="mt-3 text-sm text-slate-700">Reported to PESO: {outcomeLabel(hireReport.status)}</p>}
+                    {hireReport && <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700" aria-label="Submitted employment report"><p className="font-semibold">Reported to PESO: {outcomeLabel(hireReport.status)}</p>{hireReport.employmentDate && <p className="mt-1">{hireReport.status === 'deployed' ? 'Deployment date' : 'Date hired'}: {hireReport.employmentDate}</p>}{hireReport.notes && <p className="mt-1 whitespace-pre-wrap">Notes to PESO: {hireReport.notes}</p>}<p className="mt-2 text-xs text-slate-500">This report has been submitted and is locked. Contact PESO if a correction is needed.</p></div>}
                     {hasRating && hireReport?.status !== 'not_hired' && (
-                      <p className="mt-4 text-sm text-cyan-300">Rating submitted for this hire report.</p>
+                      <p className="mt-4 text-sm text-blue-800">You have already rated this applicant.</p>
                     )}
                   </>
                 )}
@@ -336,6 +336,7 @@ function ReferralList({ token, employerId, profileImage = '' }) {
       )}
 
       {selectedProfile && <ApplicantProfileModal applicant={selectedProfile} onClose={() => setSelectedProfile(null)} />}
+      {decision && <ConfirmDialog title={decision.status === 'accepted' ? 'Accept this referral?' : 'Decline this referral?'} note="This updates your response to the referral. Record the final hiring outcome separately in Employment updates." confirmLabel={decision.status === 'accepted' ? 'Accept referral' : 'Confirm decline'} confirmTone={decision.status === 'accepted' ? 'primary' : 'danger'} busyLabel={decision.status === 'accepted' ? 'Accepting...' : 'Declining...'} busy={responding} error={error} onConfirm={() => handleRespond(decision.referralId, decision.status)} onCancel={() => setDecision(null)} />}
 
     </section>
   )

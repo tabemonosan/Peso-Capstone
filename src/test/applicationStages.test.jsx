@@ -11,7 +11,9 @@ describe('application progress graph', () => {
     ['interview_attended', { status: 'attended' }, '3. Post-interview task', /post-interview task/],
     ['hired', { status: 'attended' }, '4. Hiring outcome', /accepted for the job/],
     ['not_hired', { status: 'held' }, '4. Hiring outcome', /not selected/],
-    ['no_show_pending', { status: 'confirmed' }, '2. Invitation accepted', /Progress is paused/],
+    ['no_show_pending', { status: 'confirmed' }, '3. Interview result review', /under PESO review/],
+    ['no_show_responded', { status: 'confirmed' }, '3. Interview result review', /under PESO review/],
+    ['no_show_confirmed', { status: 'missed' }, '3. Interview result review', /PESO reviewed/],
   ])('shows the recorded stage for %s', (status, interview, current, message) => {
     render(<ApplicationStages application={{ status, interview }} />)
     const graph = screen.getByRole('list', { name: 'Application stages' })

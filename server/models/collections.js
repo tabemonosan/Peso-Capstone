@@ -302,6 +302,7 @@ const documentFileSchema = new Schema({
 documentFileSchema.index({ applicant: 1, slot: 1, version: 1, side: 1 }, { unique: true })
 
 const ratingSchema = new Schema({
+  submissionKey: { type: String, select: false },
   fromUserId: { type: Schema.Types.ObjectId, required: true },
   fromRole: { type: String, enum: ['employer', 'applicant'], required: true },
   toUserId: { type: Schema.Types.ObjectId, required: true },
@@ -311,6 +312,7 @@ const ratingSchema = new Schema({
   comment: String,
   createdAt: { type: Date, default: Date.now },
 }, { collection: 'ratings', timestamps: true })
+ratingSchema.index({ submissionKey: 1 }, { unique: true, sparse: true })
 
 // 6-digit signup email verification codes. Only the HMAC-SHA256 hash of the
 // code is stored; the TTL index matches the 10-minute code lifetime.

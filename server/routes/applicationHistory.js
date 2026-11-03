@@ -3,6 +3,7 @@ import mongoose from 'mongoose'
 import { applicationProgressLookups, publicApplication } from '../services/applicationProgress.js'
 import { rateLimit } from 'express-rate-limit'
 import { validateApplicationEmail } from '../services/applicationEmail.js'
+import { applicationWithdrawalDeadline } from '../../shared/applicationProgress.js'
 
 export function createApplicationHistoryRouter({ Applicant, JobApplication, Referral, authenticate, notify, loadEmployerVerification, applicationWorkflow, Interview, HireReport }) {
   const router = Router()
@@ -53,6 +54,8 @@ export function createApplicationHistoryRouter({ Applicant, JobApplication, Refe
     try {
       const owned = await JobApplication.findOne({ _id: req.params.id, applicantEmail: actor.email }).select('referralId').lean()
       const meeting = owned?.referralId ? await Interview.findOne({ referralId: owned.referralId }).lean() : null
+      const deadline = applicationWithdrawalDeadline(meeting)
+      if (deadline && +new Date(deadline) <= Date.now()) return res.status(409).json({ code: 'WITHDRAWAL_WINDOW_CLOSED', error: 'The 24-hour withdrawal window after accepting the interview has ended. Report a problem or contact PESO for assistance.' })
       if (meeting && (+meeting.scheduledAt <= Date.now() || ['held', 'attended', 'missed'].includes(meeting.status))) return res.status(409).json({ error: 'The interview has started. Report a problem or contact PESO for assistance.' })
       if (owned?.referralId && await HireReport.exists({ referralId: owned.referralId, reportedByRole: { $ne: 'Applicant' } })) return res.status(409).json({ error: 'An employment outcome is already recorded. Report a problem for PESO assistance.' })
       const event = { action: 'applicant_withdrawal', status: 'withdrawn', by: 'Applicant', at: new Date() }

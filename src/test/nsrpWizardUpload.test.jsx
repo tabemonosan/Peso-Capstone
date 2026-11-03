@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ApplicantSignupWizard from '../components/ApplicantSignupWizard'
 
@@ -86,6 +86,18 @@ async function fillDocuments() {
 }
 
 describe('NSRP path choice', () => {
+  it('offers expanded Philippine IDs in both document dropdowns', async () => {
+    await completeAccountStep()
+    await chooseUpload()
+    await fillBasicInfo()
+    for (const label of ['Valid ID #1 type', 'Valid ID #2 type']) {
+      const select = await screen.findByLabelText(label)
+      for (const name of ["Driver's License", 'PhilHealth ID', 'Digital TIN ID', 'PWD ID', 'Senior Citizen ID', 'Other government-issued ID']) {
+        expect(within(select).getByRole('option', { name, exact: true })).toBeInTheDocument()
+      }
+    }
+  })
+
   it('offers both options after the Account step and adapts the tabs', async () => {
     await completeAccountStep()
     expect(screen.getByRole('radio', { name: /I already have a filled NSRP form/i })).toBeInTheDocument()

@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { API_URL } from "../config"
+import { showNotice } from '../utils/portalNotice'
 import Modal from "./Modal"
 import { ID_TYPE_OPTIONS } from "./VerificationDocumentsForm"
 import ApplicantSignupWizard from "./ApplicantSignupWizard"
@@ -32,7 +33,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
   }
 
   const viewVersion = (url) => {
-    if (!url) return alert("Document link unavailable")
+    if (!url) return showNotice("Document link unavailable")
     window.open(`${API_URL}${url}`, "_blank")
   }
 

@@ -5,11 +5,12 @@ import ApplicantSignupWizard from '../components/ApplicantSignupWizard'
 const mockFetch = vi.fn()
 
 describe('applicant location and optional fields', () => {
-  it('offers religion choices without marking optional personal fields required', () => {
+  it('requires religion and height while keeping middle name and suffix optional', () => {
     render(<ApplicantSignupWizard mode="update" initialAnswers={{}} />)
-    expect(screen.getByRole('combobox', { name: /^Religion$/i })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: /^Religion/i })).toBeRequired()
+    expect(screen.getByLabelText(/^Height/i)).toBeRequired()
     expect(screen.getByRole('option', { name: 'Roman Catholic' })).toBeInTheDocument()
-    for (const label of ['Religion', 'Middle name', 'Suffix']) {
+    for (const label of ['Middle name', 'Suffix']) {
       expect(screen.getByLabelText(new RegExp(`^${label}$`, 'i'))).toBeInTheDocument()
     }
     expect(screen.getByLabelText(/^Surname \*/i)).toBeInTheDocument()
@@ -238,6 +239,35 @@ async function goToWorkStep() {
 }
 
 describe('wizard work-experience errors', () => {
+  it('selects and clears every proficiency for a language without affecting other languages', async () => {
+    await goToWorkStep()
+    const group = screen.getByRole('group', { name: 'English proficiency' })
+    const all = within(group).getByRole('checkbox', { name: 'Select all English proficiencies' })
+    fireEvent.click(all)
+    for (const name of ['read', 'write', 'speak', 'understand']) expect(within(group).getByRole('checkbox', { name, exact: true })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Select all Filipino proficiencies' })).not.toBeChecked()
+    fireEvent.click(within(group).getByRole('checkbox', { name: 'read', exact: true }))
+    expect(all).not.toBeChecked()
+    fireEvent.click(all)
+    fireEvent.click(all)
+    for (const checkbox of within(group).getAllByRole('checkbox')) expect(checkbox).not.toBeChecked()
+  })
+
+  it('requires employment type and makes passport conditional on overseas preferences', async () => {
+    await goToWorkStep()
+    fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
+    await screen.findByLabelText(/^Employment status/i)
+    fireEvent.change(screen.getByLabelText(/^Employment status/i), { target: { value: 'Unemployed' } })
+    expect(screen.getByLabelText(/^Employment type/i)).toBeRequired()
+    const passport = screen.getByLabelText(/^Passport no/i)
+    expect(passport).not.toBeRequired()
+    const country = screen.getByLabelText(/^Overseas country 1/i)
+    fireEvent.change(country, { target: { value: 'Japan' } })
+    expect(passport).toBeRequired()
+    fireEvent.change(country, { target: { value: '' } })
+    expect(passport).not.toBeRequired()
+  })
+
   it.each(['read', 'write', 'speak', 'understand'])('blocks Next when Other language is blank and %s is checked', async (proficiency) => {
     await goToWorkStep()
     const group = screen.getByRole('group', { name: 'Others proficiency' })

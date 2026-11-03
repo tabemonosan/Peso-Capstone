@@ -33,6 +33,15 @@ beforeEach(async () => {
 
 const list = (query = '') => request(app).get(`/api/jobs?status=approved&page=1&limit=10${query}`).set(auth())
 describe('strict applicant skill visibility', () => {
+  it('rejects overlapping broader/narrower profile skills in either order and preserves saved skills', async () => {
+    for (const skills of [['Full-Stack Developer', 'Frontend Developer'], ['Backend Developer', 'Full-Stack Developer'], ['Microsoft Office', 'Excel']]) {
+      const result = await request(app).put('/api/profile').set(auth()).send({ profile: { skills } }).expect(422)
+      expect(result.body.fieldErrors.skills).toContain('already covered')
+      expect((await Applicant.findOne({ email })).profile.skills).toEqual(['Driver'])
+    }
+    const saved = await request(app).put('/api/profile').set(auth()).send({ profile: { skills: ['Full-Stack Developer', 'React'] } }).expect(200)
+    expect(saved.body.profile.skills).toEqual(['Full-Stack Developer', 'React'])
+  })
   it.each(['relevant', 'createdAt', 'salary', 'deadline', 'title'])('restricts results and accurate counts when sorted by %s', async (sort) => {
     const response = await list(`&sortBy=${sort}`)
     expect(response.status).toBe(200)

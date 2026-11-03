@@ -92,3 +92,5 @@ In Ethereal mode this also prints the preview URL.
 ## Document verification
 
 See [verification rules, settings, limitations and rollback](docs/verification.md). The workflow seed also creates eight fictional verification scenarios in the explicitly selected peso-demo-* database. Phase 6 (in-person verification) is intentionally omitted.
+
+Job postings use [automatic safety screening](docs/job-moderation.md): eligible posts from established verified employers publish automatically, and flagged posts remain in PESO review. Admins can turn automatic approval off under Job Offers.

@@ -1,6 +1,8 @@
 import { Interview, ApplicationReport, ApplicationAppeal } from './models/applicationWorkflow.js'
 import { createApplicationWorkflow } from './services/applicationWorkflow.js'
 import { createApplicationWorkflowRouter } from './routes/applicationWorkflow.js'
+import { coveringJobSkill } from '../shared/jobSkills.js'
+import { PHILIPPINE_ID_TYPES } from '../shared/philippineIds.js'
 import { applicantProfileContent } from '../shared/applicantProfile.js'
 import { validateJobApplication, RESUME_MAX_BYTES } from '../shared/jobApplication.js'
 import { validateApplicationEmail } from './services/applicationEmail.js'
@@ -61,11 +63,12 @@ import {
   NSRP_NUMERIC_SPECS, NSRP_FIELD_VALIDATORS, EDUCATION_LEVELS, WORK_STATUS_OPTIONS,
   digitsOnly, trimCollapse, normalizePhMobile, normalizePassportNo,
   isValidCalendarDate, isValidYear, ageFromDob, validateNumericId, validateNsrpBasicInfo, validateNsrpLanguages,
-  EMPLOYED_TYPES, UNEMPLOYED_TYPES, MIN_YEAR, todayInManila,
+  EMPLOYED_TYPES, UNEMPLOYED_TYPES, MIN_YEAR, todayInManila, requiresPassport,
 } from '../shared/nsrpValidation.js'
 import { NSRP_SKILL_LABELS, normalizeSkillLabel } from '../shared/nsrpSkills.js'
 import { NSRP_ROW_LIMITS } from '../shared/nsrpTableLimits.js'
 import { LOCATION_TYPES, EMPLOYMENT_TYPES, LEGACY_EMPLOYMENT_TYPES, PAY_FREQUENCIES, EDUCATION_LEVELS as JOB_EDUCATION_LEVELS, EXPERIENCE_LEVELS, JOB_LIMITS, validateJobPosting, formatSalary, formatLocation, normalizeJobPosting } from '../shared/jobPosting.js'
+import { createJobModeration } from './services/jobModeration.js'
 import { registrationProgress } from './utils/registration.js'
 import { validateReviewTransition } from './utils/docReview.js'
 import { storeDocumentFile, loadDocumentFile, deleteApplicantDocumentFiles } from './utils/documentFiles.js'
@@ -228,6 +231,13 @@ const jobSchema = new Schema({
   reviewReason: String,
   reviewedBy: String,
   reviewedAt: Date,
+  approvedBy: String,
+  approvedAt: Date,
+  moderation: {
+    rulesVersion: String, checkedAt: Date, decision: String,
+    findings: [{ _id: false, code: String, category: String, message: String, field: String }],
+  },
+  moderationHistory: { type: [Schema.Types.Mixed], default: [] },
   reviewHistory: [{
     status: { type: String, enum: ['approved', 'declined'], required: true },
     reason: String,
@@ -279,7 +289,7 @@ jobApplicationSchema.index({ applicantId: 1, jobId: 1 }, { unique: true, partial
 const JobApplication = mongoose.model('JobApplication', jobApplicationSchema)
 export const referralWorkflow = createReferralWorkflow({ Applicant, Employer, JobPosting, JobApplication, Referral, HireReport, Notification, notify, notifyAdmins, loadApplicant: loadApplicantWithCurrentResume, loadEmployerVerification, loadNsrpFile: storedApplicationNsrp })
 export const applicationWorkflow = createApplicationWorkflow({ Applicant, Employer, JobPosting, JobApplication, Referral, HireReport, Interview, ApplicationReport, ApplicationAppeal, notify, notifyAdmins, loadEmployerVerification, referralWorkflow })
-app.use('/api/workflow', createApplicationWorkflowRouter({ service: applicationWorkflow, Applicant, Employer, Admin, JobApplication, Interview, ApplicationReport, ApplicationAppeal, HireReport, authenticate: authenticateRequest }))
+app.use('/api/workflow', createApplicationWorkflowRouter({ service: applicationWorkflow, Applicant, Employer, Admin, JobApplication, Interview, ApplicationReport, ApplicationAppeal, HireReport, authenticate: authenticateRequest, notify }))
 app.use('/api/admin/referral-workflow', createReferralOversightRouter({ workflow: referralWorkflow, Applicant, Employer, JobPosting, JobApplication, Referral, authenticate: authenticateRequest }))
 app.use('/api/applications', createApplicationHistoryRouter({ Applicant, Employer, JobApplication, Referral, JobPosting, authenticate: authenticateRequest, notify, notifyAdmins, loadEmployerVerification, applicationWorkflow, Interview, HireReport }))
 
@@ -466,7 +476,7 @@ const applicantSignupUpload = multer({
   },
 })
 
-const VALID_ID_TYPES = ['SSS', 'Passport', 'PRC', 'Pag-IBIG', "Voter's ID", 'Philippine Postal ID', 'UMID', 'PhilSys National ID']
+const VALID_ID_TYPES = PHILIPPINE_ID_TYPES
 const MAX_UPLOADS_PER_DOC = 5
 // Projection to re-include the select:false buffers when streaming
 const VERIFICATION_DATA_SELECT = VERIFICATION_DOC_KEYS.flatMap((key) => [
@@ -1915,6 +1925,13 @@ app.put('/api/profile', async (req, res) => {
     const decoded = jwt.verify(token, jwtSecret)
     const { profile, companyName, contactName, phone, website } = req.body
     if (!profile) return res.status(400).json({ error: 'Missing profile' })
+    if (decoded.role === 'Applicant' && profile.skills !== undefined) {
+      if (!Array.isArray(profile.skills) || profile.skills.some(skill => typeof skill !== 'string')) return res.status(422).json({ error: 'Choose skills from the list.', fieldErrors: { skills: 'Skills must be a list of labels.' } })
+      for (const skill of profile.skills) {
+        const parent = coveringJobSkill(skill, profile.skills)
+        if (parent) return res.status(422).json({ error: `${skill} is already covered by ${parent}. Remove the redundant skill.`, fieldErrors: { skills: `${skill} is already covered by ${parent}.` } })
+      }
+    }
     if (decoded.role === 'Applicant' && typeof profile.summary === 'string') profile.summarySource = 'personal'
     // Applicants edit structured name parts; validate them server-side too
     if (decoded.role === 'Applicant' && (profile.firstName !== undefined || profile.lastName !== undefined || profile.middleName !== undefined || profile.suffix !== undefined)) {
@@ -2001,6 +2018,28 @@ async function resolveJobTitle(title, customTitle) {
 }
 
 const JOB_FIELD_ERRORS_MESSAGE = 'Check the highlighted job posting fields.'
+export const jobModeration = createJobModeration({ JobPosting, Employer })
+async function applyJobScreening(job) {
+  const screening = await jobModeration.assess(job, job.createdBy, job.isNew ? undefined : job._id)
+  job.moderation = screening
+  job.moderationHistory.push(screening)
+  if (job.moderationHistory.length > 20) job.moderationHistory.splice(0, job.moderationHistory.length - 20)
+  job.status = job.moderation.decision === 'auto_approved' ? 'approved' : 'pending'
+  if (job.status === 'approved') {
+    job.approvedBy = job.reviewedBy = 'System (job safety screening)'
+    job.approvedAt = job.reviewedAt = new Date()
+    job.reviewReason = undefined
+    job.reviewHistory.push({ status: 'approved', reason: `Passed job policy ${job.moderation.rulesVersion}`, reviewedBy: job.reviewedBy, reviewedAt: job.reviewedAt })
+  }
+}
+for (const method of ['get', 'put']) app[method]('/api/admin/job-moderation/settings', async (req, res) => {
+  let actor
+  try { actor = authenticateRequest(req) } catch { return res.status(403).json({ error: 'Admins only.' }) }
+  try {
+    if (actor?.role !== 'Admin' || !await Admin.exists({ email: actor.email })) return res.status(403).json({ error: 'Admins only.' })
+    res.json(method === 'get' ? await jobModeration.getSettings() : await jobModeration.updateSettings(req.body || {}, actor.email))
+  } catch (error) { res.status(method === 'get' ? 503 : 400).json({ error: method === 'get' ? 'Job screening settings unavailable.' : error.message }) }
+})
 
 async function prepareJobPosting(input, options = {}) {
   const { errors, value } = validateJobPosting(input, options)
@@ -2081,16 +2120,18 @@ app.post('/api/jobs', requireVerifiedEmail, requireApprovedEmployer, async (req,
     if (!resolvedCompany) return res.status(400).json({ error: 'A company name is required.' })
     if (Object.keys(errors).length) return res.status(422).json({ error: JOB_FIELD_ERRORS_MESSAGE, fieldErrors: errors })
     const job = new JobPosting({ ...fields, company: resolvedCompany, createdBy: decoded.email })
+    await applyJobScreening(job)
     await job.save()
 
     await notifyAdmins({
-      type: 'job_pending_review',
-      title: 'New job posting pending review',
-      message: `${decoded.email} submitted “${job.title}” for approval.`,
+      type: job.status === 'approved' ? 'job_auto_approved' : 'job_pending_review',
+      title: job.status === 'approved' ? 'Job posting automatically approved' : 'New job posting pending review',
+      message: job.status === 'approved' ? `“${job.title}” passed automatic screening.` : `${decoded.email} submitted “${job.title}” for PESO review.`,
       link: '/jobs',
       metadata: { jobId: String(job._id), jobTitle: job.title },
     })
 
+    if (job.status === 'approved') await notify({ recipient: { role: 'Employer', email: decoded.email }, type: 'job_approved', title: 'Job posting published', message: `Your job posting "${job.title}" passed automatic screening and is now published.`, link: '/jobs', metadata: { jobId: String(job._id) } })
     res.json(job)
   } catch (err) {
     console.error(err)
@@ -2119,7 +2160,11 @@ app.put('/api/jobs/:id', requireVerifiedEmail, requireApprovedEmployer, async (r
     if (Object.keys(errors).length) return res.status(422).json({ error: JOB_FIELD_ERRORS_MESSAGE, fieldErrors: errors })
 
     job.set({ ...fields, company })
+    await applyJobScreening(job)
     await job.save()
+
+    await notifyAdmins({ type: job.status === 'approved' ? 'job_auto_approved' : 'job_pending_review', title: job.status === 'approved' ? 'Updated job automatically approved' : 'Updated job pending review', message: `Updated posting "${job.title}" completed safety screening.`, link: '/jobs', metadata: { jobId: String(job._id) } })
+    if (job.status === 'approved') await notify({ recipient: { role: 'Employer', email: decoded.email }, type: 'job_approved', title: 'Job posting published', message: `Your updated job posting "${job.title}" passed automatic screening and is now published.`, link: '/jobs', metadata: { jobId: String(job._id) } })
 
     res.json(job)
   } catch (err) {
@@ -2144,6 +2189,8 @@ app.get('/api/jobs', requireVerifiedEmail, requireApprovedEmployer, async (req, 
     const present = (doc) => {
       const job = normalizeJobPosting(typeof doc.toObject === 'function' ? doc.toObject() : doc)
       if (viewer?.role !== 'Admin' && viewer?.email !== job.createdBy) delete job.notesToAdmin
+      if (viewer?.role !== 'Admin' && viewer?.email !== job.createdBy) delete job.moderation
+      if (viewer?.role !== 'Admin' && viewer?.email !== job.createdBy) delete job.moderationHistory
       if (viewer?.role !== 'Admin') job.applicants = (job.applicants || []).filter((entry) => viewer?.role === 'Applicant' ? entry.email === viewer.email : viewer?.role === 'Employer' && sharedApplicantEmails.get(String(job._id))?.has(entry.email))
       return job
     }
@@ -2375,6 +2422,8 @@ app.put('/api/jobs/:id/status', async (req, res) => {
     if (status === 'declined' && !reviewReason) return res.status(400).json({ error: 'A reason is required when declining a job posting.' })
     if (reviewReason.length > 500) return res.status(400).json({ error: 'The decline reason must be 500 characters or fewer.' })
     job.status = status
+    job.reviewedBy = decoded.email
+    job.reviewedAt = new Date()
     if (status === 'approved') {
       job.approvedBy = decoded.email
       job.approvedAt = new Date()
@@ -2584,6 +2633,7 @@ export function validateNsrpAnswers(input) {
     const age = ageFromDob(answers.dob)
     if (age !== null && (age < 15 || age > 100)) fieldErrors.dob = 'Applicants must be 15 to 100 years old.'
   }
+  if (requiresPassport(answers) && !answers.passportNo) fieldErrors.passportNo = 'Enter a passport number when an overseas country is specified.'
   // Passport expiry is required when a passport number is given, and must be valid
   if (answers.passportNo && !answers.passportExpiry) fieldErrors.passportExpiry = 'Enter the passport expiry date.'
   validateDate('passportExpiry', answers.passportExpiry, { notPast: true })
@@ -3184,6 +3234,7 @@ app.post('/api/hire-reports', requireVerifiedEmail, requireApprovedEmployer, asy
       ? { $or: [{ reportedByRole: 'Employer' }, { reportedByRole: { $exists: false } }] }
       : { reportedByRole: 'Applicant' }
     let hireReport = await HireReport.findOne({ applicantId, jobId, employerId: employer._id, ...roleFilter })
+    if (decoded.role === 'Employer' && hireReport) return res.status(409).json({ code: 'EMPLOYER_REPORT_LOCKED', error: 'This employment report has already been submitted and cannot be edited. Contact PESO if a correction is needed.', report: hireReport })
     if (!hireReport) hireReport = new HireReport({ applicantId, jobId, employerId: employer._id })
     if (hireReport.status) {
       hireReport.history.push({ status: hireReport.status, employmentDate: hireReport.employmentDate, notes: hireReport.notes, reportedAt: hireReport.reportedAt })
@@ -3311,15 +3362,18 @@ app.post('/api/ratings', requireApprovedEmployer, async (req, res) => {
     const token = auth.split(' ')[1]
     const decoded = jwt.verify(token, jwtSecret)
 
-    const { toUserId, toRole, hireReportId, score, comment } = req.body || {}
+    const { toUserId, toRole, hireReportId, score, comment = '' } = req.body || {}
     if (!toUserId || !toRole || !hireReportId || score === undefined || score === null) {
       return res.status(400).json({ error: 'toUserId, toRole, hireReportId, and score are required' })
     }
 
     const numericScore = Number(score)
-    if (!Number.isFinite(numericScore) || numericScore < 1 || numericScore > 5) {
+    if (!Number.isInteger(numericScore) || numericScore < 1 || numericScore > 5) {
       return res.status(400).json({ error: 'Invalid score' })
     }
+    if (![toUserId, hireReportId].every(value => typeof value === 'string' && mongoose.isValidObjectId(value))) return res.status(400).json({ error: 'Choose a valid applicant and hire report.' })
+    if (toRole !== (decoded.role === 'Employer' ? 'applicant' : 'employer')) return res.status(400).json({ error: 'Choose the correct rating recipient role.' })
+    if (typeof comment !== 'string' || comment.length > 1000) return res.status(400).json({ error: 'Comments must be at most 1,000 characters.' })
 
     const hireReport = await HireReport.findById(hireReportId)
     if (!hireReport) return res.status(404).json({ error: 'Hire report not found' })
@@ -3343,21 +3397,26 @@ app.post('/api/ratings', requireApprovedEmployer, async (req, res) => {
       return res.status(403).json({ error: 'Forbidden' })
     }
 
-    const existingRating = await Rating.findOne({ fromUserId: fromUser._id, hireReportId })
-    if (existingRating) return res.status(400).json({ error: 'Rating already exists for this hire report' })
+    const existingRating = await Rating.findOne({ fromUserId: fromUser._id, ...(fromRole === 'employer' ? { toUserId } : { hireReportId }) })
+    if (existingRating) return res.status(409).json({ code: 'RATING_ALREADY_EXISTS', error: fromRole === 'employer' ? 'You have already rated this applicant.' : 'You have already rated this hire report.' })
 
+    await Rating.init()
     const rating = await Rating.create({
+      submissionKey: fromRole === 'employer' ? `employer:${fromUser._id}:applicant:${toUserId}` : `applicant:${fromUser._id}:report:${hireReportId}`,
       fromUserId: fromUser._id,
       fromRole,
       toUserId,
       toRole,
       hireReportId,
       score: numericScore,
-      comment,
+      comment: comment.trim(),
     })
 
-    res.json(rating)
+    const result = rating.toObject()
+    delete result.submissionKey
+    res.json(result)
   } catch (err) {
+    if (err?.code === 11000) return res.status(409).json({ code: 'RATING_ALREADY_EXISTS', error: 'A rating has already been submitted.' })
     console.error(err)
     res.status(500).json({ error: 'Server error' })
   }

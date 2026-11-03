@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { API_URL } from '../config'
+import { fetchWithTimeout } from '../utils/fetchWithTimeout'
 import { DOCUMENT_LABELS, openFlags } from '../../shared/verification.js'
 import Modal from './Modal'
 import ConfirmDialog from './ConfirmDialog'
@@ -57,7 +58,7 @@ export default function AdminDocumentVerification({ token, queue = 'flagged' }) 
     setBusy(true); setError('')
     const { item, action, ruleId } = confirmation
     try {
-      const response = await fetch(`${API_URL}/api/admin/document-verification/action`, {
+      const response = await fetchWithTimeout(`${API_URL}/api/admin/document-verification/action`, {
         method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ role: item.role, accountId: item.accountId, docKey: item.docKey, version: item.version, action, reason, ruleId, unresolved: openFlags(item.findings).length, checklist }),
       })

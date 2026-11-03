@@ -93,6 +93,14 @@ afterEach(() => {
 })
 
 describe('POST /api/signup (real database)', () => {
+  it.each(["Driver's License", 'PhilHealth ID', 'PWD ID', 'Other government-issued ID'])('accepts the expanded ID choice %s', async id1Type => {
+    const email = `id-${id1Type.replace(/[^a-z]/gi, '').toLowerCase()}@example.com`
+    const response = await signup(email, { id1Type })
+    expect(response.status).toBe(200)
+    const applicant = await Applicant.findOne({ email }).lean()
+    expect(applicant.verificationDocuments.validId1.idType).toBe(id1Type)
+  })
+
   it.each(['09171234567', '+639171234567'])('allows the employer Form 2 preview with mobile %s before account creation', async (phone) => {
     const signature = new PNG({ width: 1, height: 1 })
     signature.data = Buffer.from([0, 0, 0, 255])

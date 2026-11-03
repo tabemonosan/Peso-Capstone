@@ -4,12 +4,12 @@ import mongoose from 'mongoose'
 import request from 'supertest'
 import jwt from 'jsonwebtoken'
 import bcrypt from 'bcryptjs'
-import { startTestDb, stopTestDb, clearDb, jobApplicationRequest } from './helpers.js'
+import { startTestDb, stopTestDb, clearDb, jobApplicationRequest, pdfBuffer } from './helpers.js'
 vi.mock('node:dns/promises', () => ({ Resolver: class { async resolveMx() { return [{ exchange: 'mail.example.test', priority: 10 }] } } }))
 vi.mock('../../mailer.js', async original => ({ ...await original(), sendEmail: vi.fn(async () => ({ delivered: true })), initMailer: vi.fn() }))
 const { app, referralWorkflow, applicationWorkflow } = await import('../../index.js')
-const { Applicant, Employer, Admin, Referral, HireReport, Notification } = await import('../../models/collections.js')
-const { Interview, ApplicationReport } = await import('../../models/applicationWorkflow.js')
+const { Applicant, Employer, Admin, Referral, HireReport, Notification, Rating } = await import('../../models/collections.js')
+const { Interview, ApplicationReport, PostInterviewFile } = await import('../../models/applicationWorkflow.js')
 const { seedFullCycle, FULL_CYCLE_COUNTS } = await import('../../scripts/seed-approved-jobs.js')
 const { publicApplication } = await import('../../services/applicationProgress.js')
 const JobPosting = mongoose.model('JobPosting')
@@ -36,6 +36,14 @@ async function reportNoShow(account = applicant) {
   const report = await request(app).post('/api/applications/reports').set(auth('Employer', employer)).send({ referralId: String(result.referral._id), type: 'no_show', reason: 'PRIVATE employer contact notes' }).expect(200)
   return { ...result, report: report.body }
 }
+async function documentTask(requirements = ['background_authorization', 'qualifications']) {
+  const result = await meetingFor()
+  await api('post', `/interviews/${result.meeting.id}/respond`, 'Applicant', applicant, { action: 'confirm' }).expect(200)
+  await api('post', `/interviews/${result.meeting.id}/held`, 'Employer', employer, { confirmEarly: true, reason: 'Interview completed early by agreement.' }).expect(200)
+  const requested = await api('post', `/interviews/${result.meeting.id}/task`, 'Employer', employer, { requirements, instructions: 'Upload the signed authorization form and qualification proof.' }).expect(200)
+  return { ...result, task: requested.body.postInterviewTask }
+}
+const uploadTask = (meeting, key, buffer = pdfBuffer(), account = applicant, contentType = 'application/pdf') => request(app).post(`/api/workflow/interviews/${meeting.id}/task/${key}/file`).set(auth('Applicant', account)).attach('file', buffer, { filename: 'proof.pdf', contentType })
 beforeAll(startTestDb, 180000)
 afterAll(stopTestDb)
 beforeEach(async () => {
@@ -47,6 +55,146 @@ beforeEach(async () => {
 })
 
 describe('applications, interviews and admin-confirmed events', () => {
+  it('shows applicants only their own reputation, defaults old missing values to 100, and protects admin notes', async () => {
+    await Applicant.collection.updateOne({ _id: applicant._id }, { $unset: { trustValue: 1 } })
+    const result = await api('get', '/reputation', 'Applicant', applicant).expect(200)
+    expect(result.body).toMatchObject({ points: 100, initialPoints: 100, minimumPoints: 0, maximumPoints: 100, items: [], total: 0 })
+    expect(result.headers['cache-control']).toBe('private, no-store')
+    await api('get', '/reputation', 'Employer', employer).expect(403)
+    await api('post', '/admin/events/confirm', 'Admin', admin, { applicantId: String(applicant._id), type: 'manual_adjustment', eventKey: 'private-event-0001', delta: -5, reason: 'PRIVATE admin note' }).expect(200)
+    const own = await api('get', '/reputation?applicantId=another-account', 'Applicant', applicant).expect(200)
+    expect(own.body.points).toBe(95)
+    expect(own.body.items[0]).toMatchObject({ label: 'PESO reputation adjustment', before: 100, after: 95, change: -5 })
+    expect(JSON.stringify(own.body)).not.toMatch(/PRIVATE|private-event|trustValue|trustEvents|admin@|"by"|"reason"/)
+    const other = await makeApplicant('other-reputation-owner@workflow.test')
+    expect((await api('get', `/reputation?applicantId=${applicant._id}`, 'Applicant', other)).body.points).toBe(100)
+  })
+  it('deducts no-show points only after PESO confirmation and does not deduct twice on retries', async () => {
+    const { report } = await reportNoShow()
+    expect((await api('get', '/reputation', 'Applicant', applicant)).body.points).toBe(100)
+    await api('post', `/reports/${encodeURIComponent(report.id)}/respond`, 'Applicant', applicant, { response: 'Please review my explanation.' }).expect(200)
+    const decision = { decision: 'confirmed', reason: 'PRIVATE evidence reviewed by admin' }
+    await api('post', `/admin/reports/${encodeURIComponent(report.id)}/review`, 'Admin', admin, decision).expect(200)
+    await api('post', `/admin/reports/${encodeURIComponent(report.id)}/review`, 'Admin', admin, decision).expect(200)
+    const result = await api('get', '/reputation', 'Applicant', applicant).expect(200)
+    expect(result.body).toMatchObject({ points: 80, total: 1 })
+    expect(result.body.items[0]).toMatchObject({ type: 'confirmed_no_show', before: 100, after: 80, change: -20 })
+    expect(JSON.stringify(result.body)).not.toContain('PRIVATE')
+    expect(await Notification.countDocuments({ type: 'reputation_updated' })).toBe(1)
+  })
+  it('enforces one employer rating per applicant across jobs and simultaneous submissions', async () => {
+    await Rating.init()
+    const hire = await HireReport.create({ applicantId: applicant._id, employerId: employer._id, jobId: job._id, status: 'hired' })
+    const body = { toUserId: String(applicant._id), toRole: 'applicant', hireReportId: String(hire._id), score: 4, comment: 'Good collaboration.' }
+    const results = await Promise.all([request(app).post('/api/ratings').set(auth('Employer', employer)).send(body), request(app).post('/api/ratings').set(auth('Employer', employer)).send(body)])
+    expect(results.map(result => result.status).sort()).toEqual([200, 409])
+    expect(results.find(result => result.status === 200).body).not.toHaveProperty('submissionKey')
+    const anotherJob = await JobPosting.create({ title: 'Another role', company: employer.companyName, createdBy: employer.email, status: 'approved' })
+    const anotherHire = await HireReport.create({ applicantId: applicant._id, employerId: employer._id, jobId: anotherJob._id, status: 'hired' })
+    const duplicate = await request(app).post('/api/ratings').set(auth('Employer', employer)).send({ ...body, hireReportId: String(anotherHire._id), score: 1 }).expect(409)
+    expect(duplicate.body.code).toBe('RATING_ALREADY_EXISTS')
+    expect(await Rating.countDocuments()).toBe(1)
+    expect((await Rating.findOne()).score).toBe(4)
+    expect((await api('get', '/reputation', 'Applicant', applicant)).body.points).toBe(100)
+  })
+  it('honors legacy employer ratings without a new key and validates rating input', async () => {
+    const hire = await HireReport.create({ applicantId: applicant._id, employerId: employer._id, jobId: job._id, status: 'hired' })
+    const body = { toUserId: String(applicant._id), toRole: 'applicant', hireReportId: String(hire._id), score: 5 }
+    await request(app).post('/api/ratings').set(auth('Employer', employer)).send({ ...body, toRole: 'employer' }).expect(400)
+    await request(app).post('/api/ratings').set(auth('Employer', employer)).send({ ...body, score: 1.5 }).expect(400)
+    await Rating.collection.insertOne({ fromUserId: employer._id, fromRole: 'employer', toUserId: applicant._id, toRole: 'applicant', hireReportId: hire._id, score: 3 })
+    await request(app).post('/api/ratings').set(auth('Employer', employer)).send(body).expect(409)
+    expect(await Rating.countDocuments()).toBe(1)
+  })
+  it('requests optional post-interview documents, accepts private uploads, and records employer completion separately from hiring', async () => {
+    const { meeting, referral, task } = await documentTask()
+    expect(task.status).toBe('requested')
+    expect(task.requirements.map(item => item.key)).toEqual(['background_authorization', 'qualifications'])
+    await api('post', `/interviews/${meeting.id}/task/complete`, 'Employer', employer, {}).expect(409)
+    const first = await uploadTask(meeting, 'background_authorization').expect(200)
+    expect(first.body.postInterviewTask.status).toBe('requested')
+    const uploaded = await uploadTask(meeting, 'qualifications').expect(200)
+    expect(uploaded.body.postInterviewTask.status).toBe('submitted')
+    const file = uploaded.body.postInterviewTask.requirements[0].file
+    expect(file).not.toHaveProperty('data')
+    const path = `/api/workflow/interviews/${meeting.id}/task/files/${file.id}`
+    const download = await request(app).get(path).set(auth('Employer', employer)).expect(200)
+    expect(download.headers['cache-control']).toBe('private, no-store')
+    expect(download.headers['content-disposition']).toContain('attachment')
+    expect(download.body.subarray(0, 5).toString()).toBe('%PDF-')
+    await request(app).get(path).set(auth('Applicant', applicant)).expect(200)
+    await request(app).get(path).set(auth('Admin', admin)).expect(200)
+    for (const endpoint of ['/api/workflow/mine', '/api/applications/mine']) {
+      const mine = await request(app).get(endpoint).set(auth('Applicant', applicant)).expect(200)
+      const item = Array.isArray(mine.body) ? mine.body[0] : mine.body.items[0]
+      expect(item.postInterviewTask.status).toBe('submitted')
+      expect(JSON.stringify(item.postInterviewTask)).not.toMatch(/requestedBy|employerId|applicantId|"data"/)
+    }
+    const files = Object.fromEntries(uploaded.body.postInterviewTask.requirements.map(requirement => [requirement.key, requirement.file.id]))
+    const complete = await api('post', `/interviews/${meeting.id}/task/complete`, 'Employer', employer, { files }).expect(200)
+    expect(complete.body.postInterviewTask).toMatchObject({ status: 'completed' })
+    expect(complete.body.postInterviewTask.completedAt).toBeTruthy()
+    expect(await HireReport.countDocuments({ referralId: referral._id })).toBe(0)
+    expect((await Interview.findById(meeting.id)).status).toBe('held')
+    await uploadTask(meeting, 'qualifications').expect(409)
+    expect(await Notification.countDocuments({ type: 'post_interview_task_complete' })).toBe(1)
+  })
+  it('limits task creation to the employer after interview completion and validates the requested keys', async () => {
+    const { meeting } = await meetingFor()
+    const path = `/interviews/${meeting.id}/task`
+    const body = { requirements: ['identity'], instructions: 'Provide identity proof.' }
+    await api('post', path, 'Employer', employer, body).expect(409)
+    await api('post', path, 'Applicant', applicant, body).expect(403)
+    await api('post', `/interviews/${meeting.id}/respond`, 'Applicant', applicant, { action: 'confirm' }).expect(200)
+    await api('post', `/interviews/${meeting.id}/held`, 'Employer', employer, { confirmEarly: true, reason: 'Completed early.' }).expect(200)
+    for (const requirements of [[], ['unrequested'], ['identity', 'identity'], ['__proto__']]) await api('post', path, 'Employer', employer, { ...body, requirements }).expect(422)
+    await api('post', path, 'Employer', employer, body).expect(200)
+    await api('post', path, 'Employer', employer, body).expect(409)
+  })
+  it('rejects other accounts and invalid files without storing bytes', async () => {
+    const { meeting } = await documentTask(['identity'])
+    const other = await makeApplicant('other-document-owner@workflow.test')
+    await uploadTask(meeting, 'identity', pdfBuffer(), other).expect(403)
+    await uploadTask(meeting, 'qualifications').expect(409)
+    await uploadTask(meeting, 'identity', Buffer.from('not a PDF')).expect(422)
+    await uploadTask(meeting, 'identity', pdfBuffer(5 * 1024 * 1024 + 1)).expect(422)
+    expect(await PostInterviewFile.countDocuments()).toBe(0)
+    const uploaded = await uploadTask(meeting, 'identity').expect(200)
+    const fileId = uploaded.body.postInterviewTask.requirements[0].file.id
+    const filePath = `/api/workflow/interviews/${meeting.id}/task/files/${fileId}`
+    await request(app).get(filePath).set(auth('Applicant', other)).expect(403)
+    const otherEmployer = await Employer.create({ email: 'other-doc-employer@workflow.test', passwordHash: 'test', emailVerified: true, verificationStatus: 'approved', companyName: 'Other Company' })
+    await request(app).get(filePath).set(auth('Employer', otherEmployer)).expect(403)
+    await PostInterviewFile.updateOne({ _id: fileId }, { expiresAt: new Date(Date.now() - 1000) })
+    await request(app).get(filePath).set(auth('Employer', employer)).expect(410)
+  })
+  it('caps replacements and rejects completion against outdated file versions', async () => {
+    const { meeting } = await documentTask(['identity'])
+    const first = await uploadTask(meeting, 'identity').expect(200)
+    const firstId = first.body.postInterviewTask.requirements[0].file.id
+    const second = await uploadTask(meeting, 'identity').expect(200)
+    expect(second.body.postInterviewTask.requirements[0].file.version).toBe(2)
+    await api('post', `/interviews/${meeting.id}/task/complete`, 'Employer', employer, { files: { identity: firstId } }).expect(409)
+    await request(app).get(`/api/workflow/interviews/${meeting.id}/task/files/${firstId}`).set(auth('Employer', employer)).expect(403)
+    const third = await uploadTask(meeting, 'identity').expect(200)
+    expect(third.body.postInterviewTask.requirements[0].file.version).toBe(3)
+    await uploadTask(meeting, 'identity').expect(409)
+    expect(await PostInterviewFile.countDocuments({ interviewId: meeting.id })).toBe(3)
+  })
+  it('decodes image uploads, removes embedded metadata, and rejects mismatched MIME types', async () => {
+    const sharp = (await import('sharp')).default
+    const image = await sharp({ create: { width: 40, height: 30, channels: 3, background: '#ffffff' } }).jpeg().withMetadata({ orientation: 6 }).toBuffer()
+    const { meeting } = await documentTask(['identity'])
+    await uploadTask(meeting, 'identity', image, applicant, 'image/png').expect(422)
+    const result = await uploadTask(meeting, 'identity', image, applicant, 'image/jpeg').expect(200)
+    const file = result.body.postInterviewTask.requirements[0].file
+    expect(file.name).toBe('proof.jpg')
+    const downloaded = await request(app).get(`/api/workflow/interviews/${meeting.id}/task/files/${file.id}`).set(auth('Employer', employer)).expect(200)
+    const metadata = await sharp(downloaded.body).metadata()
+    expect(metadata).toMatchObject({ width: 30, height: 40, format: 'jpeg' })
+    expect(metadata.exif).toBeUndefined()
+    expect(metadata.orientation).toBeUndefined()
+  })
   it('removes a declined invitation from active applications, returns the open job, and allows a fresh application', async () => {
     const { meeting, referral } = await meetingFor()
     await api('post', `/interviews/${meeting.id}/respond`, 'Applicant', applicant, { action: 'decline', reason: 'Schedule conflict' }).expect(200)
@@ -279,8 +427,89 @@ describe('applications, interviews and admin-confirmed events', () => {
     expect((await Referral.findById(referral._id)).history.filter(event => event.action === 'peso_confirmed_interview_attendance')).toHaveLength(1)
   })
 
-  it('permits withdrawal before an interview and requires admin confirmation for a late-cancellation event', async () => {
+  it('requires explicit early completion consent and stores the actual confirmation time and reason', async () => {
+    const { meeting } = await meetingFor()
+    await api('post', `/interviews/${meeting.id}/respond`, 'Applicant', applicant, { action: 'confirm' }).expect(200)
+    const missing = await api('post', `/interviews/${meeting.id}/held`, 'Employer', employer, { confirmed: true }).expect(409)
+    expect(missing.body.code).toBe('EARLY_CONFIRMATION_REQUIRED')
+    await api('post', `/interviews/${meeting.id}/held`, 'Employer', employer, { confirmEarly: true }).expect(403)
+    const before = Date.now()
+    await api('post', `/interviews/${meeting.id}/held`, 'Employer', employer, { confirmEarly: true, reason: 'Interview took place early by agreement.', at: '2000-01-01' }).expect(200)
+    const saved = await Interview.findById(meeting.id).lean()
+    const decision = saved.history.find(entry => entry.action === 'employer_recorded_interview_held')
+    expect(+decision.at).toBeGreaterThanOrEqual(before)
+    expect(+decision.at).toBeLessThanOrEqual(Date.now())
+    expect(+decision.at).toBeLessThan(+saved.scheduledAt)
+    expect(decision.reason).toContain('Employer confirmed an early decision')
+    expect(decision.reason).toContain('Interview took place early by agreement.')
+    expect(decision.by).toBe('Employer')
+    expect(saved.status).toBe('held')
+  })
+  it('requires early no-show consent and retains the confirmation timestamp and PESO review', async () => {
+    const { meeting, referral } = await meetingFor()
+    await api('post', `/interviews/${meeting.id}/respond`, 'Applicant', applicant, { action: 'confirm' }).expect(200)
+    const path = '/api/applications/reports'
+    const body = { referralId: String(referral._id), type: 'no_show', reason: 'Employer recording the decision ahead of time.' }
+    const missing = await request(app).post(path).set(auth('Employer', employer)).send(body).expect(409)
+    expect(missing.body.code).toBe('EARLY_CONFIRMATION_REQUIRED')
+    const before = Date.now()
+    const result = await request(app).post(path).set(auth('Employer', employer)).send({ ...body, confirmEarly: true, at: '2000-01-01' }).expect(200)
+    const report = await ApplicationReport.findById(result.body.id).lean()
+    expect(+report.at).toBeGreaterThanOrEqual(before)
+    expect(report.status).toBe('pending')
+    expect(String(report.byId)).toBe(String(employer._id))
+    const saved = await Interview.findById(meeting.id).lean()
+    const decision = saved.history.find(entry => entry.action === 'employer_reported_no_show')
+    expect(+decision.at).toBe(+report.at)
+    expect(decision.reason).toContain('Employer confirmed an early decision')
+    const display = await api('get', `/referrals/${referral._id}/interview`, 'Employer', employer).expect(200)
+    expect(display.body.noShowReport.reportedAt).toBe(report.at.toISOString())
+    expect((await score()).trustValue).toBe(100)
+  })
+
+  it('lets the owning employer record a due interview, advances applicant progress, and sends a notification', async () => {
+    const { meeting } = await meetingFor()
+    await api('post', `/interviews/${meeting.id}/respond`, 'Applicant', applicant, { action: 'confirm' }).expect(200)
+    await api('post', `/interviews/${meeting.id}/held`, 'Employer', employer, { confirmed: true }).expect(409)
+    await api('post', `/interviews/${meeting.id}/held`, 'Applicant', applicant, { confirmed: true }).expect(403)
+    await Interview.updateOne({ _id: meeting.id }, { scheduledAt: new Date(Date.now() - 1000) })
+    const otherEmployer = await Employer.create({ email: 'other-interviewer@workflow.test', passwordHash: 'test', emailVerified: true, verificationStatus: 'approved', companyName: 'Other Company' })
+    await api('post', `/interviews/${meeting.id}/held`, 'Employer', otherEmployer, { confirmed: true }).expect(403)
+    await api('post', `/interviews/${meeting.id}/held`, 'Employer', employer, { confirmed: true }).expect(200)
+    const mine = await api('get', '/mine', 'Applicant', applicant).expect(200)
+    expect(mine.body.items[0]).toMatchObject({ status: 'interview_held', interview: { status: 'held' } })
+    expect(mine.body.items[0].actions).not.toContain('withdraw')
+    expect(await Notification.countDocuments({ type: 'interview_completed', 'recipient.id': applicant._id })).toBe(1)
+    await api('post', `/interviews/${meeting.id}/held`, 'Employer', employer, { confirmed: true }).expect(409)
+    expect((await score()).trustValue).toBe(100)
+  })
+
+  it('exposes the acceptance deadline in both APIs and blocks expired withdrawal without changing records', async () => {
     const { referral, meeting } = await meetingFor()
+    await api('post', `/interviews/${meeting.id}/respond`, 'Applicant', applicant, { action: 'confirm' }).expect(200)
+    const confirmed = await Interview.findById(meeting.id).lean()
+    const acceptance = confirmed.history.find(entry => entry.action === 'interview_confirmed').at
+    for (const path of ['/api/workflow/mine', '/api/applications/mine']) {
+      const result = await request(app).get(path).set(auth('Applicant', applicant)).expect(200)
+      const item = Array.isArray(result.body) ? result.body[0] : result.body.items[0]
+      expect(item.withdrawalDeadline).toBe(new Date(+acceptance + DAY).toISOString())
+      expect(item.actions).toContain('withdraw')
+    }
+    await Interview.updateOne({ _id: meeting.id }, { $set: { 'history.$[confirmation].at': new Date(Date.now() - DAY - 1000) } }, { arrayFilters: [{ 'confirmation.action': 'interview_confirmed' }] })
+    const denied = await request(app).post(`/api/applications/${referral.applicationId}/withdraw`).set(auth('Applicant', applicant)).expect(409)
+    expect(denied.body.code).toBe('WITHDRAWAL_WINDOW_CLOSED')
+    expect((await Interview.findById(meeting.id)).status).toBe('confirmed')
+    expect((await Referral.findById(referral._id)).status).not.toBe('withdrawn')
+    expect((await mongoose.model('JobApplication').findById(referral.applicationId)).deliveryStatus).toBe('delivered')
+    for (const path of ['/api/workflow/mine', '/api/applications/mine']) {
+      const result = await request(app).get(path).set(auth('Applicant', applicant)).expect(200)
+      expect((Array.isArray(result.body) ? result.body[0] : result.body.items[0]).actions).not.toContain('withdraw')
+    }
+  })
+
+  it('permits withdrawal within 24 hours of acceptance and requires admin confirmation for a late-cancellation event', async () => {
+    const { referral, meeting } = await meetingFor()
+    await api('post', `/interviews/${meeting.id}/respond`, 'Applicant', applicant, { action: 'confirm' }).expect(200)
     await Interview.updateOne({ _id: meeting.id }, { scheduledAt: new Date(Date.now() + 3600000) })
     await request(app).post(`/api/applications/${referral.applicationId}/withdraw`).set(auth('Applicant', applicant)).expect(200)
     expect((await score()).trustValue).toBe(100)

@@ -1,9 +1,14 @@
+import SkillTagPicker from './components/SkillTagPicker'
 import MyApplicationsPage from './components/MyApplicationsPage'
+import ApplicantReputationPage from './components/ApplicantReputationPage'
+import PortalNotice from './components/PortalNotice'
+import { showNotice } from './utils/portalNotice'
+import { fetchWithTimeout } from './utils/fetchWithTimeout'
+import JobScreeningSummary from './components/JobScreeningSummary'
 import { applicantProfileContent } from '../shared/applicantProfile.js'
 import EditableProfileCover from './components/EditableProfileCover'
 import { PH_LOCATIONS as albayLocations, getEmployerJobAddress as getEmployerAddress } from '../shared/phLocations.js'
 import { useCallback, useEffect, useRef, useState } from "react"
-import { createPortal } from "react-dom"
 import { API_URL } from "./config"
 import { JOB_SKILL_OPTIONS as availableSkills } from '../shared/jobSkills.js'
 import JobsView from "./components/JobsView"
@@ -95,6 +100,7 @@ const navigationByRole = {
     { id: "dashboard", label: "Home" },
     { id: "employment-reports", label: "Employment updates" },
     { id: "my-applications", label: "My applications" },
+    { id: "my-reputation", label: "My reputation" },
     { id: "jobs", label: "Jobs" },
     { id: "reputation", label: "Reviews" },
     { id: "notify", label: "Notifications" },
@@ -255,74 +261,6 @@ const toggleSkill = (selected, skill) => {
   return [...normalized, skill]
 }
 
-// Tag-style skill/title picker: selected items as removable chips + "Add title" search input
-function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }) {
-  const [query, setQuery] = useState('')
-  const normalized = Array.isArray(selected) ? selected : []
-  const trimmed = query.trim()
-  const suggestions = trimmed
-    ? availableSkills.filter((skill) => skill.toLowerCase().includes(trimmed.toLowerCase()) && !normalized.includes(skill)).slice(0, 8)
-    : []
-  const inputCls = 'shared-form-control w-full rounded-2xl px-3 py-2 text-sm'
-  const suggestionCls = theme === 'dark'
-    ? 'cursor-pointer px-3 py-2 text-sm text-slate-200 hover:bg-slate-700'
-    : 'cursor-pointer px-3 py-2 text-sm text-black hover:bg-slate-100'
-  const chipCls = theme === 'dark'
-    ? 'inline-flex items-center gap-2 rounded-full border border-cyan-500/40 bg-cyan-500/10 px-3 py-1 text-sm font-medium text-cyan-200'
-    : 'inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1 text-sm font-medium text-black'
-  return (
-    <div className="skill-tag-picker mt-2 space-y-2">
-      {normalized.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {normalized.map((skill) => (
-            <span key={skill} className={`skill-tag-chip ${chipCls}`}>
-              {skill}
-              {!disabled && (
-                <button
-                  type="button"
-                  aria-label={`Remove ${skill}`}
-                  onClick={() => onChange(normalized.filter((item) => item !== skill))}
-                  className={`skill-tag-remove ${theme === 'dark' ? 'text-cyan-300 hover:text-white' : 'text-slate-500 hover:text-black'}`}
-                >
-                  ×
-                </button>
-              )}
-            </span>
-          ))}
-        </div>
-      )}
-      {!disabled && (
-        <div className="relative">
-          <input
-            type="text"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Add title"
-            className={`skill-tag-input ${inputCls}`}
-          />
-          {suggestions.length > 0 && (
-            <div className={`skill-tag-suggestions absolute z-20 mt-1 w-full overflow-hidden rounded-xl border ${theme === 'dark' ? 'border-slate-700 bg-slate-900' : 'border-slate-300 bg-white'} shadow-lg`}>
-              {suggestions.map((skill) => (
-                <button
-                  key={skill}
-                  type="button"
-                  onClick={() => {
-                    onChange([...normalized, skill])
-                    setQuery('')
-                  }}
-                  className={`skill-tag-suggestion block w-full text-left ${suggestionCls}`}
-                >
-                  {skill}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
   const [authView, setAuthView] = useState(() => {
     try {
       const saved = sessionStorage.getItem('peso-auth-view')
@@ -405,7 +343,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
   const [selectedJob, setSelectedJob] = useState(null)
   const [selectedNotification, setSelectedNotification] = useState(null)
   const [referralPrefill, setReferralPrefill] = useState({ jobId: '', applicantIds: [] })
-  const [appMessage, setAppMessage] = useState(null)
+  const setAppMessage = useCallback(message => { if (message) showNotice(message.text, message.type) }, [])
   const [approvalNotice, setApprovalNotice] = useState(false)
   // Promise-based confirm dialog (one instance, used by every approve/decline flow)
   const [confirmDialog, setConfirmDialog] = useState(null)
@@ -435,13 +373,13 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
     if (!confirmDialog?.onConfirm || confirmBusy) return
     setConfirmBusy(true)
     setConfirmError('')
-    const result = await confirmDialog.onConfirm(reason)
-    setConfirmBusy(false)
-    if (result?.error) {
-      setConfirmError(result.error)
-      return
-    }
-    closeConfirmDialog({ confirmed: true, reason })
+    try {
+      const result = await confirmDialog.onConfirm(reason)
+      if (result?.error) { setConfirmError(result.error); return }
+      closeConfirmDialog({ confirmed: true, reason })
+    } catch (error) {
+      setConfirmError(error?.message || 'This action could not be completed. Please try again.')
+    } finally { setConfirmBusy(false) }
   }, [confirmDialog, confirmBusy, closeConfirmDialog])
   const [showVerificationModal, setShowVerificationModal] = useState(false)
   const [reviewDocsApplicant, setReviewDocsApplicant] = useState(null)
@@ -491,7 +429,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
       .then((r) => r.json())
       .then((data) => {
         if (data.error) {
-          alert(data.error)
+          showNotice(data.error)
           return { ok: false }
         }
         // Saving the profile confirms the (possibly migrated) name
@@ -500,7 +438,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
       })
       .catch((err) => {
         console.error(err)
-        alert('Save failed')
+        showNotice('Save failed')
         return { ok: false }
       })
   }
@@ -553,11 +491,11 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
 
   const handleImageFile = (file, field) => {
     if (!file) return
-    if (!file.type.startsWith('image/')) return alert('Choose an image file.')
-    if (file.size > 2 * 1024 * 1024) return alert('Image must be under 2 MB')
+    if (!file.type.startsWith('image/')) return showNotice('Choose an image file.')
+    if (file.size > 2 * 1024 * 1024) return showNotice('Image must be under 2 MB')
     const reader = new FileReader()
     reader.onload = () => { setProfileData((current) => ({ ...current, [field]: reader.result })); setIsEditingProfile(true) }
-    reader.onerror = () => alert('The image could not be read. Please select it again.')
+    reader.onerror = () => showNotice('The image could not be read. Please select it again.')
     reader.readAsDataURL(file)
   }
   const saveProfileEdits = async () => {
@@ -566,16 +504,16 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
       const extra = activeRole === 'Employer' ? { companyName: profileData.companyName, contactName: profileData.contactName, phone: profileData.phone, website: profileData.website } : {}
       const profile = activeRole === 'Employer' ? { ...(currentUser?.profile || {}), location: profileData.location, website: profileData.website, summary: profileData.summary, profileImage: profileData.profileImage || '', bannerImage: profileData.bannerImage || '' } : profileData
       const result = await saveProfile(profile, extra)
-      if (result.ok) { setProfileData(normalizeProfile({ ...currentUser, ...extra, profile: result.data.profile || profile }, activeRole)); setIsEditingProfile(false); alert('Profile saved!') }
+      if (result.ok) { setProfileData(normalizeProfile({ ...currentUser, ...extra, profile: result.data.profile || profile }, activeRole)); setIsEditingProfile(false); showNotice('Profile saved!', 'success') }
     } finally { setProfileSaving(false) }
   }
   const cancelProfileEdits = () => { setProfileData(normalizeProfile(currentUser, currentUser?.role)); setIsEditingProfile(false) }
 
   const handleViewResume = async () => {
     const token = getToken()
-    if (!token) return alert('Not authenticated')
+    if (!token) return showNotice('Not authenticated')
     const applicantId = currentUser?.id || currentUser?._id
-    if (!applicantId) return alert('Applicant record not found')
+    if (!applicantId) return showNotice('Applicant record not found')
     const preview = window.open('', '_blank')
     try {
       const response = await fetch(`${API_URL}/api/applicants/${applicantId}/resume`, {
@@ -584,7 +522,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
       if (!response.ok) {
         preview?.close()
         const data = await response.json().catch(() => null)
-        return alert(data?.error || 'Resume could not be opened')
+        return showNotice(data?.error || 'Resume could not be opened')
       }
       const blob = await response.blob()
       const url = URL.createObjectURL(blob)
@@ -594,7 +532,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
     } catch (err) {
       preview?.close()
       console.error(err)
-      alert('Failed to open resume')
+      showNotice('Failed to open resume')
     }
   }
 
@@ -882,7 +820,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
     setJobFieldErrors(errors)
     if (Object.keys(errors).length) { focusJobError(form); return }
     const token = getToken()
-    if (!token) return alert('Not authenticated')
+    if (!token) return showNotice('Not authenticated')
     setJobSubmitting(true)
     try {
       const response = await fetch(`${API_URL}/api/jobs`, {
@@ -891,17 +829,17 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
       const data = await response.json()
       if (!response.ok || data.error) {
         if (data.fieldErrors) { setJobFieldErrors(data.fieldErrors); focusJobError(form) }
-        else alert(data.error || 'Failed to submit job request')
+        else showNotice(data.error || 'Failed to submit job request')
         return
       }
       setJobForm(emptyJobPosting())
       setShowCreateJobPosting(false)
       fetchJobs()
       fetchNotifications()
-      setJobSubmittedOpen(true)
+      setJobSubmittedOpen({ status: data.status, moderation: data.moderation })
     } catch (err) {
       console.error(err)
-      alert('Failed to submit job request')
+      showNotice('Failed to submit job request')
     } finally { setJobSubmitting(false) }
   }
 
@@ -942,7 +880,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
     if (Object.keys(errors).length) { focusJobError(form); return }
 
     const token = getToken()
-    if (!token) return alert('Not authenticated')
+    if (!token) return showNotice('Not authenticated')
 
     setJobSubmitting(true)
     try {
@@ -958,10 +896,10 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
       setEditingJob(null)
       fetchJobs()
       fetchNotifications()
-      alert('Job posting updated successfully')
+      showNotice('Job posting updated successfully', 'success')
     } catch (err) {
       console.error(err)
-      alert(err?.message || 'Failed to update job posting')
+      showNotice(err?.message || 'Failed to update job posting')
     } finally { setJobSubmitting(false) }
   }
 
@@ -987,7 +925,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
       if (!confirmation.confirmed) return { ok: false, cancelled: true }
     }
 
-    return fetch(`${API_URL}/api/jobs/${jobId}/status`, {
+    return fetchWithTimeout(`${API_URL}/api/jobs/${jobId}/status`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ status, reason: status === 'declined' ? declineReasonValue : '' }),
@@ -1004,22 +942,22 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
         fetchJobs()
         fetchNotifications()
         setSelectedNotification(null)
-        if (!options.silent) alert(`Job ${status}`)
+        if (!options.silent) showNotice(`Job ${status}`, 'success')
         return { ok: true, job: data }
       })
       .catch((err) => {
         console.error(err)
         const error = err?.message || 'Failed to update job status'
-        if (!options.silent) alert(error)
+        if (!options.silent) showNotice(error)
         return { error }
       })
   }
 
   const handleBulkReviewJobs = async (jobIds, status) => {
     const token = getToken()
-    if (!token) return alert('Not authenticated')
+    if (!token) return showNotice('Not authenticated')
     const ids = Array.isArray(jobIds) ? jobIds : []
-    if (ids.length === 0) return alert('Select at least one job posting first')
+    if (ids.length === 0) return showNotice('Select at least one job posting first')
 
     const isApprove = status === 'approved'
     const confirmation = await requestConfirm({
@@ -1034,7 +972,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
         if (!isApprove && reason.trim().length > 500) return { error: 'The decline reason must be 500 characters or fewer' }
         try {
           const results = await Promise.all(ids.map((jobId) =>
-            fetch(`${API_URL}/api/jobs/${jobId}/status`, {
+            fetchWithTimeout(`${API_URL}/api/jobs/${jobId}/status`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
               body: JSON.stringify({ status, reason: reason || '' }),
@@ -1085,7 +1023,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
         setCurrentUser((current) => ({ ...current, profile: profile.profile }))
         setProfileData((current) => ({ ...current, skills: profile.profile?.skills || [] }))
       }
-      alert(data?.deliveryStatus === 'pending_admin' ? 'Application submitted. PESO will review the referral.' : 'Application submitted and shared with the employer.')
+      showNotice(data?.deliveryStatus === 'pending_admin' ? 'Application submitted. PESO will review the referral.' : 'Application submitted and shared with the employer.', 'success')
       return { ok: true }
     } catch (err) {
       console.error(err)
@@ -1097,7 +1035,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
     const token = getToken()
     if (!token) return { error: 'Not authenticated' }
     try {
-      const response = await fetch(`${API_URL}/api/applicants/${applicantId}/verification`, {
+      const response = await fetchWithTimeout(`${API_URL}/api/applicants/${applicantId}/verification`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(status === 'unrestrict' ? { action: 'unrestrict' } : { status }),
@@ -1118,7 +1056,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
     const token = getToken()
     if (!token) return { error: 'Not authenticated' }
     try {
-      const response = await fetch(`${API_URL}/api/employer-requests/${requestId}/status`, {
+      const response = await fetchWithTimeout(`${API_URL}/api/employer-requests/${requestId}/status`, {
         method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ status, reason: reason.trim(), unresolved }),
@@ -1227,7 +1165,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
     const token = getToken()
     if (!token) {
       if (isReferred) return setAppMessage({ type: 'error', text: 'Not authenticated. Please sign in again.' })
-      return alert('Not authenticated')
+      return showNotice('Not authenticated')
     }
 
     const applicant = adminUsers.find(
@@ -1237,7 +1175,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
     if (!applicant) {
       fetchAdminUsers()
       if (isReferred) return setAppMessage({ type: 'error', text: 'Applicant record not found yet. Please try again in a moment.' })
-      return alert('Applicant record not found yet. Please try again in a moment.')
+      return showNotice('Applicant record not found yet. Please try again in a moment.')
     }
 
     const applicantId = String(applicant.id || applicant._id)
@@ -1259,22 +1197,22 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
       if (isReferred) {
         setAppMessage({ type: 'success', text: 'Referral cancelled successfully.' })
       } else {
-        alert(data?.createdCount === 0 ? 'Applicant was already referred' : 'Applicant referred successfully')
+        showNotice(data?.createdCount === 0 ? 'Applicant was already referred' : 'Applicant referred successfully', data?.createdCount === 0 ? 'info' : 'success')
       }
     } catch (err) {
       console.error(err)
       if (isReferred) {
         setAppMessage({ type: 'error', text: err?.message || 'Failed to cancel referral.' })
       } else {
-        alert(err?.message || 'Failed to create referral')
+        showNotice(err?.message || 'Failed to create referral')
       }
     }
   }
 
   const handleBulkReferApplicants = async (jobId, applicantIdsArray) => {
     const token = getToken()
-    if (!token) return alert('Not authenticated')
-    if (!Array.isArray(applicantIdsArray) || applicantIdsArray.length === 0) return alert('Select at least one applicant to refer.')
+    if (!token) return showNotice('Not authenticated')
+    if (!Array.isArray(applicantIdsArray) || applicantIdsArray.length === 0) return showNotice('Select at least one applicant to refer.')
     const confirmation = await requestConfirm({ title: 'Create referrals', note: `Refer ${applicantIdsArray.length} selected applicant(s). This action is recorded.`, requireReason: true, reasonMinLength: 1, onConfirm: async () => ({ ok: true }) })
     if (!confirmation.confirmed) return
 
@@ -1288,10 +1226,10 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
       if (!response.ok || data?.error) throw new Error(data?.error || `Request failed: ${response.status}`)
       fetchJobs()
       fetchNotifications()
-      alert(data?.createdCount === 0 ? 'Selected applicants were already referred' : `Referred ${data?.createdCount} applicant${data?.createdCount === 1 ? '' : 's'} successfully`)
+      showNotice(data?.createdCount === 0 ? 'Selected applicants were already referred' : `Referred ${data?.createdCount} applicant${data?.createdCount === 1 ? '' : 's'} successfully`, data?.createdCount === 0 ? 'info' : 'success')
     } catch (err) {
       console.error(err)
-      alert(err?.message || 'Failed to refer selected applicants')
+      showNotice(err?.message || 'Failed to refer selected applicants')
     }
   }
 
@@ -1539,7 +1477,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
     })
       .then((r) => r.json())
       .then((data) => {
-        if (data.error) return alert(data.error)
+        if (data.error) return showNotice(data.error)
 
         if (rememberMe) {
           localStorage.setItem('peso-portal-remembered-email', formData.email)
@@ -1563,7 +1501,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
       })
       .catch((err) => {
         console.error(err)
-        alert('Login failed')
+        showNotice('Login failed')
       })
   }
 
@@ -1609,23 +1547,23 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
     if (Object.keys(nameErrors).length > 0) return
     const passwordErrors = validatePassword(signupForm.password)
     if (passwordErrors.length > 0) {
-      alert('Password requirements not met. Check the rules under the password field.')
+      showNotice('Password requirements not met. Check the rules under the password field.')
       return
     }
     if (signupForm.password !== signupForm.confirmPassword) {
-      alert('Passwords do not match')
+      showNotice('Passwords do not match')
       return
     }
     if (!signupConsent) {
-      alert('Please agree to the data privacy consent to continue')
+      showNotice('Please agree to the data privacy consent to continue')
       return
     }
     if (!validateVerificationDocs(signupDocs, signupConsent)) {
-      alert('Please complete all required verification documents (NSRP form, birth certificate, and Valid ID #1 front)')
+      showNotice('Please complete all required verification documents (NSRP form, birth certificate, and Valid ID #1 front)')
       return
     }
     if (!signupResumeFile) {
-      alert('Please upload your resume (PDF, DOCX, JPG, or PNG; maximum 5 MB)')
+      showNotice('Please upload your resume (PDF, DOCX, JPG, or PNG; maximum 5 MB)')
       return
     }
     setSignupUploading(true)
@@ -1670,10 +1608,10 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
       setSignupConsent(false)
       setSignupProgress("")
       setAuthView("login")
-      alert('Account created. Your documents were submitted for admin review.')
+      showNotice('Account created. Your documents were submitted for admin review.', 'success')
     } catch (err) {
       console.error(err)
-      alert(err?.message || 'Signup failed')
+      showNotice(err?.message || 'Signup failed')
       setSignupProgress("")
     } finally {
       setSignupUploading(false)
@@ -2238,26 +2176,6 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
           {activeRole === 'Admin' && <AutomaticReferralBanner token={getToken()} onOpen={() => setActiveView('peso-referrals')} />}
           {activeRole === 'Admin' && <AdminNsrpAutomation key={activeView} token={getToken()} bannerOnly={activeView !== 'verification-rules'} />}
           {activeRole === 'Admin' && ['verification-flagged', 'verification-auto'].includes(activeView) && <AdminDocumentVerification key={activeView} token={getToken()} queue={activeView === 'verification-auto' ? 'auto' : 'flagged'} />}
-          {appMessage && createPortal(
-            <div
-              role="status"
-              className={`fixed left-3 right-3 top-3 z-[1000] flex items-center justify-between gap-4 rounded-2xl border px-4 py-3 text-sm shadow-xl sm:left-6 sm:right-6 ${
-                appMessage.type === 'error'
-                  ? 'border-rose-400 bg-rose-950 text-rose-100'
-                  : 'border-cyan-400 bg-cyan-950 text-cyan-100'
-              }`}
-            >
-              <p className="min-w-0 break-words">{appMessage.text}</p>
-              <button
-                type="button"
-                onClick={() => setAppMessage(null)}
-                className="shrink-0 rounded-full border border-current px-3 py-1 text-xs font-semibold"
-              >
-                Dismiss
-              </button>
-            </div>,
-            document.body
-          )}
           {approvalNotice && activeRole === 'Employer' && (
             <section className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-green-300 bg-green-50 p-5 text-green-950" role="status">
               <div>
@@ -2589,7 +2507,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
             <AdminEmploymentUpdatesPage key={`${hiringUpdates.applicantId || ''}:${hiringUpdates.jobId || ''}`} token={getToken()} applicantId={hiringUpdates.applicantId} jobId={hiringUpdates.jobId} />
           )}
           {activeRole === 'Admin' && clientFeedbackOpen && <AdminCsmFeedbackModal token={getToken()} onClose={() => setClientFeedbackOpen(false)} />}
-          {jobSubmittedOpen && <Modal onClose={() => setJobSubmittedOpen(false)} labelledBy="job-submitted-title" maxWidth="max-w-md"><h2 id="job-submitted-title" className="text-xl font-bold text-slate-900">Job request submitted for review</h2><p className="mt-3 text-sm text-slate-600">PESO will review your job posting. You can track its status in Job Postings.</p><button type="button" onClick={() => setJobSubmittedOpen(false)} className="mt-5 rounded-full bg-blue-600 px-5 py-2 text-sm font-semibold text-white">Done</button></Modal>}
+          {jobSubmittedOpen && <Modal onClose={() => setJobSubmittedOpen(false)} labelledBy="job-submitted-title" maxWidth="max-w-md"><h2 id="job-submitted-title" className="text-xl font-bold text-slate-900">{jobSubmittedOpen.status === 'approved' ? 'Job posting published' : 'Job request submitted for review'}</h2><p className="mt-3 text-sm text-slate-600">{jobSubmittedOpen.status === 'approved' ? 'Your job posting passed automatic safety screening and is now visible to applicants.' : 'PESO will review your job posting. You can track its status in Job Postings.'}</p><JobScreeningSummary moderation={jobSubmittedOpen.moderation} /><button type="button" onClick={() => setJobSubmittedOpen(false)} className="mt-5 rounded-full bg-blue-600 px-5 py-2 text-sm font-semibold text-white">Done</button></Modal>}
 
           {activeView === "profile" && (<section className={`${activeRole === 'Employer' ? 'employer-profile-card portal-card' : activeRole === 'Applicant' ? 'applicant-profile-card portal-card' : ''} rounded-2xl border border-slate-800 bg-slate-900/70 p-6`}>
               {activeRole === 'Applicant' ? (
@@ -3002,6 +2920,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
           )}
 
           {activeView === "my-applications" && activeRole === "Applicant" && <MyApplicationsPage token={getToken()} onDeclined={() => { fetchJobs(); setActiveView('jobs') }} />}
+          {activeView === 'my-reputation' && activeRole === 'Applicant' && <ApplicantReputationPage token={getToken()} onOpenApplications={() => setActiveView('my-applications')} />}
           {activeView === "referrals" && activeRole === "Employer" && (
             <ReferralList
               profileImage={profileData.profileImage}
@@ -3394,4 +3313,6 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
   )
 }
 
-export default App
+export default function PortalApp() {
+  return <><PortalNotice /><App /></>
+}

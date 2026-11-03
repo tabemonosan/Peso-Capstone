@@ -63,7 +63,7 @@ export default function JobPostingFields({ value, onChange, categories, suggesti
   const bounds = deadlineBounds()
   const warning = !value.negotiable ? minimumWageWarning(parseAmount(value.salaryMin), value.payFrequency, value.province) : ''
   return <div className="mt-4 space-y-6 text-black">
-    <p className="text-xs text-slate-600">* Required fields</p>
+    <p className="text-sm text-slate-600">Complete all fields marked with an asterisk (*). Other fields are optional.</p>
     <fieldset disabled={disabled} className="space-y-4"><legend className="mb-3 text-base font-semibold">Job Details</legend>
       <JobTitlePicker id={`${id}-title`} categories={categories} title={value.title} customTitle={value.customTitle} onChange={(next) => onChange({ ...value, ...next })} disabled={disabled} onBlur={() => blur('title')} error={errors.title} />
       {field('description', 'Description', { textarea: true, required: true, maxLength: JOB_LIMITS.descriptionMax })}

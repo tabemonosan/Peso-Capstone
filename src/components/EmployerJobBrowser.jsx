@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { formatLocation } from '../../shared/jobPosting.js'
 import JobPostingDetails from './JobPostingDetails'
+import JobScreeningSummary from './JobScreeningSummary'
 
 export default function EmployerJobBrowser({ jobs, onEdit, profileImage = '' }) {
   const [selectedId, setSelectedId] = useState(null)
@@ -18,7 +19,7 @@ export default function EmployerJobBrowser({ jobs, onEdit, profileImage = '' }) 
       </button>)}
     </section>
     <article ref={detailsRef} tabIndex={0} className="job-browser-details" aria-label={`${selected.title} job details`}>
-      <div className="job-browser-detail-content"><JobPostingDetails job={selected} onEdit={onEdit ? () => onEdit(selected) : undefined} /></div>
+      <div className="job-browser-detail-content"><JobPostingDetails job={selected} onEdit={onEdit ? () => onEdit(selected) : undefined} /><JobScreeningSummary moderation={selected.moderation} /></div>
     </article>
   </div>
 }

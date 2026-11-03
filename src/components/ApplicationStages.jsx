@@ -3,14 +3,15 @@ const stages = ['Invitation received', 'Invitation accepted', 'Post-interview ta
 export default function ApplicationStages({ application, audience = 'applicant' }) {
   const { status, interview } = application
   const employer = audience === 'employer'
-  const steps = employer ? ['Invitation sent', ...stages.slice(1)] : stages
+  const noShow = status?.startsWith('no_show_') || interview?.status === 'missed'
+  const steps = (employer ? ['Invitation sent', ...stages.slice(1)] : stages).map((label, index) => index === 2 && noShow ? 'Interview result review' : label)
   const outcome = ['hired', 'deployed', 'not_hired'].includes(status)
   const held = ['held', 'attended'].includes(interview?.status) || ['interview_held', 'interview_attended'].includes(status)
   const confirmed = ['confirmed', 'missed'].includes(interview?.status) || status === 'interview_confirmed'
-  const current = outcome ? 4 : held ? 3 : confirmed ? 2 : 1
+  const current = outcome ? 4 : held || noShow ? 3 : confirmed ? 2 : 1
   const paused = ['withdrawn', 'withdrawn_by_admin', 'declined', 'declined_by_admin', 'interview_declined', 'interview_cancelled', 'no_show_pending', 'no_show_responded', 'no_show_confirmed', 'no_show_dismissed'].includes(status)
-  const recorded = [Boolean(interview), confirmed || held, held, outcome]
-  const message = paused ? 'Progress is paused. Check the application status and timeline for the latest update.'
+  const recorded = [Boolean(interview), confirmed || held || noShow, held, outcome]
+  const message = noShow && !outcome ? ['no_show_pending', 'no_show_responded'].includes(status) ? 'A no-show was reported. Step 3 is under PESO review while the applicant has an opportunity to respond.' : 'PESO reviewed the no-show report. Check the application status and timeline for the result.' : paused ? 'Progress is paused. Check the application status and timeline for the latest update.'
     : outcome ? employer ? `You reported this applicant as ${status.replaceAll('_', ' ')}.` : status === 'not_hired' ? 'The employer reported that you were not selected.' : 'The employer reported that you were accepted for the job.'
       : held ? employer ? 'Interview recorded as held. Provide any post-interview task and report the final hiring outcome.' : 'The interview was recorded as held. Complete any post-interview task the employer provides while awaiting the final outcome.'
         : confirmed ? employer ? 'The applicant accepted the invitation. Hold the interview at the scheduled time.' : 'You accepted the invitation. Attend the interview at the scheduled time.'

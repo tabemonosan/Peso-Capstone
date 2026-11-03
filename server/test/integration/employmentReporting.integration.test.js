@@ -178,6 +178,18 @@ describe('PESO employment reporting', () => {
     const dashboard = await request(app).get('/api/dashboard').set(auth('Admin'))
     expect(dashboard.body.stats.hires).toBe(1)
   })
+  it('locks an employer report after submission and preserves its date, notes and history', async () => {
+    const first = await request(app).post('/api/hire-reports').set(auth('Employer')).send(payload({ employmentDate: '2026-01-02', notes: 'Final HR outcome' })).expect(200)
+    const notificationsBefore = await Notification.countDocuments()
+    const rejected = await request(app).post('/api/hire-reports').set(auth('Employer')).send(payload({ status: 'not_hired', notes: 'Changed outcome' })).expect(409)
+    expect(rejected.body.code).toBe('EMPLOYER_REPORT_LOCKED')
+    expect(rejected.body.report._id).toBe(first.body._id)
+    const saved = await HireReport.findById(first.body._id).lean()
+    expect(saved).toMatchObject({ status: 'hired', employmentDate: '2026-01-02', notes: 'Final HR outcome', history: [] })
+    expect(saved.reportedAt.toISOString()).toBe(first.body.reportedAt)
+    expect(await HireReport.countDocuments()).toBe(1)
+    expect(await Notification.countDocuments()).toBe(notificationsBefore)
+  })
 
   it('allows employers to report not hired without counting it as a hire or allowing a rating', async () => {
     const result = await request(app).post('/api/hire-reports').set(auth('Employer')).send(payload({ status: 'not_hired', notes: 'Position filled' }))
@@ -241,12 +253,14 @@ describe('PESO employment reporting', () => {
     expect((await request(app).post('/api/hire-reports').set(auth('Applicant')).send(payload({ referralId: undefined }))).status).toBe(403)
   })
 
-  it('updates legacy employer reports without creating a second report', async () => {
+  it('locks legacy employer reports without changing them or creating a second report', async () => {
     const legacy = await HireReport.collection.insertOne({ applicantId: applicant._id, employerId: employer._id, jobId: job._id, referralId: referral._id, status: 'hired', reportedAt: new Date('2026-01-01') })
     const response = await request(app).post('/api/hire-reports').set(auth('Employer')).send(payload({ status: 'deployed' }))
-    expect(response.status).toBe(200)
-    expect(response.body._id).toBe(String(legacy.insertedId))
-    expect(response.body.history[0].status).toBe('hired')
+    expect(response.status).toBe(409)
+    expect(response.body.code).toBe('EMPLOYER_REPORT_LOCKED')
+    expect(response.body.report._id).toBe(String(legacy.insertedId))
+    expect((await HireReport.findById(legacy.insertedId)).status).toBe('hired')
+    expect(await HireReport.countDocuments()).toBe(1)
   })
 
   it('retains NSRP binaries and answers while supporting document binaries expire', async () => {

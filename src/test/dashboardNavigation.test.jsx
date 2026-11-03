@@ -17,11 +17,24 @@ function mockRole(role, overrides = {}) {
     else if (url.endsWith('/api/dashboard')) data = { ...dashboard(role), stats: { ...dashboard(role).stats, verificationStatus: user.verificationStatus } }
     else if (url.includes('/api/admin/employment-updates')) data = { items: [], total: 0 }
     else if (url.includes('/api/notifications')) data = { items: [], unreadCount: 0 }
+    else if (url.includes('/api/workflow/reputation')) data = { points: 100, policy: [], items: [], total: 0 }
     else if (url.endsWith('/api/employer/verification')) data = { verificationStatus: 'approved' }
     return { ok: true, json: async () => data }
   }))
 }
 describe('one dashboard per role', () => {
+  it('opens the applicant reputation window without replacing the existing Reviews page', async () => {
+    mockRole('Applicant')
+    localStorage.setItem('peso-token', 'token')
+    localStorage.setItem('peso-active-role', 'Applicant')
+    render(<App />)
+    const nav = await screen.findByRole('navigation', { name: 'Applicant navigation' })
+    fireEvent.click(within(nav).getByRole('button', { name: 'My reputation', exact: true }))
+    expect(await screen.findByRole('heading', { name: 'My reputation' })).toBeInTheDocument()
+    expect(await screen.findByLabelText('100 out of 100 reputation points')).toBeInTheDocument()
+    expect(within(nav).getByRole('button', { name: 'Reviews', exact: true })).toBeInTheDocument()
+    expect(localStorage.getItem('peso-active-view')).toBe('my-reputation')
+  })
   it('opens the admin hiring updates page from the Hires card', async () => {
     mockRole('Admin')
     localStorage.setItem('peso-token', 'token')

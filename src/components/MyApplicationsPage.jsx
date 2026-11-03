@@ -9,6 +9,8 @@ import ApplicationReportButton from './ApplicationReportButton'
 import ConfirmDialog from './ConfirmDialog'
 import Modal from './Modal'
 import Pagination from './Pagination'
+import ApplicationWithdrawal from './ApplicationWithdrawal'
+import PostInterviewTask from './PostInterviewTask'
 
 export default function MyApplicationsPage({ token, onDeclined }) {
   const [data, setData] = useState({ items: [], total: 0, account: {} }), [page, setPage] = useState(1), [limit, setLimit] = useState(10), [order, setOrder] = useState('desc')
@@ -62,7 +64,9 @@ export default function MyApplicationsPage({ token, onDeclined }) {
       {application.interview && <div className="mt-4 rounded-xl border border-blue-100 bg-slate-50 p-4 text-sm"><p className="font-semibold">Interview: {workflowDate(application.interview.scheduledAt)}</p><p className="mt-1 text-slate-600">{application.interview.mode} · {application.interview.location}</p>{application.interview.message && <p className="mt-2 text-slate-700">{application.interview.message}</p>}</div>}
       {application.noShowReport && <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950"><p>{['confirmed', 'dismissed'].includes(application.noShowReport.status) ? 'PESO has completed its review of the missed-interview report.' : 'The employer reported a missed interview. PESO reviews the report and your response.'}</p>{application.noShowReport.responseDeadline && <p className="mt-2 font-semibold">Response deadline: {workflowDate(application.noShowReport.responseDeadline)}</p>}{application.noShowReport.applicantResponse && <p className="mt-2">Your response: {application.noShowReport.applicantResponse}</p>}{application.noShowReport.status === 'pending' && !application.actions.includes('respond_no_show') && <p className="mt-2">The response deadline has passed. PESO will review the record.</p>}</div>}
       <details className="mt-4 text-sm"><summary>Application timeline</summary><ApplicationTimeline history={publicApplicationHistory(application.history)} /></details>
-      <div className="mt-4 flex flex-wrap items-center gap-2">{application.actions.filter((type) => labels[type]).map((type) => <button type="button" key={type} onClick={() => { setError(''); setAction({ type, application }) }} className="rounded-full border border-blue-200 bg-blue-50 px-4 py-2 text-xs font-semibold text-blue-800">{labels[type]}</button>)}{application.actions.includes('view_outcome') && <button type="button" onClick={() => setOutcome(application)} className="rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-800">View outcome</button>}</div>
+      {application.interview && <PostInterviewTask token={token} interviewId={application.interview.id} task={application.postInterviewTask} readOnly={['withdrawn', 'withdrawn_by_admin', 'declined', 'declined_by_admin', 'hired', 'deployed', 'not_hired'].includes(application.status)} onChanged={load} />}
+      <div className="mt-4 flex flex-wrap items-center gap-2">{application.actions.filter((type) => type !== 'withdraw' && labels[type]).map((type) => <button type="button" key={type} onClick={() => { setError(''); setAction({ type, application }) }} className="rounded-full border border-blue-200 bg-blue-50 px-4 py-2 text-xs font-semibold text-blue-800">{labels[type]}</button>)}{application.actions.includes('view_outcome') && <button type="button" onClick={() => setOutcome(application)} className="rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-800">View outcome</button>}</div>
+      <ApplicationWithdrawal application={application} onWithdraw={() => { setError(''); setAction({ type: 'withdraw', application }) }} />
       {application.actions.includes('report_problem') && <ApplicationReportButton token={token} referralId={application.referralId} onSubmitted={load} />}
     </article>)}
       </section>

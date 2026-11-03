@@ -1,6 +1,7 @@
 import { API_URL } from '../config'
+import { fetchWithTimeout } from './fetchWithTimeout'
 export async function workflowRequest(token, path, body) {
-  const response = await fetch(`${API_URL}/api/workflow${path}`, { method: body ? 'POST' : 'GET', headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) })
+  const response = await fetchWithTimeout(`${API_URL}/api/workflow${path}`, { method: body ? 'POST' : 'GET', headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) })
   const result = await response.json()
   if (!response.ok) throw new Error(result.error || 'This request could not be completed.')
   return result
