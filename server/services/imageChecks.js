@@ -34,6 +34,7 @@ export async function processApplicantImages({ accountId, docKey, version, setti
           const normalized = normalizedText(text), nsrp = account.profile?.nsrp || {}
           const fields = [['name', [nsrp.firstName || account.profile?.firstName, nsrp.surname || account.profile?.lastName]], ['birth date', [nsrp.dob]], ['ID number', [document.declaredDetails?.number]]]
           const parsed = extractDocumentFields(text)
+          if (document.declaredDetails?.idType === 'PhilSys National ID') delete parsed.idNumber
           const expectedNumber = nsrp[{ SSS: 'gsisSss', Passport: 'passportNo', 'Pag-IBIG': 'pagibig' }[document.declaredDetails?.idType]] || document.declaredDetails?.number
           const cross = settings.crossChecks && Object.keys(parsed).length ? crossChecks({ nsrp: { ...nsrp, idNumber: expectedNumber }, ...(docKey === 'birthCertificate' ? { birth: { values: parsed, evidence: 'independent' } } : { birth: birthValues ? { values: birthValues, evidence: 'independent' } : {}, ids: [{ values: parsed, evidence: 'independent' }] }) }) : null
           return { comparisons: [...fields.map(([fieldGroup, values]) => ({ fieldGroup, result: values.every(Boolean) && values.every(value => normalized.includes(normalizedText(value))) ? 'match' : 'could_not_read', evidence: 'independent' })), ...(cross?.comparisons || [])], findings: cross?.findings || [] }

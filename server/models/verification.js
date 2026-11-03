@@ -23,7 +23,7 @@ export const verificationVersionFields = {
   adminConfirmedBy: String, adminConfirmedAt: Date,
   findings: { type: [findingSchema], default: [] },
   reviewReasons: { type: [String], default: [] },
-  explanation: { requestedAt: Date, status: { type: String, enum: ['requested', 'submitted', 'reviewed'] }, category: String, note: String },
+  explanation: { requestedAt: Date, status: { type: String, enum: ['requested', 'submitted', 'reviewed'] }, category: String, note: String, supportingVersion: Number },
   reviewRevision: { type: Number, default: 0 },
   verificationAudit: { type: [{ action: String, reason: String, by: String, at: Date, ruleId: String, checklist: { type: mongoose.Schema.Types.Mixed } }], default: [] },
 }

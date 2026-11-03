@@ -8,12 +8,13 @@ import ConfirmDialog from './ConfirmDialog'
 import ApplicationStages from './ApplicationStages'
 
 export default function EmployerInterviewPanel({ token, referralId, referralStatus = 'pending', outcome }) {
+  const [loaded, setLoaded] = useState(false)
   const [meeting, setMeeting] = useState(null), [open, setOpen] = useState(false), [action, setAction] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState('')
   const [form, setForm] = useState({ scheduledAt: '', mode: 'In person', city: '', barangay: '', province: 'Albay', landmark: '', meetingLink: '', message: '' })
   const [clock, setClock] = useState(Date.now())
   useEffect(() => { if (!open) return; setClock(Date.now()); const timer = setInterval(() => setClock(Date.now()), 30000); return () => clearInterval(timer) }, [open])
-  const load = useCallback(() => workflowRequest(token, `/referrals/${referralId}/interview`).then((result) => setMeeting(result?.id ? result : null)).catch((err) => setError(err.message)), [token, referralId])
-  useEffect(() => { load(); const timer = setInterval(load, 10000); return () => clearInterval(timer) }, [load])
+  const load = useCallback(() => workflowRequest(token, `/referrals/${referralId}/interview`).then((result) => setMeeting(result?.id ? result : null)).catch((err) => setError(err.message)).finally(() => setLoaded(true)), [token, referralId])
+  useEffect(() => { setLoaded(false); load(); const timer = setInterval(load, 10000); return () => clearInterval(timer) }, [load])
   const invite = async (e) => {
     e.preventDefault(); setBusy(true); setError('')
     try {
@@ -46,7 +47,7 @@ export default function EmployerInterviewPanel({ token, referralId, referralStat
   const reportPending = ['pending', 'responded', 'confirmed'].includes(meeting?.noShowReport?.status)
   const due = !reportPending && meeting?.status === 'confirmed' && +new Date(meeting.scheduledAt) <= Date.now()
   const progressStatus = outcome || (meeting?.noShowReport ? `no_show_${meeting.noShowReport.status}` : ['declined', 'cancelled'].includes(meeting?.status) ? `interview_${meeting.status}` : referralStatus)
-  return <><ApplicationStages audience="employer" application={{ status: progressStatus, interview: meeting }} /><div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/50 p-4 text-sm text-slate-900">
+  return <>{loaded ? <ApplicationStages audience="employer" application={{ status: progressStatus, interview: meeting }} /> : <p role="status" className="text-sm text-slate-600">Loading interview progress…</p>}<div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/50 p-4 text-sm text-slate-900">
     <h4 className="font-semibold">Interview</h4>
     {meeting ? <><p className="mt-2">{workflowDate(meeting.scheduledAt)} · {meeting.mode}</p><p className="mt-1 text-slate-600">{meeting.location}</p><p className="mt-2 font-medium">Status: {meeting.status.replaceAll('_', ' ')}</p>{meeting.responseMessage && <p className="mt-2">Applicant response: {meeting.responseMessage}</p>}</> : <p className="mt-2 text-slate-600">No interview invitation sent yet.</p>}
     <div className="mt-3 flex flex-wrap gap-2">{editable && !meeting?.noShowReport && <button type="button" onClick={openInvitation} className="rounded-full border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-blue-800">{meeting ? 'Send updated invitation' : 'Invite to interview'}</button>}{due && <><button type="button" onClick={() => { setError(''); setAction('held') }} className="rounded-full border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-blue-800">Record interview held</button><button type="button" disabled={Boolean(meeting.noShowReport)} onClick={() => { setError(''); setAction('no_show') }} className="rounded-full border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">Report interview no-show</button></>}</div>

@@ -7,6 +7,8 @@ import { Applicant, Employer, Admin, Referral, HireReport, Notification } from '
 import { Interview, ApplicationReport, ApplicationAppeal } from '../models/applicationWorkflow.js'
 import { createReferralWorkflow } from '../services/referralWorkflow.js'
 import { createApplicationWorkflow } from '../services/applicationWorkflow.js'
+import { seedVerificationScenarios } from './verification-seed.js'
+export { seedVerificationScenarios }
 
 // Retains the existing approved-posting examples, now attached only to a fake employer.
 const JOB_EXAMPLES = [
@@ -93,7 +95,7 @@ async function run() {
   process.env.NODE_ENV = 'test'
   await import('../index.js') // reuse the existing registered posting/application models; no listener
   await mongoose.connect(process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://localhost:27017', { dbName: database })
-  try { const fixture = await seedFullCycle(); console.log('Created fake workflow cycle in ' + database, fixture.expectedCounts) }
+  try { const fixture = await seedFullCycle(); const verification = await seedVerificationScenarios(); console.log('Created fake workflow cycle in ' + database, fixture.expectedCounts); console.log('Created fictional verification scenarios', verification.counts) }
   finally { await mongoose.disconnect() }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) run().catch(error => { console.error('Seeding failed:', error.message); process.exitCode = 1 })

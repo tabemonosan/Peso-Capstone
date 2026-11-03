@@ -211,6 +211,7 @@ export function createDocumentVerification({ Applicant, Employer, EmployerReques
       const file = await loadDocumentFile(account._id, target.docKey, document.version)
       if (file?.mimetype?.startsWith('image/')) readValues = (await readOcr(Buffer.from(file.data), text => ({ values: extractDocumentFields(text) }), { reserve: reserveOcr })).values || {}
     }
+    if (document.declaredDetails?.idType === 'PhilSys National ID') delete readValues.idNumber
     return { declaredDetails: document.declaredDetails || {}, readValues, quality: document.quality, qr: document.qr, comparisons: document.imageComparisons || [], authorizationCode: secret?.code || '', nsrp: account.profile?.nsrp || {}, explanation: document.explanation, version: document.version }
   }
   return { list, act, details }

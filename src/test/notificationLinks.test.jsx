@@ -5,6 +5,11 @@ import { notificationDestination, notificationViewFromQuery } from '../utils/not
 
 const user = { id: 'employer1', role: 'Employer', email: 'employer@example.com', emailVerified: true, verificationStatus: 'approved', registration: { complete: true }, companyName: 'Example Works', profile: {} }
 const notification = { _id: 'notification1', type: 'referral_received', title: 'New application received', message: 'A new applicant is available for Delivery Driver.', link: '/referrals', createdAt: '2026-11-02T12:00:00Z', read: false }
+it('routes verification notifications to their admin queues only', () => {
+  expect(notificationDestination({ link: '/verification-flagged' }, 'Admin')?.view).toBe('verification-flagged')
+  expect(notificationViewFromQuery('Admin', '?notificationView=verification-auto')).toBe('verification-auto')
+  expect(notificationDestination({ link: '/verification-flagged' }, 'Applicant')).toBeNull()
+})
 beforeEach(() => {
   window.history.replaceState({}, '', '/')
   localStorage.setItem('peso-token', 'token')

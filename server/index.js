@@ -1343,7 +1343,7 @@ async function appendVerificationVersion(applicant, docKey, file, idType = '', s
   applicant.verificationDocuments = applicant.verificationDocuments || {}
   const slot = applicant.verificationDocuments[docKey] || { uploads: 0, versions: [] }
   const current = latestVersion(slot)
-  if (current?.status === 'approved') {
+  if (current?.status === 'approved' && docKey !== 'supportingExplanation') {
     const error = new Error(`${VERIFICATION_DOC_LABELS[docKey]} is already approved and locked.`)
     error.status = 409
     throw error
@@ -1356,7 +1356,7 @@ async function appendVerificationVersion(applicant, docKey, file, idType = '', s
   const versionNumber = (slot.versions?.length || 0) + 1
   await storeDocumentFile(applicant._id, docKey, versionNumber, 'front', file)
   const cleanup = () => DocumentFile.deleteOne({ applicant: applicant._id, slot: docKey, version: versionNumber, side: 'front' }).catch(() => {})
-  if (current && ['pending', 'rejected', 'needs_resubmission'].includes(current.status)) current.status = 'superseded'
+  if (current && (['pending', 'rejected', 'needs_resubmission'].includes(current.status) || docKey === 'supportingExplanation')) current.status = 'superseded'
   const version = {
     originalName: file.originalname,
     storedName: crypto.randomBytes(16).toString('hex'),
@@ -1558,17 +1558,19 @@ app.post('/api/profile/document-explanations/:docKey', verificationUpload.single
     const applicant = await Applicant.findOne({ email: actor.email })
     const current = latestVersion(applicant?.verificationDocuments?.[req.params.docKey])
     if (!current) return res.status(404).json({ error: 'Document unavailable' })
+    let supportingVersion
     if (req.file) {
       if (!VERIFICATION_DOC_TYPES.includes(req.file.mimetype) || !fileMatchesDeclaredType(req.file) || req.file.size > VERIFICATION_MAX_BYTES) return res.status(422).json({ error: 'Attach one PDF, JPG or PNG up to 5 MB.' })
       if ((await nsrpAutomation.getSettings()).imageChecks) await inspectDocument(req.file)
       const appended = await appendVerificationVersion(applicant, 'supportingExplanation', req.file, '', 'uploaded')
       appended.version.reviewReasons = ['Explanation supporting document']
+      supportingVersion = appended.version.version
     }
     if (req.file) await applicant.save()
     const index = applicant.verificationDocuments[req.params.docKey].versions.length - 1
     const base = `verificationDocuments.${req.params.docKey}.versions.${index}`
     const updated = await Applicant.collection.updateOne({ _id: applicant._id, [`${base}.version`]: current.version, [`${base}.status`]: current.status }, {
-      $set: { [`${base}.explanation`]: { status: 'submitted', category, note: note.trim(), requestedAt: new Date() } },
+      $set: { [`${base}.explanation`]: { status: 'submitted', category, note: note.trim(), requestedAt: new Date(), ...(supportingVersion ? { supportingVersion } : {}) } },
       $addToSet: { [`${base}.reviewReasons`]: 'Explanation submitted' }, $inc: { [`${base}.reviewRevision`]: 1 },
       $push: { [`${base}.verificationAudit`]: { action: 'explanation-submitted', reason: 'Applicant explanation submitted', by: String(applicant._id), at: new Date() } },
     })

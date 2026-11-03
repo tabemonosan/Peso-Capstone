@@ -21,6 +21,8 @@ const destinations = {
     '/employers': ['employers', 'View employers'],
     '/applicants': ['applicants', 'View applicants'],
     '/verification-rules': ['verification-rules', 'Open verification rules'],
+    '/verification-flagged': ['verification-flagged', 'Open flagged documents'],
+    '/verification-auto': ['verification-auto', 'Open automatic approvals'],
   },
 }
 export function notificationDestination(notification, role) {

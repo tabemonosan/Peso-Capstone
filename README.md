@@ -88,3 +88,7 @@ In Ethereal mode this also prints the preview URL.
 - **"Could not reach the SMTP server"** — check host and port (587 = STARTTLS, 465 = SSL), and that no firewall is blocking outbound SMTP.
 - **TLS/certificate error** — make sure the port matches the encryption, and check the server certificate.
 - **"Email is not configured..."** — no mode is active; set `SMTP_*` or `EMAIL_DEV_MODE=ethereal`.
+
+## Document verification
+
+See [verification rules, settings, limitations and rollback](docs/verification.md). The workflow seed also creates eight fictional verification scenarios in the explicitly selected peso-demo-* database. Phase 6 (in-person verification) is intentionally omitted.

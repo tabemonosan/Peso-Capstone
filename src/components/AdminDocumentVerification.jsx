@@ -113,6 +113,7 @@ export default function AdminDocumentVerification({ token, queue = 'flagged' }) 
       <p className="my-2">{selected.email} · {selected.unresolved} unresolved flags</p>
       {selected.findings.map(f => <div key={f.ruleId} className="my-3 rounded-lg border border-slate-200 bg-white p-3"><p>{f.ruleId} · {f.severity} · {f.fieldGroup} · {f.evidence} · {f.status}</p>{f.note && <p>{f.note}</p>}{f.status !== 'dismissed' && actionButton(selected, 'resolve', f.ruleId)}</div>)}
       {selected.explanation && <div className="my-3"><h3 className="font-semibold">Explanation</h3><p>{selected.explanation.status} · {selected.explanation.category}</p><p>{selected.explanation.note}</p></div>}
+      {selected.findings.some(f => f.ruleId === 'agency_manual_license') && <p className="rounded border border-cyan-200 bg-cyan-50 p-2 text-sm">Verify the agency license manually.</p>}
       <h3 className="mt-4 font-semibold">Audit history</h3>{selected.audit.map((entry, index) => <p key={index} className="my-2 text-sm">{entry.action} · {entry.by} · {new Date(entry.at).toLocaleString()} · {entry.reason}</p>)}
       <button type="button" className={`${control} mt-4`} onClick={() => setSelected(null)}>Close review details</button>
     </Modal>}
