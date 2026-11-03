@@ -2,6 +2,10 @@ import mongoose from 'mongoose'
 import { DOCUMENT_KEYS, DOCUMENT_LABELS, REVIEW_ACTIONS, openFlags } from '../../shared/verification.js'
 import { clearAuthorization } from './documentUpload.js'
 import { needsManualChecklist, completeChecklist } from '../../shared/manualDocumentReview.js'
+import { loadDocumentFile } from '../utils/documentFiles.js'
+import { readOcr } from './localImageReading.js'
+import { reserveOcr } from './imageChecks.js'
+import { extractDocumentFields } from '../../shared/crossChecks.js'
 
 const fail = (status, message) => { const error = new Error(message); error.status = status; throw error }
 const oid = value => {
@@ -200,7 +204,13 @@ export function createDocumentVerification({ Applicant, Employer, EmployerReques
   async function details(target) {
     const { account, document } = await locate(target)
     const secret = target.docKey === 'birthCertificate' ? await mongoose.connection.db.collection('verification_private').findOne({ _id: `${account._id}:${target.docKey}:${document.version}` }, { projection: { code: 1 } }) : null
-    return { declaredDetails: document.declaredDetails || {}, quality: document.quality, qr: document.qr, comparisons: document.imageComparisons || [], authorizationCode: secret?.code || '', nsrp: account.profile?.nsrp || {}, version: document.version }
+    let readValues = {}
+    const settings = await automation.getSettings()
+    if (target.role === 'Applicant' && settings.ocrTextReading && settings.crossChecks && document.imageComparisons?.length) {
+      const file = await loadDocumentFile(account._id, target.docKey, document.version)
+      if (file?.mimetype?.startsWith('image/')) readValues = (await readOcr(Buffer.from(file.data), text => ({ values: extractDocumentFields(text) }), { reserve: reserveOcr })).values || {}
+    }
+    return { declaredDetails: document.declaredDetails || {}, readValues, quality: document.quality, qr: document.qr, comparisons: document.imageComparisons || [], authorizationCode: secret?.code || '', nsrp: account.profile?.nsrp || {}, explanation: document.explanation, version: document.version }
   }
   return { list, act, details }
 }

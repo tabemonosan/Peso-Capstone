@@ -5,6 +5,7 @@ import { ID_TYPE_OPTIONS } from "./VerificationDocumentsForm"
 import ApplicantSignupWizard from "./ApplicantSignupWizard"
 import { NSRP_SOURCE_LABELS } from "../../shared/verificationDocs.js"
 import DeclaredDocumentFields from './DeclaredDocumentFields'
+import DocumentExplanationForm from './DocumentExplanationForm'
 
 // Applicant-facing documents modal: one card per requirement with a status
 // badge, file details, View (signed expiring URL), and Replace/Upload for
@@ -18,6 +19,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
   const [correctionDoc, setCorrectionDoc] = useState(null)
   const [correctionReason, setCorrectionReason] = useState('')
   const [success, setSuccess] = useState('')
+  const [explanationDoc, setExplanationDoc] = useState(null)
   const nsrpDocument = info.documents?.find((doc) => doc.docKey === 'nsrpForm')
   const [editingNsrp, setEditingNsrp] = useState(() => new URLSearchParams(window.location.search).get("editNsrp") === "1" && ['missing', 'rejected', 'needs_resubmission'].includes(nsrpDocument?.status) && nsrpDocument.uploadsRemaining !== 0)
   const documents = [...(info.documents || [])]
@@ -205,6 +207,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
                 </p>
               )}
               {doc.status === 'pending' && <p className="mt-2 text-xs text-amber-800">Submitted for PESO review. Please wait for feedback before resubmitting.</p>}
+              {['nsrpForm', 'birthCertificate', 'validId1', 'validId2'].includes(doc.docKey) && doc.latest && <button type="button" onClick={() => setExplanationDoc(doc.docKey)} className="mt-2 rounded border border-slate-300 bg-white px-3 py-1 text-xs text-cyan-800">Explain a difference</button>}
               {locked && <p className="mt-2 text-xs text-green-700">Approved by PESO. You can view this document or request a correction if information changes.</p>}
               {doc.correctionRequest && <p className="mt-2 rounded-lg border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">Correction requested: {doc.correctionRequest.reason}. Waiting for PESO review.</p>}
               {locked && !doc.correctionRequest && <button type="button" onClick={() => { setCorrectionDoc(doc.docKey); setCorrectionReason(''); setError(''); setSuccess('') }} className="mt-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold">Request correction</button>}
@@ -291,6 +294,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
       )}
       </>
       )}
+      {explanationDoc && <DocumentExplanationForm token={token} docKey={explanationDoc} onClose={() => setExplanationDoc(null)} onSent={() => { setSuccess('Your explanation was sent to PESO.'); onUpdated?.() }} />}
     </Modal>
   )
 }

@@ -18,7 +18,15 @@ export async function readQr(buffer, consume = async () => {}) {
   })
 }
 let active = 0
-export async function readOcr(buffer, compare, { reserve = async () => true } = {}) {
+let queue = Promise.resolve(), pending = 0
+export function readOcr(buffer, compare, options) {
+  if (pending >= 20) return Promise.resolve({ result: 'could_not_read' })
+  pending++
+  const work = queue.then(() => runOcr(buffer, compare, options)).finally(() => { pending-- })
+  queue = work.catch(() => {})
+  return work
+}
+async function runOcr(buffer, compare, { reserve = async () => true } = {}) {
   if (active >= IMAGE_LIMITS.ocrConcurrency || !await reserve()) return { result: 'could_not_read' }
   active++
   let worker, timer, expired = false

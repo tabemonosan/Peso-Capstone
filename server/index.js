@@ -27,6 +27,8 @@ import { createDocumentVerificationRouter } from './routes/documentVerification.
 import { openFlags } from '../shared/verification.js'
 import { prepareDocument, parseDocumentDetails, saveAuthorization } from './services/documentUpload.js'
 import { processApplicantImages } from './services/imageChecks.js'
+import { EXPLANATION_CATEGORIES } from '../shared/crossChecks.js'
+import { inspectDocument } from './services/imageQuality.js'
 import { applicantSkillQuery } from './utils/jobSkillMatching.js'
 import { jobSkillMatchCount } from '../shared/jobSkills.js'
 import { rankEmployerReferrals } from './services/applicantRanking.js'
@@ -1023,7 +1025,7 @@ app.post('/api/signup', applicantSignupUpload.fields([
       for (const [slot, field, idType] of [['birthCertificate', 'birthCertificate', ''], ['validId1', 'validId1Front', id1Type], ['validId2', 'validId2Front', id2Type]]) {
         if (!fileFor(field)) continue
         try {
-          documentReviews[slot] = await prepareDocument(fileFor(field), slot, idType, declaredDocuments[slot], slot === 'validId2' ? declaredDocuments.validId1?.number : undefined)
+          documentReviews[slot] = await prepareDocument(fileFor(field), slot, idType, declaredDocuments[slot], slot === 'validId2' ? declaredDocuments.validId1?.number : undefined, answers || {})
           const back = fileFor(slot + 'Back')
           if (back) { const backReview = await prepareDocument(back, slot, idType, declaredDocuments[slot]); documentReviews[slot].quality.warnings.push(...backReview.quality.warnings) }
         } catch (error) { if (error.status) return res.status(422).json({ error: 'Check your document before you upload.', fieldErrors: { [slot]: error.message } }); throw error }
@@ -1483,7 +1485,7 @@ app.post('/api/profile/verification-documents/:docKey', verificationUpload.singl
     if (applicant.verificationStatus === 'restricted') return res.status(403).json({ error: 'This account is restricted. Please contact PESO support.' })
 
     const declared = parseDocumentDetails(req.body?.verificationDetails)
-    if (docKey !== 'nsrpForm' && (await nsrpAutomation.getSettings()).imageChecks) req.file.verificationReview = await prepareDocument(req.file, docKey, idType, declared)
+    if (docKey !== 'nsrpForm' && (await nsrpAutomation.getSettings()).imageChecks) req.file.verificationReview = docKey === 'supportingExplanation' ? { quality: await inspectDocument(req.file) } : await prepareDocument(req.file, docKey, idType, declared, applicant.verificationDocuments?.[docKey === 'validId1' ? 'validId2' : 'validId1']?.versions?.at(-1)?.declaredDetails?.number, applicant.profile?.nsrp)
 
     const { slot, version, cleanup } = await appendVerificationVersion(applicant, docKey, req.file, idType, docKey === 'nsrpForm' ? 'uploaded' : undefined)
     try {
@@ -1511,6 +1513,37 @@ app.post('/api/profile/verification-documents/:docKey', verificationUpload.singl
     console.error(err)
     res.status(500).json({ error: 'Server error' })
   }
+})
+
+app.post('/api/profile/document-explanations/:docKey', verificationUpload.single('supportingDocument'), async (req, res) => {
+  try {
+    const actor = authenticateRequest(req)
+    if (actor?.role !== 'Applicant') return res.status(403).json({ error: 'Applicants only' })
+    if (!(await nsrpAutomation.getSettings()).crossChecks) return res.status(409).json({ error: 'Explanation forms are currently unavailable. Please contact PESO.' })
+    const { category, note = '' } = req.body || {}
+    if (!EXPLANATION_CATEGORIES.includes(category) || typeof note !== 'string' || note.length > 300) return res.status(422).json({ error: 'Choose a category and use a note of at most 300 characters.' })
+    if (!['nsrpForm', 'birthCertificate', 'validId1', 'validId2'].includes(req.params.docKey)) return res.status(400).json({ error: 'Invalid document type' })
+    const applicant = await Applicant.findOne({ email: actor.email })
+    const current = latestVersion(applicant?.verificationDocuments?.[req.params.docKey])
+    if (!current) return res.status(404).json({ error: 'Document unavailable' })
+    if (req.file) {
+      if (!VERIFICATION_DOC_TYPES.includes(req.file.mimetype) || !fileMatchesDeclaredType(req.file) || req.file.size > VERIFICATION_MAX_BYTES) return res.status(422).json({ error: 'Attach one PDF, JPG or PNG up to 5 MB.' })
+      if ((await nsrpAutomation.getSettings()).imageChecks) await inspectDocument(req.file)
+      const appended = await appendVerificationVersion(applicant, 'supportingExplanation', req.file, '', 'uploaded')
+      appended.version.reviewReasons = ['Explanation supporting document']
+    }
+    if (req.file) await applicant.save()
+    const index = applicant.verificationDocuments[req.params.docKey].versions.length - 1
+    const base = `verificationDocuments.${req.params.docKey}.versions.${index}`
+    const updated = await Applicant.collection.updateOne({ _id: applicant._id, [`${base}.version`]: current.version, [`${base}.status`]: current.status }, {
+      $set: { [`${base}.explanation`]: { status: 'submitted', category, note: note.trim(), requestedAt: new Date() } },
+      $addToSet: { [`${base}.reviewReasons`]: 'Explanation submitted' }, $inc: { [`${base}.reviewRevision`]: 1 },
+      $push: { [`${base}.verificationAudit`]: { action: 'explanation-submitted', reason: 'Applicant explanation submitted', by: String(applicant._id), at: new Date() } },
+    })
+    if (!updated.modifiedCount) return res.status(409).json({ error: 'The document changed. Please submit the explanation again.' })
+    await notifyAdmins({ type: 'document_explanation', title: 'Document explanation submitted', message: 'An applicant submitted an explanation for PESO review.', link: '/verification-flagged', metadata: { applicantId: String(applicant._id) } })
+    res.json({ ok: true, message: 'Your explanation was sent to PESO. You may continue using your account.' })
+  } catch (error) { res.status(error.status || 503).json({ error: error.status ? error.message : 'Could not save your explanation. Please try again.' }) }
 })
 
 app.post('/api/profile/verification-documents/:docKey/correction-request', async (req, res) => {
@@ -4282,7 +4315,7 @@ export async function purgeExpiredVerificationDocuments() {
     })
     for (const applicant of stale) {
       const unset = {}
-      for (const key of ['birthCertificate', 'validId1', 'validId2', 'resume']) {
+      for (const key of ['birthCertificate', 'validId1', 'validId2', 'supportingExplanation', 'resume']) {
         const versions = applicant.verificationDocuments?.[key]?.versions || []
         versions.forEach((_, index) => {
           unset[`verificationDocuments.${key}.versions.${index}.data`] = 1

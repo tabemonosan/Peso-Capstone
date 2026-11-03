@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { API_URL } from "../config"
 import { EMPLOYER_OUTCOMES, APPLICANT_OUTCOMES, outcomeLabel } from "../../shared/employmentReporting.js"
 
@@ -12,8 +12,11 @@ function HireReportForm({ token, applicantId, jobId, referralId, onCreated, repo
   const [error, setError] = useState("")
   const outcomes = reporterRole === 'Applicant' ? APPLICANT_OUTCOMES : EMPLOYER_OUTCOMES
   const fieldId = `${reporterRole}-${referralId || jobId}`
+  const previousInput = useRef({ existingReport, initialStatus })
 
   useEffect(() => {
+    if (previousInput.current.existingReport === existingReport && previousInput.current.initialStatus === initialStatus) return
+    previousInput.current = { existingReport, initialStatus }
     const changingOutcome = initialStatus && initialStatus !== existingReport?.status
     setStatus(initialStatus || existingReport?.status || 'hired')
     setEmploymentDate(changingOutcome ? '' : existingReport?.employmentDate || '')

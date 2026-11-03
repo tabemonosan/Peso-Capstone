@@ -3,7 +3,7 @@
 // exactly NSRP, birth certificate, and Valid ID #1.
 // The resume is no longer part of the applicant document system at all;
 // stored legacy resume data is kept in the database but unreachable from the UI.
-export const VERIFICATION_DOC_KEYS = ['nsrpForm', 'birthCertificate', 'validId1', 'validId2']
+export const VERIFICATION_DOC_KEYS = ['nsrpForm', 'birthCertificate', 'validId1', 'validId2', 'supportingExplanation']
 export const REQUIRED_DOC_KEYS = ['nsrpForm', 'birthCertificate', 'validId1']
 
 export const VERIFICATION_DOC_LABELS = {
@@ -11,6 +11,7 @@ export const VERIFICATION_DOC_LABELS = {
   birthCertificate: 'Birth Certificate',
   validId1: 'Valid ID #1',
   validId2: 'Valid ID #2',
+  supportingExplanation: 'Supporting explanation document',
 }
 
 export const NSRP_SOURCE_LABELS = {

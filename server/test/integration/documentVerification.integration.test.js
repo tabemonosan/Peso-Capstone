@@ -3,7 +3,7 @@ import mongoose from 'mongoose'
 import jwt from 'jsonwebtoken'
 import request from 'supertest'
 import { beforeAll, beforeEach, afterAll, describe, it, expect, vi } from 'vitest'
-import { startTestDb, stopTestDb, clearDb, validNsrpAnswers } from './helpers.js'
+import { startTestDb, stopTestDb, clearDb, validNsrpAnswers, pdfBuffer } from './helpers.js'
 import { VERIFICATION_DEFAULTS } from '../../../shared/verification.js'
 vi.mock('../../mailer.js', async original => ({ ...await original(), sendEmail: vi.fn(async () => ({ delivered: true })), initMailer: vi.fn() }))
 const { app, nsrpAutomation } = await import('../../index.js')
@@ -226,5 +226,16 @@ describe('Document verification foundations', () => {
     await action(account, 'approve', { docKey: 'birthCertificate' }).expect(400)
     await action(account, 'approve', { docKey: 'birthCertificate', checklist: { nameMatches: true, photoClear: true, notExpired: true, typeMatches: true, bothSides: true } }).expect(200)
     expect(await mongoose.connection.db.collection('verification_private').countDocuments()).toBe(0)
+  })
+  it('accepts an optional supporting document and explanation without changing approval', async () => {
+    const account = await applicant({ status: 'approved' })
+    const url = '/api/profile/document-explanations/nsrpForm'
+    await request(app).post(url).set('Authorization', `Bearer ${sign('Applicant', account)}`).field('category', 'Married name').field('note', 'Different records use different names')
+      .attach('supportingDocument', pdfBuffer(), { filename: 'support.pdf', contentType: 'application/pdf' }).expect(200)
+    const stored = await Applicant.findById(account._id)
+    expect(stored.verificationDocuments.nsrpForm.versions[0]).toMatchObject({ status: 'approved', explanation: { status: 'submitted', category: 'Married name' } })
+    expect(stored.verificationDocuments.supportingExplanation.versions).toHaveLength(1)
+    expect((await api('get', '/queue?docKey=nsrpForm').expect(200)).body.items[0].reasons).toContain('Explanation submitted')
+    await request(app).post(url).set('Authorization', `Bearer ${sign('Applicant', account)}`).field('category', 'Other').field('note', 'x'.repeat(301)).expect(422)
   })
 })

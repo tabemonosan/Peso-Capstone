@@ -98,6 +98,7 @@ const applicantSchema = new Schema({
     birthCertificate: verificationDocSlotSchema,
     validId1: verificationDocSlotSchema,
     validId2: verificationDocSlotSchema,
+    supportingExplanation: verificationDocSlotSchema,
     resume: verificationDocSlotSchema,
   },
   documentsPurgedAt: Date,
@@ -290,7 +291,7 @@ hireReportSchema.index({ employerId: 1, reportedAt: -1 })
 // `data` is select:false so queries must opt in explicitly.
 const documentFileSchema = new Schema({
   applicant: { type: Schema.Types.ObjectId, ref: 'Applicant', required: true, index: true },
-  slot: { type: String, enum: ['nsrpForm', 'birthCertificate', 'validId1', 'validId2', 'resume'], required: true },
+  slot: { type: String, enum: ['nsrpForm', 'birthCertificate', 'validId1', 'validId2', 'supportingExplanation', 'resume'], required: true },
   version: { type: Number, required: true },
   side: { type: String, enum: ['front', 'back'], default: 'front' },
   mimetype: String,

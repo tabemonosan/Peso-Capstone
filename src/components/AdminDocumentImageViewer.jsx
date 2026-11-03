@@ -25,6 +25,9 @@ export default function AdminDocumentImageViewer({ token, accountId, docKey }) {
       {data.authorizationCode && <label>PSA authorization code (admin only)<input type="password" readOnly value={data.authorizationCode} className="block rounded border bg-white p-2 text-slate-900" /></label>}
       <h3 className="mt-3 font-semibold">NSRP details</h3>{['surname', 'firstName', 'middleName', 'suffix', 'dob', 'placeOfBirth'].map(key => <p key={key} className="text-sm">{key}: {data.nsrp[key] || 'Not provided'}</p>)}
       <h3 className="mt-3 font-semibold">Image checks</h3><p>{data.quality?.warnings?.join(', ') || 'No quality warning recorded'}</p>
+      <h3 className="mt-3 font-semibold">Cross-check</h3><table className="my-2 w-full text-sm"><thead><tr><th className="text-left">Field group</th><th className="text-left">Result</th><th className="text-left">Evidence</th></tr></thead><tbody>{(data.comparisons || []).map((row, index) => <tr key={index}><td>{row.fieldGroup}</td><td>{row.result.replaceAll('_', ' ')}</td><td>{row.evidence === 'independent' ? 'Independent' : 'Self-declared only'}</td></tr>)}</tbody></table>
+      {Object.entries(data.readValues || {}).map(([field, value]) => <p key={field} className="text-sm">Document {field}: {value}</p>)}
+      {data.explanation && <p className="mt-2 text-sm">Explanation: {data.explanation.category} — {data.explanation.note}</p>}
       {data.qr?.found && <><p>QR domain: {data.qr.domain || 'Non-URL QR'}</p>{data.qr.allowlisted ? <a className="text-cyan-800 underline" target="_blank" rel="noopener noreferrer" href={docKey === 'birthCertificate' ? 'https://e-cert.psahelpline.ph/verify' : 'https://verify.philsys.gov.ph'}>{docKey === 'birthCertificate' ? 'PSA verification' : 'PSA National ID check'}</a> : <p className="text-amber-900">QR destination is not on the allowlist. No link is opened.</p>}</>}
     </div>
   </section>
