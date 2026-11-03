@@ -34,7 +34,7 @@ export function validNsrpAnswers(overrides = {}) {
     sex: 'Male',
     civilStatus: 'Single',
     addressStreet: '1 Main Street',
-    addressBarangay: 'Centro',
+    addressBarangay: 'Bgy. 10 - Cabugao',
     addressCity: 'Legazpi',
     addressProvince: 'Albay',
     cellphone: '09171234567',
@@ -134,4 +134,11 @@ export function signupUploadRequest(req, { email, basic = validBasicInfo(), emai
   return withFields
     .attach('birthCertificate', pdfBuffer(), { filename: 'birth.pdf', contentType: 'application/pdf' })
     .attach('validId1Front', pdfBuffer(), { filename: 'id1-front.pdf', contentType: 'application/pdf' })
+}
+
+// Complete the four-step job application without changing signup documents.
+export function jobApplicationRequest(req, { email = 'applicant@example.com', mobile = '09171234567', bachelorDegree = 'No', hasExperience = 'No', experience = '', resume = pdfBuffer() } = {}) {
+  return req.field('sharingConsent', 'true')
+    .field('applicationDetails', JSON.stringify({ email, mobile, bachelorDegree, hasExperience, experience }))
+    .attach('resume', resume, { filename: 'resume.pdf', contentType: 'application/pdf' })
 }

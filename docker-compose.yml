@@ -26,7 +26,7 @@ services:
       SMTP_PORT: ${SMTP_PORT:-}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
-      EMAIL_FROM: ${EMAIL_FROM:-}
+      MAIL_FROM: ${MAIL_FROM:-}
     ports:
       - "4000:4000"
 

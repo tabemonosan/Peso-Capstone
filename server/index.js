@@ -1,4 +1,10 @@
-import { matchLocation, getEmployerAddress } from '../shared/phLocations.js'
+import { Interview, ApplicationReport, ApplicationAppeal } from './models/applicationWorkflow.js'
+import { createApplicationWorkflow } from './services/applicationWorkflow.js'
+import { createApplicationWorkflowRouter } from './routes/applicationWorkflow.js'
+import { applicantProfileContent } from '../shared/applicantProfile.js'
+import { validateJobApplication, RESUME_MAX_BYTES } from '../shared/jobApplication.js'
+import { validateApplicationEmail } from './services/applicationEmail.js'
+import { matchLocation, getEmployerJobAddress as getEmployerAddress, validateApplicantLocation } from '../shared/phLocations.js'
 import 'dotenv/config'
 import express from 'express'
 import mongoose from 'mongoose'
@@ -13,6 +19,14 @@ import path from 'path'
 import { createReport } from 'docx-templates'
 import { Applicant, Employer, Admin, JobTitle, Notification, Referral, HireReport, Rating, DocumentFile, EmailCode, EmailCodeSend, UsedEmailProof, findUserByEmail, emailTakenAcrossRoles, createUserInRole, updateUserProfileByEmail, applicantFullName, applicantDisplayName } from './models/collections.js'
 import { sendEmail, sendVerificationEmail, initMailer } from './mailer.js'
+import { createNsrpAutomation, SYSTEM_REVIEWER } from './services/nsrpAutomation.js'
+import { createNsrpAutomationRouter } from './routes/nsrpAutomation.js'
+import { applicantSkillQuery } from './utils/jobSkillMatching.js'
+import { jobSkillMatchCount } from '../shared/jobSkills.js'
+import { rankEmployerReferrals } from './services/applicantRanking.js'
+import { createReferralWorkflow, ApplicationError, WITHDRAWN_REFERRALS } from './services/referralWorkflow.js'
+import { createReferralOversightRouter } from './routes/referralOversight.js'
+import { createApplicationHistoryRouter } from './routes/applicationHistory.js'
 import { EMAIL_CODE_TTL_MS, EMAIL_CODE_MAX_ATTEMPTS, EMAIL_CODE_RESEND_COOLDOWN_MS, EMAIL_CODE_HOURLY_LIMIT, EMAIL_CODE_IP_HOURLY_LIMIT, generateEmailCode, hashEmailCode, emailCodeMatches, signEmailProof, verifyEmailProof } from './utils/emailCode.js'
 import { notify, notifyAdmins } from './services/notify.js'
 import { startHireReportReminders } from './services/hireReminders.js'
@@ -50,7 +64,7 @@ import { redactPath, redactString } from './utils/redact.js'
 // optional and not part of REQUIRED_DOC_KEYS.
 import { VERIFICATION_DOC_KEYS, REQUIRED_DOC_KEYS, VERIFICATION_DOC_LABELS } from '../shared/verificationDocs.js'
 import { baseApprovedJobFilter, buildJobFilter, countJobFacets } from './utils/jobFilters.js'
-import { EMPLOYER_OUTCOMES, APPLICANT_OUTCOMES, employerApplicantSummary, outcomeLabel } from '../shared/employmentReporting.js'
+import { EMPLOYER_OUTCOMES, APPLICANT_OUTCOMES, outcomeLabel, publicApplicationHistory } from '../shared/employmentReporting.js'
 
 const LOCATION_TYPE_OPTIONS = LOCATION_TYPES
 const EMPLOYMENT_TYPE_OPTIONS = EMPLOYMENT_TYPES
@@ -173,6 +187,8 @@ if (!isTestEnv) {
 const { Schema } = mongoose
 
 const jobSchema = new Schema({
+  acceptingApplications: { type: Boolean, default: true },
+  hiredApplicantIds: [{ type: Schema.Types.ObjectId, ref: 'Applicant' }],
   title: { type: String, required: true },
   company: { type: String, required: true },
   location: String,
@@ -190,6 +206,7 @@ const jobSchema = new Schema({
   deadline: Date,
   locationType: { type: String, enum: ['', ...LOCATION_TYPES], default: '' },
   city: { type: String, trim: true, maxlength: JOB_LIMITS.placeMax },
+  barangay: { type: String, trim: true, maxlength: JOB_LIMITS.placeMax },
   province: { type: String, trim: true, maxlength: JOB_LIMITS.placeMax },
   // Legacy values remain valid on save; normalizeJobPosting maps them on read.
   employmentType: { type: String, enum: ['', ...EMPLOYMENT_TYPES, ...Object.keys(LEGACY_EMPLOYMENT_TYPES)], default: '' },
@@ -222,6 +239,18 @@ jobSchema.index({ status: 1, employmentType: 1 })
 const JobPosting = mongoose.model('JobPosting', jobSchema)
 
 const jobApplicationSchema = new Schema({
+  applicantId: { type: Schema.Types.ObjectId, ref: 'Applicant' },
+  employerId: { type: Schema.Types.ObjectId, ref: 'Employer' },
+  referralId: { type: Schema.Types.ObjectId, ref: 'Referral' },
+  source: { type: String, enum: ['auto', 'admin'] },
+  deliveryStatus: { type: String, enum: ['processing', 'pending_admin', 'delivered', 'withdrawn_by_admin', 'withdrawn', 'declined_by_admin'] },
+  jobTitle: String, employerName: String, lastActivityAt: Date,
+  reviewQueue: { type: String, select: false },
+  sharingConfirmedAt: Date, invitationDeclinedAt: Date,
+  applicationDetails: { email: String, mobile: String, bachelorDegree: { type: String, enum: ['Yes', 'No'] }, hasExperience: { type: String, enum: ['Yes', 'No'] }, experience: { type: String, maxlength: 20 } },
+  resumeFile: { originalName: String, mimetype: String, size: Number, data: { type: Buffer, select: false } },
+  findings: [{ code: String, severity: String, at: Date }],
+  history: [{ action: String, status: String, by: String, reason: String, at: Date }],
   jobId: { type: Schema.Types.ObjectId, ref: 'JobPosting', required: true },
   applicantEmail: { type: String, required: true },
   nsrpFile: {
@@ -236,9 +265,26 @@ const jobApplicationSchema = new Schema({
   submittedAt: { type: Date, default: Date.now },
 })
 jobApplicationSchema.index({ jobId: 1, applicantEmail: 1 }, { unique: true })
+jobApplicationSchema.index({ applicantId: 1, jobId: 1 }, { unique: true, partialFilterExpression: { applicantId: { $type: 'objectId' } } })
 const JobApplication = mongoose.model('JobApplication', jobApplicationSchema)
+export const referralWorkflow = createReferralWorkflow({ Applicant, Employer, JobPosting, JobApplication, Referral, HireReport, Notification, notify, notifyAdmins, loadApplicant: loadApplicantWithCurrentResume, loadEmployerVerification, loadNsrpFile: storedApplicationNsrp })
+export const applicationWorkflow = createApplicationWorkflow({ Applicant, Employer, JobPosting, JobApplication, Referral, HireReport, Interview, ApplicationReport, ApplicationAppeal, notify, notifyAdmins, loadEmployerVerification, referralWorkflow })
+app.use('/api/workflow', createApplicationWorkflowRouter({ service: applicationWorkflow, Applicant, Employer, Admin, JobApplication, Interview, ApplicationReport, ApplicationAppeal, HireReport, authenticate: authenticateRequest }))
+app.use('/api/admin/referral-workflow', createReferralOversightRouter({ workflow: referralWorkflow, Applicant, Employer, JobPosting, JobApplication, Referral, authenticate: authenticateRequest }))
+app.use('/api/applications', createApplicationHistoryRouter({ Applicant, Employer, JobApplication, Referral, JobPosting, authenticate: authenticateRequest, notify, notifyAdmins, loadEmployerVerification, applicationWorkflow, Interview, HireReport }))
+
+async function storedApplicationNsrp(applicant) {
+  const saved = await Applicant.findById(applicant._id).select('+verificationDocuments.nsrpForm.versions.data +nsrpVerificationFile.data')
+  const version = latestVersion(saved?.verificationDocuments?.nsrpForm)
+  const stored = version?.version ? await loadDocumentFile(applicant._id, 'nsrpForm', version.version, 'front') : null
+  const snapshot = stored?.data ? { ...version, data: stored.data } : version?.data ? version : saved?.nsrpVerificationFile
+  if (!snapshot?.data) throw new ApplicationError('NSRP_REQUIRED', 'Complete your NSRP form before applying.', 403)
+  const data = Buffer.isBuffer(snapshot.data) ? snapshot.data : Buffer.from(snapshot.data.buffer || snapshot.data)
+  return { originalName: snapshot.originalName || 'NSRP-Registration-Form.pdf', mimetype: snapshot.mimetype || 'application/pdf', size: snapshot.size || data.length, data }
+}
 
 const employerRequestSchema = new Schema({
+  nsrpAutoEnabledAtCreation: { type: Boolean, select: false },
   email: { type: String, required: true, unique: true },
   passwordHash: { type: String, required: true },
   companyName: { type: String, required: true },
@@ -296,6 +342,19 @@ const employerRequestSchema = new Schema({
 })
 employerRequestSchema.index({ status: 1, createdAt: -1, _id: 1 })
 const EmployerRequest = mongoose.model('EmployerRequest', employerRequestSchema)
+export const nsrpAutomation = createNsrpAutomation({ Applicant, Employer, EmployerRequest, notify, notifyAdmins, recomputeApplicant: async (id) => {
+  const account = await Applicant.findById(id)
+  if (!account) return
+  recomputeVerificationStatus(account)
+  const match = { _id: id, verificationStatus: { $ne: 'restricted' }, deletedAt: { $exists: false } }
+  for (const key of REQUIRED_DOC_KEYS) {
+    const versions = account.verificationDocuments?.[key]?.versions || []
+    match[`verificationDocuments.${key}.versions`] = { $size: versions.length }
+    if (versions.length) match[`verificationDocuments.${key}.versions.${versions.length - 1}.status`] = versions.at(-1).status
+  }
+  await Applicant.updateOne(match, { $set: { verificationStatus: account.verificationStatus } })
+} })
+app.use('/api/admin/nsrp-automation', createNsrpAutomationRouter({ automation: nsrpAutomation, authenticate: authenticateRequest }))
 
 const requirementsDirectory = path.join(process.cwd(), 'server', 'uploads', 'employer-requirements')
 fs.mkdirSync(requirementsDirectory, { recursive: true })
@@ -479,8 +538,14 @@ async function loadApplicantWithCurrentResume(email) {
   if (!applicant) return null
   const migratedNsrp = await migrateLegacyNsrp(applicant)
   const previousStatus = applicant.verificationStatus
+  const content = applicantProfileContent(applicant.profile)
+  const profileChanged = content.summary !== (applicant.profile?.summary || '') || JSON.stringify(content.skills) !== JSON.stringify(applicant.profile?.skills || [])
+  if (profileChanged) {
+    if (content.summary !== (applicant.profile?.summary || '')) applicant.set('profile.summarySource', 'personal')
+    applicant.set('profile.summary', content.summary); applicant.set('profile.skills', content.skills)
+  }
   recomputeVerificationStatus(applicant)
-  if (migratedNsrp || applicant.verificationStatus !== previousStatus) await applicant.save()
+  if (migratedNsrp || profileChanged || applicant.verificationStatus !== previousStatus) await applicant.save()
   return applicant
 }
 
@@ -541,7 +606,7 @@ function summarizeVerificationDocuments(applicant, { withUrls = false, includeHi
           }
         : null,
       history,
-      reviewLog: (slot?.history || []).map((entry) => ({
+      reviewLog: (slot?.history || []).filter((entry) => includeHistory || !['auto-approved', 'revoke-auto-approval'].includes(entry.action)).map((entry) => ({
         action: entry.action,
         reason: entry.reason || undefined,
         by: entry.by,
@@ -622,7 +687,7 @@ async function loadEmployerVerification(email) {
   if (!employer) return { employer: null, request, status: null, reason: '' }
 
   const latestVersion = request?.requirementsVersions?.at(-1)
-  const documentStatus = request?.requirementsFile?.status || latestVersion?.status
+  const documentStatus = latestVersion?.reviewedBy === SYSTEM_REVIEWER && request?.adminDecision !== 'approved' ? 'pending' : request?.requirementsFile?.status || latestVersion?.status
     || (request?.status === EMPLOYER_VERIFICATION_STATUS.APPROVED ? 'approved' : undefined)
   const decision = request?.adminDecision
     || ([EMPLOYER_VERIFICATION_STATUS.APPROVED, EMPLOYER_VERIFICATION_STATUS.DECLINED, EMPLOYER_VERIFICATION_STATUS.NEEDS_RESUBMISSION].includes(request?.status)
@@ -1023,7 +1088,7 @@ app.post('/api/signup', applicantSignupUpload.fields([
             education: answers.education || [],
             technicalTraining: answers.technicalTraining || [],
             workExperience: answers.workExperience || [],
-            summary: [answers.occupation1, ...(answers.skills || [])].filter(Boolean).join(' · '),
+            summary: '',
             nsrp: storedAnswers,
           }
         })()
@@ -1042,9 +1107,11 @@ app.post('/api/signup', applicantSignupUpload.fields([
           summary: '',
         }
     stage = 'create-account'
+    const nsrpAutoEnabledAtCreation = await nsrpAutomation.creationEnabled('Applicant')
     let user
     try {
       user = await createUserInRole('Applicant', {
+        nsrpAutoEnabledAtCreation,
         sessionVersion: 1,
         email: email.trim(),
         passwordHash,
@@ -1076,6 +1143,9 @@ app.post('/api/signup', applicantSignupUpload.fields([
 
     // Consume the single-use proof token only after the account exists.
     await UsedEmailProof.create({ jti: emailProof.jti, expiresAt: new Date(emailProof.exp * 1000) })
+    await nsrpAutomation.process({ role: 'Applicant', accountId: user._id, ip: req.ip })
+    // Refresh metadata after the atomic automation write; never save a stale user.
+    user = await Applicant.findById(user._id)
 
     // No link-verification email is sent: these accounts are verified by code.
     // The link-based flow (verify-email / resend) stays for older accounts.
@@ -1168,7 +1238,7 @@ app.post('/api/auth/resend-verification', async (req, res) => {
 async function hydrateEmployerAddress(employer, request) {
   const address = getEmployerAddress(employer, request)
   if (!address.city) return
-  if (employer.establishmentAddress?.city !== address.city || employer.establishmentAddress?.province !== address.province) {
+  if (employer.establishmentAddress?.city !== address.city || employer.establishmentAddress?.province !== address.province || employer.establishmentAddress?.barangay !== address.barangay) {
     await Employer.updateOne({ _id: employer._id }, { $set: { establishmentAddress: address } })
   }
   employer.establishmentAddress = address
@@ -1391,6 +1461,8 @@ app.post('/api/profile/verification-documents/:docKey', verificationUpload.singl
       throw err
     }
 
+    if (docKey === 'nsrpForm') await nsrpAutomation.process({ role: 'Applicant', accountId: applicant._id, ip: req.ip })
+
     await notifyAdmins({
       type: 'document_resubmitted',
       title: 'Document awaiting review',
@@ -1477,6 +1549,7 @@ app.put('/api/profile/nsrp', async (req, res) => {
     const storedAnswers = { ...answers, certified: Boolean(req.body?.answers?.certified) }
     delete storedAnswers.signatureDataUrl
     const fullName = [answers.firstName, answers.middleName, answers.surname, answers.suffix].filter(Boolean).join(' ')
+    const personalSummary = applicantProfileContent(applicant.profile).summary
     applicant.set('profile.nsrp', storedAnswers)
     applicant.set('profile.firstName', answers.firstName)
     applicant.set('profile.middleName', answers.middleName)
@@ -1489,7 +1562,8 @@ app.put('/api/profile/nsrp', async (req, res) => {
     applicant.set('profile.addressCity', answers.addressCity)
     applicant.set('profile.addressProvince', answers.addressProvince)
     applicant.set('phone', answers.cellphone)
-    applicant.set('profile.summary', [answers.occupation1, ...(answers.skills || [])].filter(Boolean).join(' · '))
+    applicant.set('profile.summary', personalSummary)
+    applicant.set('profile.summarySource', 'personal')
     applicant.set('profile.skills', answers.skills || [])
     applicant.set('profile.education', answers.education || [])
     applicant.set('profile.technicalTraining', answers.technicalTraining || [])
@@ -1517,6 +1591,7 @@ app.put('/api/profile/nsrp', async (req, res) => {
       await cleanup()
       throw err
     }
+    await nsrpAutomation.process({ role: 'Applicant', accountId: applicant._id, ip: req.ip })
     await notifyAdmins({
       type: 'applicant_registration_pending',
       title: 'Applicant NSRP updated',
@@ -1641,6 +1716,13 @@ app.put('/api/applicants/:id/verification-documents/:docKey', async (req, res) =
     })
     if (guard) return res.status(guard.status).json({ code: guard.code, error: guard.message })
 
+    if (isRevert && docKey === 'nsrpForm' && current.reviewedBy === SYSTEM_REVIEWER) {
+      const revoked = await nsrpAutomation.revoke(`Applicant:${applicant._id}:${current.version}`, decoded.email, String(reason || ''))
+      if (!revoked) return res.status(409).json({ error: 'The approval changed. Refresh the document.' })
+      const fresh = await Applicant.findById(applicant._id)
+      return res.json({ id: String(fresh._id), verificationStatus: fresh.verificationStatus, documents: summarizeVerificationDocuments(fresh) })
+    }
+
     if (isRevert) {
       slot.correctionRequest = undefined
       current.status = 'pending'
@@ -1714,6 +1796,7 @@ app.put('/api/profile', async (req, res) => {
     const decoded = jwt.verify(token, jwtSecret)
     const { profile, companyName, contactName, phone, website } = req.body
     if (!profile) return res.status(400).json({ error: 'Missing profile' })
+    if (decoded.role === 'Applicant' && typeof profile.summary === 'string') profile.summarySource = 'personal'
     // Applicants edit structured name parts; validate them server-side too
     if (decoded.role === 'Applicant' && (profile.firstName !== undefined || profile.lastName !== undefined || profile.middleName !== undefined || profile.suffix !== undefined)) {
       const { values: nameValues, fieldErrors: nameErrors } = validateNameFields(profile, { noMiddleName: profile.noMiddleName === true || !sanitizeName(profile.middleName) })
@@ -1929,9 +2012,20 @@ app.put('/api/jobs/:id', requireVerifiedEmail, requireApprovedEmployer, async (r
 app.get('/api/jobs', requireVerifiedEmail, requireApprovedEmployer, async (req, res) => {
   try {
     const viewer = authenticateRequest(req)
+    const sharedApplicantEmails = new Map()
+    if (viewer?.role === 'Employer') {
+      const owner = await Employer.findOne({ email: viewer.email }).select('_id').lean()
+      const shares = owner ? await Referral.find({ employerId: owner._id, status: { $nin: WITHDRAWN_REFERRALS }, deliveryState: { $ne: 'processing' } }).populate({ path: 'applicantId', select: 'email' }).select('jobId applicantId').lean() : []
+      for (const share of shares) {
+        const key = String(share.jobId)
+        if (!sharedApplicantEmails.has(key)) sharedApplicantEmails.set(key, new Set())
+        if (share.applicantId?.email) sharedApplicantEmails.get(key).add(share.applicantId.email)
+      }
+    }
     const present = (doc) => {
       const job = normalizeJobPosting(typeof doc.toObject === 'function' ? doc.toObject() : doc)
       if (viewer?.role !== 'Admin' && viewer?.email !== job.createdBy) delete job.notesToAdmin
+      if (viewer?.role !== 'Admin') job.applicants = (job.applicants || []).filter((entry) => viewer?.role === 'Applicant' ? entry.email === viewer.email : viewer?.role === 'Employer' && sharedApplicantEmails.get(String(job._id))?.has(entry.email))
       return job
     }
     const attachEmployerBranding = async (jobDocs) => {
@@ -1942,10 +2036,11 @@ app.get('/api/jobs', requireVerifiedEmail, requireApprovedEmployer, async (req, 
           return { ...plain, employerBranding: null }
         })
       }
-      const employers = await Employer.find({ email: { $in: emails.map((email) => new RegExp(`^${String(email).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i')) } }).select('email profile.profileImage profile.bannerImage').lean()
+      const employers = await Employer.find({ email: { $in: emails.map((email) => new RegExp(`^${String(email).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i')) } }).select('email profile.profileImage profile.bannerImage receivingApplicantsSuspendedAt').lean()
       const brandingByEmail = new Map(employers.map((employer) => [employer.email.toLowerCase(), {
         profileImage: employer.profile?.profileImage || '',
         bannerImage: employer.profile?.bannerImage || '',
+        receivingApplicationsSuspended: Boolean(employer.receivingApplicantsSuspendedAt),
       }]))
       return jobDocs.map((job) => {
         const plain = present(job)
@@ -1991,7 +2086,8 @@ app.get('/api/jobs', requireVerifiedEmail, requireApprovedEmployer, async (req, 
     // Paginated mode: ?page=1&limit=10&status=approved&search=...&sortBy=...&order=... -> { items, total, page, limit, totalPages }
     if (req.query.page !== undefined || req.query.limit !== undefined) {
       const { page, limit } = parsePagination(req.query)
-      const status = String(req.query.status || 'approved')
+      const requestedStatus = String(req.query.status || 'approved')
+      const status = ['pending', 'declined', 'mine', 'applied'].includes(requestedStatus) ? requestedStatus : 'approved'
       const auth = req.headers.authorization
       const decoded = auth?.startsWith('Bearer ') ? jwt.verify(auth.split(' ')[1], jwtSecret) : null
       const filter = {}
@@ -2018,6 +2114,12 @@ app.get('/api/jobs', requireVerifiedEmail, requireApprovedEmployer, async (req, 
       // Applicant job board: filters + facets + relevance sort
       if (status === 'approved') {
         const base = baseApprovedJobFilter()
+        let applicantSkills = []
+        if (decoded?.role === 'Applicant') {
+          const applicant = await Applicant.findOne({ email: decoded.email }).select('profile.skills').lean()
+          applicantSkills = applicant?.profile?.skills || []
+          Object.assign(base, applicantSkillQuery(applicantSkills).filter)
+        }
         const facetDocs = await JobPosting.find(base).select('skills location locationType employmentType').lean()
         const facets = countJobFacets(facetDocs)
         const allowedTypes = {
@@ -2031,26 +2133,13 @@ app.get('/api/jobs', requireVerifiedEmail, requireApprovedEmployer, async (req, 
 
         // "Most relevant" ranks by how many of the applicant's saved skills each job requires
         const sortBy = String(req.query.sortBy || 'relevant')
-        let applicantSkills = []
-        if (decoded?.role === 'Applicant') {
-          const applicant = await Applicant.findOne({ email: decoded.email }).select('profile.skills').lean()
-          applicantSkills = (applicant?.profile?.skills || []).filter((skill) => typeof skill === 'string' && skill.trim())
-        }
         if (sortBy === 'relevant' && applicantSkills.length > 0) {
-          const lowerSkills = applicantSkills.map((skill) => skill.trim().toLowerCase())
           const result = await paginateQuery(JobPosting, finalFilter, {
             page,
             limit,
             sortSpec: {
               computed: {
-                __skillMatch: {
-                  $size: {
-                    $setIntersection: [
-                      { $map: { input: { $ifNull: ['$skills', []] }, as: 'skill', in: { $toLower: '$$skill' } } },
-                      { $literal: lowerSkills },
-                    ],
-                  },
-                },
+                __skillMatch: applicantSkillQuery(applicantSkills).countExpression,
               },
               fields: () => ({ __skillMatch: -1, createdAt: -1 }),
             },
@@ -2072,6 +2161,7 @@ app.get('/api/jobs', requireVerifiedEmail, requireApprovedEmployer, async (req, 
           sortSpec: approvedSortSpec,
           sortDir: approvedSortOrder,
         })
+        if (decoded?.role === 'Applicant') result.items = result.items.map((job) => ({ ...job, skillMatch: jobSkillMatchCount(job.skills, applicantSkills), skillTotal: (job.skills || []).length }))
         result.items = decoded?.role === 'Admin' ? await attachAdminReviewDetails(result.items) : await attachEmployerBranding(result.items)
         return res.json({ ...result, facets, applied })
       }
@@ -2129,13 +2219,22 @@ app.get('/api/jobs', requireVerifiedEmail, requireApprovedEmployer, async (req, 
       const jobs = await JobPosting.find({ status: 'declined' }).sort({ createdAt: -1 })
       return res.json(await attachAdminReviewDetails(jobs))
     }
-    const jobs = await JobPosting.find({ status: 'approved' }).sort({ createdAt: -1 })
     const auth = req.headers.authorization
+    const decoded = auth?.startsWith('Bearer ') ? jwt.verify(auth.split(' ')[1], jwtSecret) : null
+    const approvedFilter = { status: 'approved' }
+    let applicantSkills = []
+    if (decoded?.role === 'Applicant') {
+      const applicant = await Applicant.findOne({ email: decoded.email }).select('profile.skills').lean()
+      applicantSkills = applicant?.profile?.skills || []
+      Object.assign(approvedFilter, baseApprovedJobFilter(), applicantSkillQuery(applicantSkills).filter)
+    }
+    const jobs = await JobPosting.find(approvedFilter).sort({ createdAt: -1 })
     if (auth?.startsWith('Bearer ')) {
       const decoded = jwt.verify(auth.split(' ')[1], jwtSecret)
       if (decoded.role === 'Admin') return res.json(await attachAdminReviewDetails(jobs))
     }
-    res.json(await attachEmployerBranding(jobs))
+    const visibleJobs = decoded?.role === 'Applicant' ? jobs.map((job) => ({ ...job.toObject(), skillMatch: jobSkillMatchCount(job.skills, applicantSkills), skillTotal: job.skills.length })) : jobs
+    res.json(await attachEmployerBranding(visibleJobs))
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Server error' })
@@ -2238,8 +2337,12 @@ export function validateNsrpAnswers(input) {
   for (const [field, allowed] of Object.entries(NSRP_ALLOWED_VALUES)) {
     if (answers[field] && !allowed.includes(answers[field])) fieldErrors[field] = 'Choose one of the listed options.'
   }
+  Object.assign(fieldErrors, validateApplicantLocation(answers))
   // Shared per-field rules (names, addresses, height, salary, phones, passport)
   for (const [field, validate] of Object.entries(NSRP_FIELD_VALIDATORS)) {
+    // Location names are checked against the shared list, which includes
+    // official labels with punctuation beyond the free-text address rules.
+    if (['addressBarangay', 'addressCity', 'addressProvince'].includes(field)) continue
     if (!fieldErrors[field]) {
       const problem = validate(answers[field])
       if (problem) fieldErrors[field] = problem
@@ -2696,163 +2799,33 @@ app.post('/api/nsrp/generate', async (req, res) => {
   }
 })
 
-app.post('/api/jobs/:id/apply', requireVerifiedEmail, applicationUpload.single('nsrp'), async (req, res) => {
+const jobResumeUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: RESUME_MAX_BYTES, files: 1, fields: 3, fieldSize: 4096 } }).single('resume')
+app.post('/api/jobs/:id/apply', (req, res, next) => jobResumeUpload(req, res, (error) => {
+  if (error) return res.status(403).json({ code: 'INVALID_RESUME', error: error.code === 'LIMIT_FILE_SIZE' ? 'Your resume must be no larger than 5 MB.' : 'Upload one PDF or DOCX resume.', fieldErrors: { resume: 'Upload one PDF or DOCX resume, up to 5 MB.' } })
+  next()
+}), async (req, res) => {
   try {
-    const auth = req.headers.authorization
-    if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
-    const token = auth.split(' ')[1]
-    const decoded = jwt.verify(token, jwtSecret)
-    if (decoded.role !== 'Applicant') return res.status(403).json({ error: 'Forbidden' })
-    const job = await JobPosting.findById(req.params.id)
-    if (!job) return res.status(404).json({ error: 'Job not found' })
-    if (job.status !== 'approved') return res.status(400).json({ error: 'Job is not available' })
-    if (job.deadline && job.deadline.toISOString().slice(0, 10) < todayInManila()) {
-      return res.status(410).json({ code: 'APPLICATION_CLOSED', error: 'The application deadline for this job has passed.' })
+    const decoded = authenticateRequest(req)
+    if (decoded?.role !== 'Applicant') return res.status(403).json({ error: 'Applicants only' })
+    await referralWorkflow.checkEligibility({ email: decoded.email, jobId: req.params.id, sharingConsent: req.body?.sharingConsent })
+    let details = req.body?.applicationDetails
+    if (typeof details === 'string') {
+      try { details = JSON.parse(details) }
+      catch { return res.status(403).json({ code: 'INVALID_APPLICATION_DETAILS', error: 'Check your application details and try again.' }) }
     }
-
-    const applicant = await loadApplicantWithCurrentResume(decoded.email)
-    if (!applicant) return res.status(404).json({ error: 'Applicant not found' })
-    if (applicant.verificationStatus !== 'approved') {
-      return res.status(403).json({ code: 'APPLICANT_NOT_VERIFIED', error: 'PESO must approve your registration and documents before you apply for a job.' })
-    }
-    // A resume is optional and never blocks applying.
-    if (job.applicants.some((existingApplicant) => existingApplicant.email === decoded.email)) {
-      return res.status(409).json({ error: 'You have already applied for this job' })
-    }
-
-    let nsrpFilePayload
-    let nsrpVersionToSave
-    let nsrpVersionCleanup
-    if (req.body?.answers) {
-      const { answers, fieldErrors } = validateNsrpAnswers({ ...req.body.answers, email: req.body.answers.email || decoded.email })
-      if (Object.keys(fieldErrors).length) return res.status(422).json({ error: 'Check the highlighted NSRP fields.', fieldErrors })
-      let signatureImage = null
-      let certification = { certified: false, certificationDate: '' }
-      try {
-        signatureImage = parseSignatureImage(req.body.answers.signatureDataUrl)
-        certification = resolveCertification({ certified: req.body.answers.certified, signature: signatureImage })
-      } catch (err) {
-        if (err instanceof SignatureValidationError) {
-          return res.status(422).json({ error: err.message, fieldErrors: { certified: err.message } })
-        }
-        throw err
-      }
-      let pdfBuffer
-      try {
-        pdfBuffer = await generateNsrpPdf(answers, { signatureImage, certificationDate: certification.certificationDate })
-      } catch (err) {
-        console.error('NSRP application PDF generation failed:', err)
-        return res.status(500).json({ code: 'NSRP_GENERATION_FAILED', error: 'The NSRP PDF could not be generated. Please try again.' })
-      }
-      if (signatureImage && certification.certified) {
-        applicant.set('nsrpSignature', {
-          mimetype: signatureImage.mimetype,
-          size: signatureImage.bytes.length,
-          uploadedAt: new Date(),
-          certifiedAt: certification.certifiedAt,
-          data: signatureImage.bytes,
-        })
-      }
-      const nsrpFile = { originalname: `NSRP-${answers.surname.replace(/\s+/g, '_')}.pdf`, mimetype: 'application/pdf', size: pdfBuffer.length, buffer: pdfBuffer }
-      const { version, cleanup } = await appendVerificationVersion(applicant, 'nsrpForm', nsrpFile, '', 'generated')
-      nsrpVersionToSave = version
-      nsrpVersionCleanup = cleanup
-      nsrpFilePayload = { originalName: nsrpFile.originalname, mimetype: nsrpFile.mimetype, size: nsrpFile.size, data: pdfBuffer }
-      const existingSkills = Array.isArray(applicant.profile?.skills) ? applicant.profile.skills : []
-      const mergedSkills = new Map(existingSkills.map((skill) => [skill.trim().toLocaleLowerCase(), skill.trim()]).filter(([key]) => key))
-      for (const skill of answers.skills) mergedSkills.set(skill.toLocaleLowerCase(), skill)
-      applicant.set('profile.education', answers.education)
-      applicant.set('profile.technicalTraining', answers.technicalTraining)
-      applicant.set('profile.workExperience', answers.workExperience)
-      applicant.set('profile.skills', [...mergedSkills.values()])
-    } else if (req.file) {
-      nsrpFilePayload = { originalName: req.file.originalname, mimetype: req.file.mimetype, size: req.file.size, data: req.file.buffer }
-    } else {
-      const savedApplicant = await Applicant.findOne({ email: decoded.email })
-        .select('+verificationDocuments.nsrpForm.versions.data +nsrpVerificationFile.data')
-      const savedVersion = latestVersion(savedApplicant?.verificationDocuments?.nsrpForm)
-      const storedNsrp = savedVersion?.version
-        ? await loadDocumentFile(savedApplicant._id, 'nsrpForm', savedVersion.version, 'front')
-        : null
-      const savedVersionData = storedNsrp?.data ?? savedVersion?.data
-      const savedNsrp = savedVersionData ? { ...savedVersion, data: savedVersionData } : savedApplicant?.nsrpVerificationFile
-      if (savedNsrp?.data) {
-        const raw = savedNsrp.data
-        const buffer = Buffer.isBuffer(raw) ? raw : (raw?.buffer ? Buffer.from(raw.buffer) : Buffer.from(raw))
-        nsrpFilePayload = {
-          originalName: savedNsrp.originalName || 'NSRP-Registration-Form.pdf',
-          mimetype: savedNsrp.mimetype || 'application/pdf',
-          size: savedNsrp.size || buffer.length,
-          data: buffer,
-        }
-      } else {
-        return res.status(400).json({ error: 'Complete your NSRP form online before applying.' })
-      }
-    }
-
-    if (nsrpVersionToSave) {
-      try {
-        await applicant.save()
-      } catch (err) {
-        if (nsrpVersionCleanup) await nsrpVersionCleanup()
-        throw err
-      }
-    }
-    await JobApplication.create({
-      jobId: job._id,
-      applicantEmail: decoded.email,
-      nsrpFile: nsrpFilePayload,
-    })
-
-    job.applicants.push({ email: decoded.email, appliedAt: new Date() })
-    await job.save()
-
-    const employer = await Employer.findOne({ email: job.createdBy }).lean()
-    const applicantName = applicantFullName(applicant) || applicant.email
-    const employerName = employer?.companyName || job.company || job.createdBy || 'Unknown employer'
-    const applicationMeta = {
-      applicantId: String(applicant._id),
-      jobId: String(job._id),
-      employerId: employer?._id ? String(employer._id) : undefined,
-      applicantName,
-      jobTitle: job.title,
-      employerName,
-    }
-
-    await notify({
-      recipient: { id: applicant._id, role: 'Applicant', email: applicant.email },
-      type: 'application_submitted',
-      title: 'Application submitted',
-      message: `Your application for "${job.title}" at ${employerName} was submitted.`,
-      link: '/jobs',
-      email: true,
-      metadata: applicationMeta,
-    })
-    if (employer) {
-      await notify({
-        recipient: { id: employer._id, role: 'Employer', email: employer.email },
-        type: 'new_applicant',
-        title: 'New applicant',
-        message: `${applicantName} applied to "${job.title}".`,
-        link: '/jobs',
-        email: true,
-        metadata: applicationMeta,
-      })
-    }
-    await notifyAdmins({
-      type: 'new_application',
-      title: 'New applicant needs referral review',
-      message: `${applicantName} applied to "${job.title}" at ${employerName}. Review and decide whether to refer.`,
-      link: '/peso-referrals',
-      metadata: applicationMeta,
-    })
-
-    res.json({ success: true, job })
-  } catch (err) {
-    console.error(err)
-    if (err.status) return res.status(err.status).json({ error: err.message })
-    if (err.code === 11000) return res.status(409).json({ error: 'You have already applied for this job' })
-    res.status(500).json({ error: 'Server error' })
+    const { value, errors } = validateJobApplication(details, req.file)
+    if (Object.keys(errors).length) return res.status(403).json({ code: 'INVALID_APPLICATION_DETAILS', error: 'Check the highlighted application fields.', fieldErrors: errors })
+    const emailCheck = await validateApplicationEmail(value.email)
+    if (!emailCheck.valid) return res.status(emailCheck.status).json({ code: emailCheck.code, error: emailCheck.error, fieldErrors: { email: emailCheck.error } })
+    const signature = req.file.mimetype === 'application/pdf' ? Buffer.from('%PDF-') : Buffer.from([0x50, 0x4b, 0x03, 0x04])
+    if (!req.file.buffer.subarray(0, signature.length).equals(signature)) return res.status(403).json({ code: 'INVALID_RESUME', error: 'The resume contents do not match its file type. Upload a valid PDF or DOCX file.', fieldErrors: { resume: 'Upload a valid PDF or DOCX file.' } })
+    const resumeFile = { originalName: path.basename(req.file.originalname).replace(/[\r\n]/g, '').slice(0, 180), mimetype: req.file.mimetype, size: req.file.size, data: req.file.buffer }
+    res.json(await referralWorkflow.submit({ email: decoded.email, jobId: req.params.id, sharingConsent: req.body.sharingConsent, applicationDetails: value, resumeFile, ip: req.ip }))
+  } catch (error) {
+    if (error instanceof ApplicationError) return res.status(error.status).json({ code: error.code, error: error.message })
+    if (error.status) return res.status(error.status).json({ error: error.message })
+    console.error('[application] submission unavailable')
+    res.status(409).json({ code: 'APPLICATION_UNAVAILABLE', error: 'Your application could not be submitted. Please try again.' })
   }
 })
 
@@ -2860,83 +2833,25 @@ app.post('/api/referrals', async (req, res) => {
   try {
     const auth = req.headers.authorization
     if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
-    const token = auth.split(' ')[1]
-    const decoded = jwt.verify(token, jwtSecret)
-    if (decoded.role !== 'Admin') return res.status(403).json({ error: 'Forbidden' })
+    const decoded = authenticateRequest(req)
+    if (decoded?.role !== 'Admin') return res.status(403).json({ error: 'Forbidden' })
 
-    const { jobId, applicantIds } = req.body || {}
-    if (!jobId || !Array.isArray(applicantIds) || applicantIds.length === 0) {
-      return res.status(400).json({ error: 'jobId and applicantIds are required' })
+    const { jobId, applicantIds, reason } = req.body || {}
+    if (!mongoose.isValidObjectId(jobId) || !Array.isArray(applicantIds) || !applicantIds.length || applicantIds.some((id) => !mongoose.isValidObjectId(id))) return res.status(403).json({ code: 'INVALID_REFERRAL', error: 'Choose a valid job and applicants.' })
+    if (typeof reason !== 'string' || !reason.trim() || reason.length > 500) return res.status(403).json({ code: 'REASON_REQUIRED', error: 'A reason of 1 to 500 characters is required.' })
+    const admin = await Admin.findOne({ email: decoded.email }).select('_id').lean()
+    if (!admin) return res.status(403).json({ error: 'Admin account not found' })
+    const accounts = await Applicant.find({ _id: { $in: applicantIds } }).select('email').lean()
+    if (accounts.length !== new Set(applicantIds.map(String)).size) return res.status(403).json({ error: 'Applicant not found' })
+    const created = []
+    for (const account of accounts) {
+      try {
+        created.push(await referralWorkflow.submit({ email: account.email, jobId, source: 'admin', adminId: admin._id, adminEmail: decoded.email, reason, ip: req.ip }))
+      } catch (error) { if (error.code !== 'ALREADY_APPLIED') throw error }
     }
-
-    const job = await JobPosting.findById(jobId)
-    if (!job) return res.status(404).json({ error: 'Job not found' })
-
-    const employer = await Employer.findOne({ email: job.createdBy }).lean()
-    if (!employer) return res.status(404).json({ error: 'Employer for job not found' })
-    if (job.status !== 'approved') return res.status(409).json({ error: 'PESO must approve the job posting before creating referrals.' })
-
-    const admin = await Admin.findOne({ email: decoded.email }).lean()
-    if (!admin) return res.status(404).json({ error: 'Admin not found' })
-
-    const normalizedApplicantIds = applicantIds
-      .filter((id) => typeof id === 'string' || typeof id === 'number' || (id && typeof id === 'object'))
-      .map((id) => String(id))
-
-    if (normalizedApplicantIds.length === 0) {
-      return res.status(400).json({ error: 'No valid applicantIds provided' })
-    }
-
-    const existingApplicants = await Applicant.find({ _id: { $in: normalizedApplicantIds } }).select('_id verificationStatus deletedAt').lean()
-    if (existingApplicants.some((applicant) => applicant.deletedAt || applicant.verificationStatus !== 'approved')) {
-      return res.status(403).json({ error: 'Only approved applicants with active accounts can be referred. Review the selected applicants before continuing.' })
-    }
-    const existingApplicantIds = new Set(existingApplicants.map((a) => String(a._id)))
-
-    const existingReferrals = await Referral.find({
-      jobId: job._id,
-      applicantId: { $in: normalizedApplicantIds },
-    }).select('applicantId').lean()
-    const alreadyReferredApplicantIds = new Set(existingReferrals.map((referral) => String(referral.applicantId)))
-
-    const referralsPayload = normalizedApplicantIds
-      .filter((applicantId) =>
-        existingApplicantIds.has(applicantId) && !alreadyReferredApplicantIds.has(applicantId),
-      )
-      .map((applicantId) => ({
-        jobId: job._id,
-        applicantId,
-        employerId: employer._id,
-        referredBy: admin._id,
-        status: 'pending',
-      }))
-
-    if (referralsPayload.length === 0) {
-      return res.json({ createdCount: 0, referrals: [], message: 'Applicants already referred for this job' })
-    }
-
-    const created = await Referral.insertMany(referralsPayload)
-
-    await Promise.all(created.map((referral) => notify({
-      recipient: { id: referral.applicantId, role: 'Applicant' },
-      type: 'referral_received',
-      title: 'You were referred to a job',
-      message: `PESO referred you to "${job.title}" at ${employer.companyName || job.company || 'an employer'}.`,
-      link: '/jobs',
-      email: true,
-      metadata: { referralId: String(referral._id), jobId: String(job._id) },
-    })))
-    await notify({
-      recipient: { id: employer._id, role: 'Employer', email: employer.email },
-      type: 'referral_received',
-      title: 'New referral received',
-      message: `PESO referred ${created.length} applicant(s) to "${job.title}".`,
-      link: '/referrals',
-      email: true,
-      metadata: { jobId: String(job._id), count: created.length },
-    })
     res.json({ createdCount: created.length, referrals: created })
   } catch (err) {
+    if (err instanceof ApplicationError) return res.status(err.status).json({ code: err.code, error: err.message })
     console.error(err)
     res.status(500).json({ error: 'Server error' })
   }
@@ -2946,17 +2861,17 @@ app.delete('/api/referrals', async (req, res) => {
   try {
     const auth = req.headers.authorization
     if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
-    const token = auth.split(' ')[1]
-    const decoded = jwt.verify(token, jwtSecret)
-    if (decoded.role !== 'Admin') return res.status(403).json({ error: 'Forbidden' })
+    const decoded = authenticateRequest(req)
+    if (decoded?.role !== 'Admin') return res.status(403).json({ error: 'Forbidden' })
 
-    const { jobId, applicantIds } = req.body || {}
-    const applicantId = Array.isArray(applicantIds) ? applicantIds[0] : null
-    if (!jobId || !applicantId) return res.status(400).json({ error: 'jobId and applicantId are required' })
-
-    const deleted = await Referral.deleteOne({ jobId, applicantId: String(applicantId) })
-    res.json({ deletedCount: deleted.deletedCount || 0 })
+    const { jobId, applicantIds, reason } = req.body || {}
+    if (!mongoose.isValidObjectId(jobId) || !mongoose.isValidObjectId(applicantIds?.[0])) return res.status(403).json({ code: 'INVALID_REFERRAL', error: 'Choose a valid referral.' })
+    const referral = await Referral.findOne({ jobId, applicantId: applicantIds[0] }).select('_id').lean()
+    if (!referral) return res.status(409).json({ error: 'Referral not found' })
+    await referralWorkflow.pullBack(referral._id, decoded.email, reason)
+    res.json({ withdrawnCount: 1 })
   } catch (err) {
+    if (err instanceof ApplicationError) return res.status(err.status).json({ code: err.code, error: err.message })
     console.error(err)
     res.status(500).json({ error: 'Server error' })
   }
@@ -3012,26 +2927,30 @@ app.get('/api/referrals/employer/:employerId', requireApprovedEmployer, async (r
       if (String(employer._id) !== String(req.params.employerId)) return res.status(403).json({ error: 'Forbidden' })
     }
 
-    if (req.query.page !== undefined || req.query.limit !== undefined) {
-      const { page, limit } = parsePagination(req.query)
-      const result = await paginateQuery(Referral, { employerId: req.params.employerId }, { page, limit, sort: { createdAt: -1 } })
-      await Referral.populate(result.items, [
-        { path: 'applicantId', select: 'email phone profile' },
-        { path: 'jobId', model: JobPosting, select: 'title company location description requirements salary locationType employmentType status createdBy createdAt' },
-      ])
-      result.items = result.items.map((item) => ({ ...item, applicantId: employerApplicantSummary(item.applicantId) }))
-      return res.json(result)
-    }
-    const referrals = await Referral.find({ employerId: req.params.employerId })
+    if (!mongoose.isValidObjectId(req.params.employerId)) return res.status(403).json({ code: 'INVALID_EMPLOYER', error: 'Choose a valid employer.' })
+    const referrals = await Referral.find({ employerId: req.params.employerId, deliveryState: { $ne: 'processing' } })
       .sort({ createdAt: -1 })
       .populate({ path: 'applicantId', select: 'email phone profile' })
       .populate({
         path: 'jobId',
         model: JobPosting,
-        select: 'title company location description requirements salary locationType employmentType status createdBy createdAt',
+        select: 'title company location description requirements salary locationType employmentType status createdBy createdAt skills experience education deadline',
       })
-
-    res.json(referrals.map((referral) => ({ ...referral.toObject(), applicantId: employerApplicantSummary(referral.applicantId) })))
+      .lean()
+    const employerState = await Employer.findById(req.params.employerId).select('receivingApplicantsSuspendedAt').lean()
+    const applications = await JobApplication.find({ referralId: { $in: referrals.filter((entry) => !WITHDRAWN_REFERRALS.includes(entry.status)).map((entry) => entry._id) }, deliveryStatus: 'delivered' }).select('referralId applicationDetails resumeFile.originalName resumeFile.mimetype resumeFile.size').lean()
+    const applicationByReferral = new Map(applications.map((entry) => [String(entry.referralId), entry]))
+    const ranked = rankEmployerReferrals(referrals).map((entry) => {
+      const application = applicationByReferral.get(String(entry._id))
+      if (application?.applicationDetails?.email && entry.applicantId) entry.applicantId.email = application.applicationDetails.email
+      if (application?.applicationDetails?.mobile && entry.applicantId) entry.applicantId.phone = application.applicationDetails.mobile
+      return { ...entry, employerSuspended: Boolean(employerState?.receivingApplicantsSuspendedAt), ...(application ? { application: { id: application._id, details: application.applicationDetails, resume: application.resumeFile?.originalName ? { name: application.resumeFile.originalName, size: application.resumeFile.size } : undefined } } : {}) }
+    })
+    if (req.query.page !== undefined || req.query.limit !== undefined) {
+      const { page, limit } = parsePagination(req.query)
+      return res.json({ items: ranked.slice((page - 1) * limit, page * limit), total: ranked.length, page, limit, totalPages: Math.max(1, Math.ceil(ranked.length / limit)) })
+    }
+    res.json(ranked)
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Server error' })
@@ -3042,10 +2961,11 @@ app.put('/api/referrals/:id/respond', requireApprovedEmployer, async (req, res) 
   try {
     const auth = req.headers.authorization
     if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
-    const token = auth.split(' ')[1]
-    const decoded = jwt.verify(token, jwtSecret)
+    const decoded = authenticateRequest(req)
 
+    if (decoded?.role !== 'Employer') return res.status(403).json({ error: 'Employers only' })
     const { status } = req.body || {}
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(403).json({ code: 'INVALID_REFERRAL', error: 'Choose a valid application.' })
     if (!['accepted', 'declined'].includes(status)) return res.status(400).json({ error: 'Invalid status' })
 
     const employer = await Employer.findOne({ email: decoded.email }).lean()
@@ -3054,9 +2974,13 @@ app.put('/api/referrals/:id/respond', requireApprovedEmployer, async (req, res) 
     const referral = await Referral.findById(req.params.id)
     if (!referral) return res.status(404).json({ error: 'Referral not found' })
     if (String(referral.employerId) !== String(employer._id)) return res.status(403).json({ error: 'Forbidden' })
+    if (WITHDRAWN_REFERRALS.includes(referral.status) || referral.deliveryState === 'processing') return res.status(409).json({ code: 'APPLICATION_WITHDRAWN', error: 'This application is no longer available for employer review.' })
 
+    const responseEvent = { action: 'employer_response', status, by: 'Employer', at: new Date() }
+    const responseChange = await Referral.updateOne({ _id: referral._id, status: { $nin: WITHDRAWN_REFERRALS }, deliveryState: { $ne: 'processing' } }, { $set: { status }, $push: { history: responseEvent } })
+    if (!responseChange.modifiedCount) return res.status(409).json({ code: 'APPLICATION_WITHDRAWN', error: 'This application is no longer available for employer review.' })
     referral.status = status
-    await referral.save()
+    await JobApplication.updateOne({ referralId: referral._id }, { $push: { history: responseEvent } })
 
     const respondedJob = await JobPosting.findById(referral.jobId).select('title').lean()
     const respondedTitle = respondedJob?.title || 'a job'
@@ -3077,7 +3001,7 @@ app.put('/api/referrals/:id/respond', requireApprovedEmployer, async (req, res) 
       metadata: { referralId: String(referral._id), jobId: String(referral.jobId), status },
     })
 
-    res.json(referral)
+    res.json({ _id: referral._id, jobId: referral.jobId, applicantId: referral.applicantId, employerId: referral.employerId, source: referral.source, status: referral.status, createdAt: referral.createdAt, history: publicApplicationHistory([...(referral.history || []), responseEvent]) })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Server error' })
@@ -3132,6 +3056,8 @@ app.post('/api/hire-reports', requireVerifiedEmail, requireApprovedEmployer, asy
     if (!referral && !job.applicants.some((entry) => entry.email === applicant.email)) {
       return res.status(403).json({ error: 'A referral or application for this job is required' })
     }
+    if (referral && WITHDRAWN_REFERRALS.includes(referral.status)) return res.status(409).json({ code: 'APPLICATION_WITHDRAWN', error: 'This application has returned to PESO review.' })
+    if (decoded.role === 'Employer' && !referral) return res.status(403).json({ code: 'REFERRAL_REQUIRED', error: 'This applicant is not available for employer review.' })
 
     // Each party maintains its own report. An applicant update never overwrites
     // the employer's statement, and prior outcomes remain available to PESO.
@@ -3154,7 +3080,10 @@ app.post('/api/hire-reports', requireVerifiedEmail, requireApprovedEmployer, asy
       notes: notes.trim(),
       reportedAt: new Date(),
     })
+    if (decoded.role === 'Employer' && ['hired', 'deployed'].includes(status)) await referralWorkflow.reserveHireSlot(job, applicant._id)
     await hireReport.save()
+    if (referral) await Referral.updateOne({ _id: referral._id }, { $push: { history: { action: 'employment_update', status, by: decoded.role, at: new Date() } } })
+    if (decoded.role === 'Employer' && status === 'not_hired') await JobPosting.updateOne({ _id: job._id }, { $pull: { hiredApplicantIds: applicant._id } })
 
     await notifyAdmins({
       type: 'hire_report_submitted',
@@ -3175,6 +3104,7 @@ app.post('/api/hire-reports', requireVerifiedEmail, requireApprovedEmployer, asy
 
     res.json(hireReport)
   } catch (err) {
+    if (err instanceof ApplicationError) return res.status(err.status).json({ code: err.code, error: err.message })
     console.error(err)
     res.status(500).json({ error: 'Server error' })
   }
@@ -3324,7 +3254,14 @@ app.get('/api/ratings/:userId', async (req, res) => {
         return res.status(403).json({ code: 'EMPLOYER_NOT_VERIFIED', status: verification.status })
       }
     }
-    const ratings = await Rating.find({ toUserId: req.params.userId }).sort({ createdAt: -1 })
+    if (!decoded || !mongoose.isValidObjectId(req.params.userId)) return res.status(403).json({ error: 'Please sign in and choose a valid recipient.' })
+    const filter = { toUserId: req.params.userId }
+    if (decoded.role !== 'Admin') {
+      const account = await (decoded.role === 'Applicant' ? Applicant : Employer).findOne({ email: decoded.email }).select('_id').lean()
+      if (!account) return res.status(403).json({ error: 'Account unavailable.' })
+      if (String(account._id) !== req.params.userId) filter.fromUserId = account._id
+    }
+    const ratings = await Rating.find(filter).sort({ createdAt: -1 })
     const total = ratings.reduce((sum, item) => sum + Number(item.score || 0), 0)
     const averageScore = ratings.length > 0 ? total / ratings.length : 0
 
@@ -3340,7 +3277,7 @@ app.get('/api/ratings/:userId', async (req, res) => {
   }
 })
 
-const dashboardService = createDashboardService({ Applicant, Employer, JobPosting, JobApplication, Referral, HireReport, Notification })
+const dashboardService = createDashboardService({ Applicant, Employer, JobPosting, JobApplication, Referral, HireReport, Notification, Interview, ApplicationReport })
 
 // Read-only, role-scoped aggregates; the role always comes from the verified token
 app.get('/api/dashboard', requireApprovedEmployer, async (req, res) => {
@@ -3513,6 +3450,7 @@ app.post('/api/employer-requests', requirementsUpload.single('requirements'), as
       fieldErrors: { city: 'Choose a city/municipality from the location list.', province: 'Province must match the selected city/municipality.' },
     })
     const passwordHash = await bcrypt.hash(password, 10)
+    const nsrpAutoEnabledAtCreation = await nsrpAutomation.creationEnabled('Employer')
     try {
       createdEmployer = await createUserInRole('Employer', {
         email: email.trim(),
@@ -3542,6 +3480,7 @@ app.post('/api/employer-requests', requirementsUpload.single('requirements'), as
       uploadedAt: submittedAt,
     }
     const request = new EmployerRequest({
+      nsrpAutoEnabledAtCreation,
       email: email.trim(),
       passwordHash,
       companyName: companyName.trim(),
@@ -3575,6 +3514,7 @@ app.post('/api/employer-requests', requirementsUpload.single('requirements'), as
     }
     await UsedEmailProof.create({ jti: emailProof.jti, expiresAt: new Date(emailProof.exp * 1000) })
     await Employer.updateOne({ email: email.trim() }, { $set: { requirementsSubmittedAt: request.requirementsSubmittedAt } })
+    await nsrpAutomation.process({ role: 'Employer', accountId: createdEmployer._id, ip: req.ip })
     await notify({
       recipient: { id: createdEmployer._id, role: 'Employer', email: createdEmployer.email },
       type: 'employer_registration_review',
@@ -3781,6 +3721,7 @@ app.post('/api/employer-requirements', requirementsUpload.single('requirements')
     request.reviewedBy = undefined
     if (versionNumber > 1) request.resubmittedAt = submittedAt
     await request.save()
+    await nsrpAutomation.process({ role: 'Employer', accountId: verification.employer._id, ip: req.ip })
     uploadedPath = null
     await Employer.updateOne({ email: decoded.email }, {
       $set: {

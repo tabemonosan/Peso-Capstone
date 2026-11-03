@@ -1,10 +1,20 @@
 // @vitest-environment node
+import { jobApplicationRequest } from './helpers.js'
+import { Employer } from '../../models/collections.js'
 // Integration tests for the upload-path sign-up (nsrpMode: 'upload') and the
 // optional resume, against a real MongoDB (mongodb-memory-server) over HTTP.
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest'
 import request from 'supertest'
 import mongoose from 'mongoose'
 
+
+// DNS is deterministic; no external mailbox or DNS service is contacted in tests.
+vi.mock('node:dns/promises', () => ({ Resolver: class {
+  async resolveMx(domain) {
+    if (domain === 'gmail.comsds') throw Object.assign(new Error('Domain not found'), { code: 'ENOTFOUND' })
+    return [{ priority: 10, exchange: 'mail.example.test' }]
+  }
+} }))
 vi.mock('../../mailer.js', async (importOriginal) => {
   const actual = await importOriginal()
   return {
@@ -139,7 +149,7 @@ describe('online path without a resume', () => {
     expect(requiredDocs.map((d) => d.docKey).sort()).toEqual(['birthCertificate', 'nsrpForm', 'validId1'])
   }, 60000)
 
-  it('reaches verified status and can apply for a job without a resume', async () => {
+  it('reaches verified status without a signup resume and supplies one when applying', async () => {
     const signup = await signupRequest(request(app).post('/api/signup'), { email: 'apply-no-resume@example.com', resume: false })
     // Admin approves the 3 required documents
     await Applicant.updateOne(
@@ -151,11 +161,11 @@ describe('online path without a resume', () => {
       } },
     )
     const JobPosting = mongoose.model('JobPosting')
+    await Employer.create({ email: 'boss@example.com', passwordHash: 'unused', emailVerified: true, verificationStatus: 'approved', companyName: 'Acme' })
     const job = await JobPosting.create({ title: 'Clerk', company: 'Acme', status: 'approved', createdBy: 'boss@example.com' })
-    const res = await request(app)
+    const res = await jobApplicationRequest(request(app)
       .post(`/api/jobs/${job._id}/apply`)
-      .set('Authorization', `Bearer ${signup.body.token}`)
-      .send({})
+      .set('Authorization', `Bearer ${signup.body.token}`), { email: 'apply-no-resume@example.com' })
     expect(res.status).toBe(200)
   }, 60000)
 })

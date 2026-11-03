@@ -22,7 +22,7 @@ The connected scenario exercises:
 - Uploaded NSRP registrations, logins, and employer approval.
 - Job submission and approval; blocking applicants still awaiting document review.
 - Document approval, expired-deadline rejection, application submission, and duplicate rejection.
-- Employer NSRP access denial, PESO referral, and employer acceptance.
+- Employer NSRP access denial, automatic referral without admin action, and employer acceptance.
 - Independent employer/applicant hiring statements, deployment updates, and admin history.
 - English/Tagalog feedback submission, retry deduplication, and admin feedback listing.
 - Account closure, invalidation of its login token, and retention of historical reports.
@@ -32,6 +32,13 @@ Additional focused tests cover refusal of referrals to unapproved postings or
 restricted applicants, document rejection/resubmission, signup validation,
 notifications, account deletion recovery, and UI navigation. Browser storage is
 reset before each test; refresh behavior remains preserved within each test.
+
+Automatic-referral integration tests additionally cover duplicate/concurrent
+submissions, daily and hashed-IP limits, concurrent hires at capacity, failed
+delivery rollback, consent, privacy after pull back or withdrawal, suspension
+and resumption, manual referrals, the OFF queue and ON behavior, oversight
+authorization, daily digest and immediate problem/no-show notifications.
+See [automatic-referrals.md](automatic-referrals.md) for the implementation details.
 
 ## Latest verification — October 31, 2026
 

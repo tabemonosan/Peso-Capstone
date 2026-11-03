@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { jobApplicationRequest } from './helpers.js'
 import fs from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import bcrypt from 'bcryptjs'
@@ -10,6 +11,14 @@ import { deadlineBounds, emptyJobPosting } from '../../../shared/jobPosting.js'
 import { CSM_QUESTION_KEYS } from '../../../shared/csmQuestionnaire.js'
 
 const sent = vi.hoisted(() => [])
+
+// DNS is deterministic; no external mailbox or DNS service is contacted in tests.
+vi.mock('node:dns/promises', () => ({ Resolver: class {
+  async resolveMx(domain) {
+    if (domain === 'gmail.comsds') throw Object.assign(new Error('Domain not found'), { code: 'ENOTFOUND' })
+    return [{ priority: 10, exchange: 'mail.example.test' }]
+  }
+} }))
 vi.mock('../../mailer.js', () => ({
   sendEmail: vi.fn(async (to, subject, text) => { sent.push({ to, text }); return { delivered: true } }),
   sendVerificationEmail: vi.fn().mockResolvedValue({ delivered: true }), initMailer: vi.fn(),
@@ -68,21 +77,23 @@ describe('connected portal lifecycle', () => {
     const jobId = created.body._id
     expect((await request(app).put(`/api/jobs/${jobId}/status`).set(auth(adminToken)).send({ status: 'approved' })).status).toBe(200)
     // A complete registration still awaits PESO approval until its documents are reviewed.
-    expect((await request(app).post(`/api/jobs/${jobId}/apply`).set(auth(applicantToken)).send({})).status).toBe(403)
+    expect((await request(app).post(`/api/jobs/${jobId}/apply`).set(auth(applicantToken)).send({ sharingConsent: true })).status).toBe(403)
     for (const key of ['nsrpForm', 'birthCertificate', 'validId1']) {
       const review = await request(app).put(`/api/applicants/${applicant._id}/verification-documents/${key}`).set(auth(adminToken)).send({ status: 'approved' })
       expect(review.status, JSON.stringify(review.body)).toBe(200)
     }
     await mongoose.model('JobPosting').updateOne({ _id: jobId }, { deadline: new Date('2000-01-01') })
-    expect((await request(app).post(`/api/jobs/${jobId}/apply`).set(auth(applicantToken)).send({})).status).toBe(410)
-    await mongoose.model('JobPosting').updateOne({ _id: jobId }, { deadline: new Date(deadlineBounds().min) })
-    const application = await request(app).post(`/api/jobs/${jobId}/apply`).set(auth(applicantToken)).send({})
+    expect((await request(app).post(`/api/jobs/${jobId}/apply`).set(auth(applicantToken)).send({ sharingConsent: true })).status).toBe(409)
+    await mongoose.model('JobPosting').updateOne({ _id: jobId }, { deadline: new Date(`${deadlineBounds().min}T23:59:59.999+08:00`) })
+    const application = await jobApplicationRequest(request(app).post(`/api/jobs/${jobId}/apply`).set(auth(applicantToken)), { email: applicantEmail })
     expect(application.status, JSON.stringify(application.body)).toBe(200)
-    expect((await request(app).post(`/api/jobs/${jobId}/apply`).set(auth(applicantToken)).send({})).status).toBe(409)
+    expect((await request(app).post(`/api/jobs/${jobId}/apply`).set(auth(applicantToken)).send({ sharingConsent: true })).status).toBe(409)
     expect((await request(app).get(`/api/job-applications/view?jobId=${jobId}&email=${applicantEmail}`).set(auth(employerToken))).status).toBe(403)
-    const referred = await request(app).post('/api/referrals').set(auth(adminToken)).send({ jobId, applicantIds: [String(applicant._id)] })
+    const referred = await request(app).post('/api/referrals').set(auth(adminToken)).send({ jobId, applicantIds: [String(applicant._id)], reason: 'Already delivered automatically' })
     expect(referred.status, JSON.stringify(referred.body)).toBe(200)
     const referral = await Referral.findOne({ jobId, applicantId: applicant._id })
+    expect(referral.source).toBe('auto')
+    expect(referred.body.createdCount).toBe(0)
     const report = { applicantId: String(applicant._id), referralId: String(referral._id), jobId, status: 'hired', employmentDate: '2026-01-01', notes: 'Contract signed' }
     expect((await request(app).post('/api/hire-reports').set(auth(applicantToken)).send(report)).status).toBe(403)
     expect((await request(app).put(`/api/referrals/${referral._id}/respond`).set(auth(employerToken)).send({ status: 'accepted' })).status).toBe(200)

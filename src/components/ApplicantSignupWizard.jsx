@@ -9,8 +9,9 @@ import VerificationDocumentsForm, { emptyVerificationDocs, validateVerificationD
 import PasswordChecklist from "./PasswordChecklist"
 import { getNsrpWarningSection, getNsrpFieldLabel, NSRP_SECTION_WIZARD_STEP } from "../../shared/nsrpFieldLabels.js"
 import { SUFFIX_OPTIONS } from "../../shared/nameFields.js"
+import { PH_LOCATIONS, applicantCityName } from "../../shared/phLocations.js"
 import {
-  NSRP_TEXT_LIMITS, NSRP_NUMERIC_SPECS, NSRP_SECTION_MAX_ROWS,
+  NSRP_TEXT_LIMITS, NSRP_NUMERIC_SPECS, NSRP_SECTION_MAX_ROWS, NSRP_REQUIRED_FIELDS, RELIGION_OPTIONS,
   EMPLOYED_TYPES, UNEMPLOYED_TYPES, EDUCATION_LEVELS, SEX_OPTIONS, CIVIL_STATUS_OPTIONS,
   EMPLOYMENT_STATUS_OPTIONS, YES_NO, DISABILITY_OPTIONS, WORK_STATUS_OPTIONS,
   digitsOnly, normalizePhMobile, normalizePassportNo, validateNsrpLanguages,
@@ -25,13 +26,14 @@ const NSRP_FIELDS = [
   [
     ["surname", "Surname"], ["firstName", "First name"], ["middleName", "Middle name"],
     ["suffix", "Suffix", "select", SUFFIX_OPTIONS.filter(Boolean)], ["dob", "Date of birth", "date"], ["placeOfBirth", "Place of birth"],
-    ["sex", "Sex", "select", SEX_OPTIONS], ["religion", "Religion"],
+    ["sex", "Sex", "select", SEX_OPTIONS], ["religion", "Religion", "select", RELIGION_OPTIONS],
     ["civilStatus", "Civil status", "select", CIVIL_STATUS_OPTIONS],
     ["height", "Height"],
   ],
   [
-    ["addressStreet", "House no. / street / village"], ["addressBarangay", "Barangay"],
-    ["addressCity", "Municipality / city"], ["addressProvince", "Province"],
+    ["addressStreet", "House no. / street / village"],
+    ["addressCity", "Municipality / city", "select", Object.keys(PH_LOCATIONS)], ["addressProvince", "Province"],
+    ["addressBarangay", "Barangay", "select", []],
     ["tin", "TIN"], ["gsisSss", "GSIS / SSS ID no."], ["pagibig", "Pag-IBIG no."],
     ["philhealth", "PhilHealth no."], ["cellphone", "Cellphone number"],
     ["landline", "Landline number"], ["disability", "Disability (if any)", "select", DISABILITY_OPTIONS],
@@ -177,12 +179,14 @@ function safeDraft() {
 
 export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "signup", initialAnswers = {}, token, onSaved }) {
   const isUpdate = mode === "update"
-  const saved = useMemo(safeDraft, [])
+  const isPublic = mode === "public"
+  const formStepTitle = (id) => isPublic && id === 8 ? 'Preview & download' : stepTitle(id)
+  const saved = useMemo(() => isPublic ? { email: '', answers: {}, basicInfo: {} } : safeDraft(), [isPublic])
   const [email, setEmail] = useState(saved.email)
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
-  const [step, setStep] = useState(isUpdate ? 1 : saved.step)
+  const [step, setStep] = useState(isUpdate || isPublic ? 1 : saved.step)
   const [answers, setAnswers] = useState(() => isUpdate ? { ...initialAnswers, signatureDataUrl: "" } : saved.answers)
   const [consent, setConsent] = useState(saved.consent)
   const [docs, setDocs] = useState(emptyVerificationDocs)
@@ -201,7 +205,7 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
   // Tab navigation state: furthest position reached in the current flow,
   // per-step validity (edited = invalid until re-validated), and the currently
   // focused field (for salary thousands-separator formatting on blur).
-  const flow = isUpdate ? UPDATE_FLOW : nsrpMode === "upload" ? UPLOAD_FLOW : nsrpMode === "online" ? ONLINE_FLOW : UNDECIDED_FLOW
+  const flow = isUpdate || isPublic ? UPDATE_FLOW : nsrpMode === "upload" ? UPLOAD_FLOW : nsrpMode === "online" ? ONLINE_FLOW : UNDECIDED_FLOW
   const flowPos = flow.indexOf(step)
   const [maxPos, setMaxPos] = useState(isUpdate ? UPDATE_FLOW.length - 1 : Math.max(0, flow.indexOf(saved.step)))
   const [stepValidity, setStepValidity] = useState({})
@@ -222,14 +226,14 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
     const safeAnswers = { ...answers }
     delete safeAnswers.signatureDataUrl
     // Files and signatures stay in memory only; both paths' answers are kept.
-    if (!isUpdate) {
+    if (!isUpdate && !isPublic) {
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify({ email, step, answers: safeAnswers, consent, nsrpMode, basicInfo }))
       } catch (storageError) {
         console.error("Could not save applicant sign-up draft:", storageError)
       }
     }
-  }, [email, step, answers, consent, isUpdate, nsrpMode, basicInfo])
+  }, [email, step, answers, consent, isUpdate, isPublic, nsrpMode, basicInfo])
   useEffect(() => () => {
     if (previewUrl) URL.revokeObjectURL(previewUrl)
   }, [previewUrl])
@@ -369,6 +373,7 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
     setBasicInfo((current) => ({
       ...current,
       [key]: value,
+      ...(key === "addressCity" ? { addressProvince: value ? "Albay" : "" } : {}),
       ...(key === "noMiddleName" && value ? { middleName: "" } : {}),
     }))
     setFieldErrors((current) => ({ ...current, [key]: undefined }))
@@ -380,6 +385,10 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
     const sanitized = rule?.sanitize ? rule.sanitize(value) : value
     setAnswers((current) => {
       const next = { ...current, [key]: sanitized }
+      if (key === "addressCity") {
+        next.addressProvince = sanitized ? "Albay" : ""
+        next.addressBarangay = ""
+      }
       // Changing a parent answer clears and hides its dependent fields
       for (const dependent of CONDITIONAL_CLEARS[key]?.(sanitized) || []) next[dependent] = ""
       return next
@@ -527,8 +536,14 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
   // position; one beyond after the current step validates. The last two steps
   // of each flow (Documents onward) require every earlier step to be valid.
   const goToStep = async (targetId) => {
+    if (busy) return
     const targetPos = flow.indexOf(targetId)
     if (targetPos < 0 || targetPos === flowPos) return
+    if (isPublic) {
+      if (targetId === 8) await generatePreview()
+      else setStep(targetId)
+      return
+    }
     if (targetPos < flowPos) { setStep(targetId); return }
     if (targetPos >= flow.length - 2) {
       const invalid = firstInvalidPosBefore(flow.length - 2)
@@ -548,10 +563,16 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
     }
   }
   const next = async () => {
+    if (isPublic) {
+      const target = flow[flowPos + 1]
+      if (target === 8) await generatePreview()
+      else if (target !== undefined) setStep(target)
+      return
+    }
     if (!(await validateCurrent())) return
     setStepValidity((current) => ({ ...current, [step]: true }))
     // Online path: generate the NSRP PDF preview before the final step.
-    if ((isUpdate && step === 6) || (!isUpdate && step === 7 && nsrpMode !== "upload")) {
+    if (((isUpdate || isPublic) && step === 6) || (!isUpdate && step === 7 && nsrpMode !== "upload")) {
       await generatePreview()
       return
     }
@@ -588,6 +609,10 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
       setWarnings(warningHeader ? JSON.parse(warningHeader) : [])
       setPreviewBlob(blob)
       setPreviewUrl(URL.createObjectURL(blob))
+      if (isPublic) {
+        setFieldErrors({})
+        setStepValidity(Object.fromEntries(flow.map((id) => [id, true])))
+      }
       setStepValidity((current) => ({ ...current, [step]: true }))
       setMaxPos(flow.length - 1)
       setStep(8)
@@ -601,6 +626,7 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
     }
   }
   const submit = async () => {
+    if (isPublic) return
     setBusy(true)
     setError("")
     try {
@@ -694,6 +720,7 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
     onCancel?.()
   }
   const renderTextField = ([key, label, type, options]) => {
+    if (key === "addressBarangay") options = PH_LOCATIONS[applicantCityName(answers.addressCity)] || []
     const rule = FIELD_RULES[key] || {}
     const limit = NSRP_TEXT_LIMITS[key]
     const rawValue = answers[key] || ""
@@ -704,16 +731,18 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
       : rawValue
     return (
       <label key={key} className="block text-sm font-medium text-slate-800">
-        {label}{stepErrors.some((fields) => fields.includes(key)) && step !== 0 ? <span className="text-rose-600"> *</span> : null}
+        {label}{NSRP_REQUIRED_FIELDS.includes(key) || (key === "passportExpiry" && answers.passportNo) ? <span className="text-rose-600"> *</span> : null}
         {type === "select" ? (
-          <select id={`field-${key}`} value={rawValue} onChange={(event) => updateAnswer(key, event.target.value)} aria-invalid={Boolean(fieldErrors[key]) || undefined} aria-describedby={fieldErrors[key] ? `error-${key}` : undefined} className={`${inputClass}${inputErrorClass(Boolean(fieldErrors[key]))}`}>
+          <select id={`field-${key}`} value={key === "addressCity" ? applicantCityName(rawValue) : rawValue} disabled={key === "addressBarangay" && !applicantCityName(answers.addressCity)} onChange={(event) => updateAnswer(key, event.target.value)} aria-invalid={Boolean(fieldErrors[key]) || undefined} aria-describedby={fieldErrors[key] ? `error-${key}` : undefined} className={`${inputClass}${inputErrorClass(Boolean(fieldErrors[key]))}`}>
             <option value="">Select…</option>{options.map((option) => <option key={option}>{option}</option>)}
+            {key === "religion" && rawValue && !options.includes(rawValue) && <option>{rawValue}</option>}
           </select>
         ) : (
           <span className="relative block">
             <input
               id={`field-${key}`}
               type={type || "text"}
+              readOnly={key === "addressProvince"}
               inputMode={rule.inputMode}
               maxLength={rule.sanitize ? undefined : limit}
               value={displayValue}
@@ -768,13 +797,13 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
   )
 
   return (
-    <form className="auth-form auth-detail-form" onSubmit={(event) => { event.preventDefault(); if (step === 8 || step === 11) submit(); else next() }}>
-      <nav aria-label={isUpdate ? "NSRP progress" : "Sign-up progress"} className="grid grid-cols-3 gap-1 sm:grid-cols-5">
+    <form className="auth-form auth-detail-form" onSubmit={(event) => { event.preventDefault(); if (step === 8 || step === 11) { if (!isPublic) submit() } else next() }}>
+      <nav aria-label={isUpdate || isPublic ? "NSRP progress" : "Sign-up progress"} className="grid grid-cols-3 gap-1 sm:grid-cols-5">
         {flow.map((id, index) => {
-          const name = stepTitle(id)
+          const name = formStepTitle(id)
           const tabErrorKeys = tabErrorKeysFor(id)
           const hasErrors = Object.keys(fieldErrors).some((key) => fieldErrors[key] && tabErrorKeys.some((field) => key === field || key.startsWith(`${field}[`)))
-          const done = index < flowPos || posOk(index)
+          const done = isPublic ? stepValidity[id] === true : index < flowPos || posOk(index)
           return <button key={id} type="button" onClick={() => goToStep(id)} aria-current={id === step ? "step" : undefined} className={`rounded-lg px-2 py-1.5 text-left text-[11px] font-semibold ${id === step ? "bg-cyan-500 text-slate-950" : index < flowPos ? "bg-cyan-100 text-cyan-900" : "bg-slate-100 text-slate-500"}`}>
             {index + 1}. {name}
             {hasErrors && <span role="img" aria-label="has errors" className="ml-1 inline-block h-2 w-2 rounded-full bg-rose-500 align-middle" />}
@@ -785,7 +814,8 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
       <div className="h-2 overflow-hidden rounded-full bg-slate-200" aria-label={`Step ${flowPos + 1} of ${flow.length}`}>
         <div className="h-full bg-cyan-500 transition-all" style={{ width: `${((flowPos + 1) / flow.length) * 100}%` }} />
       </div>
-      <h2 className="text-lg font-semibold text-slate-900">{stepTitle(step)}</h2>
+      <h2 className="text-lg font-semibold text-slate-900">{formStepTitle(step)}</h2>
+      {isPublic && <p className="text-sm text-slate-600">You can jump between sections. Complete all required fields before previewing or downloading your PDF.</p>}
       {step === 9 && !isUpdate && (
         <section aria-label="Choose how to provide your NSRP" className="space-y-3">
           <p className="text-sm text-slate-600">The NSRP form is required for your PESO registration. Choose one option:</p>
@@ -877,7 +907,14 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
             ["addressProvince", "Province"],
           ].map(([key, label]) => (
             <label key={key} className="block text-sm font-medium text-slate-800">{label}
-              <input id={`field-${key}`} value={basicInfo[key] || ""} onChange={(event) => updateBasic(key, event.target.value)} aria-invalid={Boolean(fieldErrors[key]) || undefined} aria-describedby={fieldErrors[key] ? `error-${key}` : undefined} className={`${inputClass}${inputErrorClass(Boolean(fieldErrors[key]))}`} />
+              {key === "addressCity" ? (
+                <select id={`field-${key}`} value={applicantCityName(basicInfo[key])} onChange={(event) => updateBasic(key, event.target.value)} aria-invalid={Boolean(fieldErrors[key]) || undefined} aria-describedby={fieldErrors[key] ? `error-${key}` : undefined} className={`${inputClass}${inputErrorClass(Boolean(fieldErrors[key]))}`}>
+                  <option value="">Select…</option>
+                  {Object.keys(PH_LOCATIONS).map((city) => <option key={city}>{city}</option>)}
+                </select>
+              ) : (
+                <input id={`field-${key}`} value={basicInfo[key] || ""} readOnly aria-invalid={Boolean(fieldErrors[key]) || undefined} aria-describedby={fieldErrors[key] ? `error-${key}` : undefined} className={`${inputClass}${inputErrorClass(Boolean(fieldErrors[key]))}`} />
+              )}
               {fieldErrors[key] && <span id={`error-${key}`} role="alert" className="mt-1 block text-xs text-rose-600">{fieldErrors[key]}</span>}
             </label>
           ))}
@@ -967,6 +1004,7 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
       {step >= 1 && step <= 6 && (
         <section className="space-y-4">
           {NSRP_FIELDS[step - 1].length > 0 && <div className="grid gap-3 sm:grid-cols-2">{NSRP_FIELDS[step - 1].filter(([key]) => !FIELD_VISIBLE[key] || FIELD_VISIBLE[key](answers)).map(renderTextField)}</div>}
+          {step === 2 && isPublic && <label className="block text-sm font-medium text-slate-800">Email *<input id="field-email" type="email" value={email} onChange={(event) => { setEmail(event.target.value); markStepInvalid(); if (previewUrl) URL.revokeObjectURL(previewUrl); setPreviewUrl(''); setPreviewBlob(null) }} className={inputClass} aria-invalid={Boolean(fieldErrors.email) || undefined} />{fieldErrors.email && <span role="alert" className="text-xs text-rose-600">{fieldErrors.email}</span>}</label>}
           {step === 2 && answers.disability === "Others" && <div className="grid gap-3 sm:grid-cols-2">{renderTextField(["disabilityOthers", "Specify disability"])}</div>}
           {step === 4 && (
             <section className="space-y-3 rounded-xl border border-slate-200 p-3">
@@ -1182,6 +1220,7 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
       {step === 8 && (
         <div className="space-y-3">
           {(() => {
+            if (isPublic) return null
             const previewPos = flow.indexOf(8)
             const invalidSteps = []
             for (let p = 0; p < previewPos; p += 1) if (!posOk(p)) invalidSteps.push(flow[p])
@@ -1220,11 +1259,11 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
       )}
       {error && <p role="alert" className="rounded-lg border border-rose-300 bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
       <div className="flex flex-wrap justify-between gap-2">
-        <button type="button" disabled={busy} onClick={() => flowPos <= 0 ? (isUpdate ? onCancel?.() : discard()) : setStep(flow[flowPos - 1])} className="auth-secondary-button">{flowPos <= 0 ? "Cancel" : "Back"}</button>
-        {!isUpdate && <button type="button" onClick={discard} className="text-sm font-medium text-rose-700 underline">Discard and start over</button>}
+        <button type="button" disabled={busy} onClick={() => flowPos <= 0 ? (isUpdate || isPublic ? onCancel?.() : discard()) : setStep(flow[flowPos - 1])} className="auth-secondary-button">{flowPos <= 0 ? "Cancel" : "Back"}</button>
+        {!isUpdate && !isPublic && <button type="button" onClick={discard} className="text-sm font-medium text-rose-700 underline">Discard and start over</button>}
         {step !== 8 && step !== 11 ? (
-          <button type="button" disabled={busy || (step === 0 && !isUpdate && !emailVerified)} onClick={next} className="auth-primary-button">{busy ? "Validating…" : ((isUpdate && step === 6) || (!isUpdate && step === 7 && nsrpMode !== "upload")) ? "Generate preview" : "Next"}</button>
-        ) : (
+          <button type="button" disabled={busy || (step === 0 && !isUpdate && !emailVerified)} onClick={next} className="auth-primary-button">{busy ? "Validating…" : (((isUpdate || isPublic) && step === 6) || (!isUpdate && step === 7 && nsrpMode !== "upload")) ? "Generate preview" : "Next"}</button>
+        ) : isPublic ? <button type="button" onClick={onCancel} className="auth-secondary-button">Back to home</button> : (
           <button type="submit" disabled={busy || (step === 8 && !previewUrl)} className="auth-primary-button">{busy ? (isUpdate ? "Saving…" : "Creating account…") : isUpdate ? "Save NSRP" : "Create account"}</button>
         )}
       </div>

@@ -74,8 +74,8 @@ export const PH_LOCATIONS = {
     "Binanderahan",
     "Binitayan",
     "Bongabong",
-    "Cabag\u2022an",
-    "Cabraran Peque\u2022o",
+    "Cabag\u00f1an",
+    "Cabraran Peque\u00f1o",
     "Caguiba",
     "Calabidongan",
     "Comun",
@@ -117,8 +117,8 @@ export const PH_LOCATIONS = {
     "Anislag",
     "Bagumbayan",
     "Balinad",
-    "Ba\u2022adero",
-    "Ba\u2022ag",
+    "Ba\u00f1adero",
+    "Ba\u00f1ag",
     "Bascaran",
     "Bigao",
     "Binitayan",
@@ -153,14 +153,14 @@ export const PH_LOCATIONS = {
     "Nabasan",
     "Namantao",
     "Pandan",
-    "Pe\u2022afrancia",
+    "Pe\u00f1afrancia",
     "Sagpon",
     "Salvacion",
     "San Rafael",
     "San Ramon",
     "San Roque",
     "San Vicente Grande",
-    "San Vicente Peque\u2022o",
+    "San Vicente Peque\u00f1o",
     "Sipi",
     "Tabon-tabon",
     "Tagas",
@@ -178,11 +178,11 @@ export const PH_LOCATIONS = {
     "Bubulusan",
     "Calzada",
     "Catomag",
-    "Do\u2022a Mercedes",
-    "Do\u2022a Tomasa",
+    "Do\u00f1a Mercedes",
+    "Do\u00f1a Tomasa",
     "Ilawod",
     "Inamnan Grande",
-    "Inamnan Peque\u2022o",
+    "Inamnan Peque\u00f1o",
     "Inascan",
     "Iraya",
     "Lomacao",
@@ -193,13 +193,13 @@ export const PH_LOCATIONS = {
     "Malobago",
     "Maninila",
     "Mapaco",
-    "Marcial O. Ra\u2022ola",
+    "Marcial O. Ra\u00f1ola",
     "Masarawag",
     "Mauraro",
     "Minto",
     "Morera",
     "Muladbucad Grande",
-    "Muladbucad Peque\u2022o",
+    "Muladbucad Peque\u00f1o",
     "Ongo",
     "Palanas",
     "Poblacion",
@@ -248,10 +248,10 @@ export const PH_LOCATIONS = {
     "Bgy. 15 - Ilawod East Pob.",
     "Bgy. 16 - Kawit-East Washington Drive (Pob.)",
     "Bgy. 17 - Rizal Street., Ilawod (Pob.)",
-    "Bgy. 18 - Cabag\u2022an West (Pob.)",
-    "Bgy. 19 - Cabag\u2022an",
+    "Bgy. 18 - Cabag\u00f1an West (Pob.)",
+    "Bgy. 19 - Cabag\u00f1an",
     "Bgy. 2 - Em's Barrio South (Pob.)",
-    "Bgy. 20 - Cabag\u2022an East (Pob.)",
+    "Bgy. 20 - Cabag\u00f1an East (Pob.)",
     "Bgy. 21 - Binanuahan West (Pob.)",
     "Bgy. 22 - Binanuahan East (Pob.)",
     "Bgy. 23 - Imperial Court Subd. (Pob.)",
@@ -265,7 +265,7 @@ export const PH_LOCATIONS = {
     "Bgy. 30 - Pigcale (Pob.)",
     "Bgy. 31 - Centro-Baybay (Pob.)",
     "Bgy. 32 - San Roque",
-    "Bgy. 33 - PNR-Pe\u2022aranda St.-Iraya (Pob.)",
+    "Bgy. 33 - PNR-Pe\u00f1aranda St.-Iraya (Pob.)",
     "Bgy. 34 - Oro Site-Magallanes St. (Pob.)",
     "Bgy. 35 - Tinago (Pob.)",
     "Bgy. 36 - Kapantawan (Pob.)",
@@ -294,7 +294,7 @@ export const PH_LOCATIONS = {
     "Bgy. 57 - Dap-dap",
     "Bgy. 58 - Buragwis",
     "Bgy. 59 - Puro",
-    "Bgy. 6 - Ba\u2022adero Pob.",
+    "Bgy. 6 - Ba\u00f1adero Pob.",
     "Bgy. 60 - Lamba",
     "Bgy. 61 - Maslog",
     "Bgy. 62 - Homapon",
@@ -305,7 +305,7 @@ export const PH_LOCATIONS = {
     "Bgy. 67 - Bariis",
     "Bgy. 68 - San Francisco",
     "Bgy. 69 - Buenavista",
-    "Bgy. 7 - Ba\u2022o (Pob.)",
+    "Bgy. 7 - Ba\u00f1o (Pob.)",
     "Bgy. 70 - Cagbacong",
     "Bgy. 8 - Bagumbayan (Pob.)",
     "Bgy. 9 - Pinaric (Pob.)",
@@ -332,7 +332,7 @@ export const PH_LOCATIONS = {
     "Matara",
     "Molosbolos",
     "Natasan",
-    "Ni\u2022o Jesus",
+    "Ni\u00f1o Jesus",
     "Nogpo",
     "Pantao",
     "Rawis",
@@ -413,7 +413,7 @@ export const PH_LOCATIONS = {
     "Tomolin",
     "Tuburan",
     "Tula-tula Grande",
-    "Tula-tula Peque\u2022o",
+    "Tula-tula Peque\u00f1o",
     "Tupas",
   ],
   "Malilipot": [
@@ -679,7 +679,7 @@ export const PH_LOCATIONS = {
     "San Vicente Pob.",
     "Santa Misericordia",
     "Santo Domingo Pob.",
-    "Santo Ni\u2022o",
+    "Santo Ni\u00f1o",
   ],
   "Tabaco City": [
     "Agnas",
@@ -689,12 +689,12 @@ export const PH_LOCATIONS = {
     "Baranghawon",
     "Basagan",
     "Basud (Pob.)",
-    "Bog\u2022abong",
+    "Bog\u00f1abong",
     "Bombon (Pob.)",
     "Bonot",
     "Buang",
     "Buhian",
-    "Cabag\u2022an",
+    "Cabag\u00f1an",
     "Cobo",
     "Comon",
     "Cormidal",
@@ -769,6 +769,27 @@ export function provinceForCity(city) {
   return Object.keys(PH_LOCATIONS).some((item) => item.toLowerCase() === String(city || '').trim().toLowerCase()) ? 'Albay' : ''
 }
 
+// Accept older applicant records that omitted the "City" suffix.
+export function applicantCityName(city) {
+  const value = String(city || '').trim().toLowerCase()
+  return Object.keys(PH_LOCATIONS).find((name) => name.toLowerCase() === value
+    || name.toLowerCase().replace(/ city$/, '') === value) || ''
+}
+
+export function validateApplicantLocation(input = {}, { barangay = true } = {}) {
+  const errors = {}
+  const city = applicantCityName(input.addressCity)
+  if (input.addressProvince && String(input.addressProvince).trim().toLowerCase() !== 'albay') {
+    errors.addressProvince = 'Select an address in Albay.'
+  }
+  if (input.addressCity && !city) errors.addressCity = 'Select a city or municipality in Albay.'
+  if (barangay && input.addressBarangay && (!city || !PH_LOCATIONS[city].some((name) =>
+    name.toLowerCase() === String(input.addressBarangay).trim().toLowerCase()))) {
+    errors.addressBarangay = 'Select a barangay belonging to the selected city or municipality.'
+  }
+  return errors
+}
+
 // City/province labels contain commas; serialize these as an array so filters
 // never mistake a province for a second selected location. Old URLs still work.
 export function encodeLocationFilters(values) {
@@ -816,4 +837,28 @@ export function getEmployerAddress(employer = {}, request = {}) {
     if (place) return place
   }
   return {}
+}
+
+export function matchBarangay(city, barangay) {
+  const raw = String(barangay || '').trim().toLowerCase()
+  const value = raw.replace(/^(?:brgy\.?|barangay)\s+/i, '')
+  return (PH_LOCATIONS[city] || []).find((name) => name.toLowerCase() === raw || name.toLowerCase() === value) || ''
+}
+
+export function storedBarangay(location, city) {
+  const place = parseStoredLocation(location)
+  if (!place || place.city !== city) return ''
+  const parts = location.split(/,\s*Landmark\s*:/i)[0].split(',').map((part) => part.trim()).filter(Boolean)
+  return parts.length >= 3 ? matchBarangay(city, parts.at(-3)) : ''
+}
+
+export function getEmployerJobAddress(employer = {}, request = {}) {
+  const place = getEmployerAddress(employer, request)
+  if (!place.city) return place
+  const barangay = matchBarangay(place.city, employer.establishmentAddress?.barangay)
+    || matchBarangay(place.city, request?.registrationDetails?.barangay)
+    || matchBarangay(place.city, employer.profile?.barangay)
+    || storedBarangay(employer.profile?.location || '', place.city)
+    || storedBarangay(request?.location || '', place.city)
+  return barangay ? { ...place, barangay } : place
 }

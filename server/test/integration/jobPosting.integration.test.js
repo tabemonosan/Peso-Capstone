@@ -20,6 +20,30 @@ beforeEach(async () => {
   await Admin.create({ email: 'admin@example.com', passwordHash: 'unused' })
 })
 describe('job request and review API', () => {
+  it('rejects fabricated skills and redundant combinations on create and update', async () => {
+    for (const skills of [['sadsa'], ['Full-Stack Developer', 'Frontend Developer'], ['Microsoft Office', 'Excel']]) {
+      const response = await request(app).post('/api/jobs').set(auth('Employer')).send(payload({ skills }))
+      expect(response.status).toBe(422)
+      expect(response.body.fieldErrors.skills).toBeTruthy()
+    }
+    expect(await JobPosting.countDocuments()).toBe(0)
+    const created = await request(app).post('/api/jobs').set(auth('Employer')).send(payload({ skills: ['Full-Stack Developer', 'React'] }))
+    expect(created.status).toBe(200)
+    const update = await request(app).put(`/api/jobs/${created.body._id}`).set(auth('Employer')).send(payload({ company: 'Example Works', skills: ['Full-Stack Developer', 'Backend Developer'] }))
+    expect(update.status).toBe(422)
+    expect((await JobPosting.findById(created.body._id)).skills).toEqual(['Full-Stack Developer', 'React'])
+  })
+  it('stores barangays, includes them in the job address, and rejects mismatched municipalities', async () => {
+    const created = await request(app).post('/api/jobs').set(auth('Employer')).send(payload({ city: 'Manito', province: 'Albay', barangay: 'Nagotgot' }))
+    expect(created.status).toBe(200)
+    expect(created.body).toMatchObject({ barangay: 'Nagotgot', location: 'Nagotgot, Manito, Albay' })
+    const stored = await JobPosting.findById(created.body._id)
+    expect(stored.barangay).toBe('Nagotgot')
+    const invalid = await request(app).put(`/api/jobs/${created.body._id}`).set(auth('Employer')).send(payload({ company: 'Example Works', city: 'Daraga', barangay: 'Nagotgot' }))
+    expect(invalid.status).toBe(422)
+    expect(invalid.body.fieldErrors.barangay).toBeTruthy()
+    expect((await JobPosting.findById(created.body._id)).barangay).toBe('Nagotgot')
+  })
   it('returns field errors without writing or notifying', async () => {
     const response = await request(app).post('/api/jobs').set(auth('Employer')).send(payload({ title: '', description: '', skills: [], city: '', province: '', salaryMin: -1, salaryMax: 'bad', slots: 1.5, deadline: '2000-01-01', notesToAdmin: 'x'.repeat(501) }))
     expect(response.status).toBe(422)
@@ -43,7 +67,7 @@ describe('job request and review API', () => {
     expect(response.body.status).toBe('approved')
     expect(response.body.reviewHistory[0].status).toBe('approved')
     expect(await Notification.findOne({ recipientEmail: 'employer@example.com', type: 'job_approved' })).toBeTruthy()
-    await Applicant.create({ email: 'applicant@example.com', passwordHash: 'unused', emailVerified: true, profile: { firstName: 'Juan', lastName: 'Cruz', location: 'Legazpi' }, verificationDocuments: { nsrpForm: { versions: [{ version: 1 }] }, birthCertificate: { versions: [{ version: 1 }] }, validId1: { versions: [{ version: 1 }] } } })
+    await Applicant.create({ email: 'applicant@example.com', passwordHash: 'unused', emailVerified: true, profile: { firstName: 'Juan', lastName: 'Cruz', location: 'Legazpi', skills: ['Excel'] }, verificationDocuments: { nsrpForm: { versions: [{ version: 1 }] }, birthCertificate: { versions: [{ version: 1 }] }, validId1: { versions: [{ version: 1 }] } } })
     for (const url of ['/api/jobs', '/api/jobs?status=approved&page=1']) {
       const publicJobs = await request(app).get(url).set(auth('Applicant'))
       expect(publicJobs.status).toBe(200)
@@ -152,7 +176,7 @@ describe('job request and review API', () => {
   it('recovers uploaded legacy registration addresses from the exact stored city/province suffix', async () => {
     await Employer.updateOne({ email: 'employer@example.com' }, { $set: { 'profile.location': 'Brgy. Nagotgot, Manito, Albay, Landmark: near Barangay Hall' } })
     const profile = await request(app).get('/api/profile').set(auth('Employer'))
-    expect(profile.body.establishmentAddress).toEqual({ city: 'Manito', province: 'Albay' })
+    expect(profile.body.establishmentAddress).toEqual({ city: 'Manito', province: 'Albay', barangay: 'Nagotgot' })
     expect((await Employer.findOne({ email: 'employer@example.com' })).establishmentAddress.city).toBe('Manito')
   })
   it.each([

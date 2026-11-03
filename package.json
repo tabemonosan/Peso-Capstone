@@ -14,7 +14,8 @@
     "mail:test": "node server/scripts/test-email.js",
     "build": "vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "seed:workflow": "node server/scripts/seed-approved-jobs.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

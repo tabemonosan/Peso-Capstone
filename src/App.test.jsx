@@ -384,7 +384,7 @@ describe('PESO Portal prototype', () => {
           ok: true,
           json: async () => ({
             token: 'token',
-            user: { email: 'applicant@peso.gov', role: 'Applicant', emailVerified: true, verificationStatus: 'approved', profile: { name: 'Applicant One' } },
+            user: { email: 'applicant@peso.gov', role: 'Applicant', emailVerified: true, verificationStatus: 'approved', profile: { name: 'Applicant One', skills: ['Cleaning'] } },
           }),
         })
       }
@@ -441,14 +441,15 @@ describe('PESO Portal prototype', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /^Jobs$/i }))
 
-    // Clicking a card opens the job detail modal; Apply starts the wizard from there
+    // Selecting a job shows its details alongside the list; Apply opens the wizard.
     const card = await screen.findByRole('button', { name: /View Warehouse Helper details/i })
     fireEvent.click(card)
-    const detail = await screen.findByRole('dialog', { name: 'Warehouse Helper' })
+    const detail = await screen.findByRole('article', { name: 'Warehouse Helper job details' })
     expect(within(detail).getByText(/Move inventory/)).toBeInTheDocument()
     expect(within(detail).getByText(/Fast learner/)).toBeInTheDocument()
 
     fireEvent.click(within(detail).getByRole('button', { name: /Apply Now/i }))
+    expect(screen.queryByRole('alertdialog', { name: 'Share your profile with this employer?' })).not.toBeInTheDocument()
     expect(await screen.findByText(/Apply for Warehouse Helper/i)).toBeInTheDocument()
     expect(screen.getAllByText(/Acme Logistics/i).length).toBeGreaterThan(0)
   })

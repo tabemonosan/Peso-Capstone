@@ -5,6 +5,7 @@
 // 3 work/skills/languages, 4 employment/preferences, 5 certification.
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest'
 import request from 'supertest'
+import { PH_LOCATIONS } from '../../../shared/phLocations.js'
 
 vi.mock('../../mailer.js', async (importOriginal) => {
   const actual = await importOriginal()
@@ -31,6 +32,30 @@ beforeEach(async () => {
 // The wizard always includes the account email; add one by default.
 const validate = (step, overrides) => request(app).post('/api/nsrp/validate-signup').send({ step, answers: validNsrpAnswers({ email: 'validator@example.com', ...overrides }) })
 const signup = (email, answers) => signupRequest(request(app).post('/api/signup'), { email, answers })
+
+describe('Albay applicant addresses', () => {
+  it('accepts every listed Albay barangay under its own municipality', () => {
+    for (const [city, barangays] of Object.entries(PH_LOCATIONS)) {
+      for (const barangay of barangays) {
+        const { fieldErrors } = validateNsrpAnswers(validNsrpAnswers({ addressCity: city, addressBarangay: barangay }))
+        expect(fieldErrors.addressCity, city).toBeUndefined()
+        expect(fieldErrors.addressBarangay, `${barangay}, ${city}`).toBeUndefined()
+      }
+    }
+  })
+  it('accepts Nagotgot only under Manito', async () => {
+    expect((await validate(1, { addressCity: 'Manito', addressBarangay: 'Nagotgot' })).status).toBe(200)
+    const response = await validate(1, { addressCity: 'Daraga', addressBarangay: 'Nagotgot' })
+    expect(response.status).toBe(422)
+    expect(response.body.fieldErrors.addressBarangay).toBeTruthy()
+  })
+
+  it('rejects addresses outside Albay at final signup', async () => {
+    const response = await signup('outside-albay@example.com', validNsrpAnswers({ addressProvince: 'Sorsogon' }))
+    expect(response.status).toBe(422)
+    expect(response.body.fieldErrors.addressProvince).toBeTruthy()
+  })
+})
 
 describe('Other language proficiency', () => {
   it.each(['read', 'write', 'speak', 'understand'])('requires a name when %s is selected', async (proficiency) => {

@@ -4,6 +4,36 @@ import ApplicantSignupWizard from '../components/ApplicantSignupWizard'
 
 const mockFetch = vi.fn()
 
+describe('applicant location and optional fields', () => {
+  it('offers religion choices without marking optional personal fields required', () => {
+    render(<ApplicantSignupWizard mode="update" initialAnswers={{}} />)
+    expect(screen.getByRole('combobox', { name: /^Religion$/i })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Roman Catholic' })).toBeInTheDocument()
+    for (const label of ['Religion', 'Middle name', 'Suffix']) {
+      expect(screen.getByLabelText(new RegExp(`^${label}$`, 'i'))).toBeInTheDocument()
+    }
+    expect(screen.getByLabelText(/^Surname \*/i)).toBeInTheDocument()
+  })
+
+  it('limits barangays by municipality, fills province, and clears barangay on city changes', async () => {
+    await goToAddressStep()
+    const city = screen.getByLabelText(/^Municipality \/ city/i)
+    const barangay = screen.getByLabelText(/^Barangay/i)
+    const province = screen.getByLabelText(/^Province/i)
+    expect(barangay).toBeDisabled()
+    fireEvent.change(city, { target: { value: 'Manito' } })
+    expect(province).toHaveValue('Albay')
+    expect(province).toHaveAttribute('readonly')
+    expect(within(barangay).getByRole('option', { name: 'Nagotgot' })).toBeInTheDocument()
+    fireEvent.change(barangay, { target: { value: 'Nagotgot' } })
+    fireEvent.change(city, { target: { value: 'Daraga' } })
+    expect(barangay).toHaveValue('')
+    expect(within(barangay).queryByRole('option', { name: 'Nagotgot' })).not.toBeInTheDocument()
+    expect(within(city).getAllByRole('option')).toHaveLength(19)
+    expect(screen.getByLabelText(/^TIN/).closest('label')).not.toHaveTextContent('*')
+  })
+})
+
 // Per-step server validation results, flipped by individual tests.
 let validateImpl = () => ({ ok: true, status: 200, body: { ok: true, fieldErrors: {} } })
 

@@ -49,14 +49,14 @@ function RatingForm({ token, toUserId, toRole, hireReportId, onCreated }) {
   return (
     <form
       onSubmit={handleSubmit}
-      className="mt-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-4"
+      className="mt-4 rounded-2xl border border-slate-200 bg-white p-4"
     >
-      <h4 className="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-300">
+      <h4 className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-800">
         Rate Applicant
       </h4>
 
       <div className="mt-3">
-        <label className="block text-sm font-medium text-slate-300" htmlFor={`rating-score-${hireReportId}`}>
+        <label className="block text-sm font-medium text-slate-700" htmlFor={`rating-score-${hireReportId}`}>
           Score (1-5)
         </label>
         <div className="mt-2 flex items-center gap-2">
@@ -66,7 +66,7 @@ function RatingForm({ token, toUserId, toRole, hireReportId, onCreated }) {
               type="button"
               onClick={() => setScore(value)}
               className={`rounded-full px-3 py-1 text-sm font-semibold ${
-                score >= value ? "bg-cyan-500 text-slate-950" : "bg-slate-800 text-slate-300"
+                score >= value ? "bg-cyan-500 text-slate-950" : "bg-slate-100 text-slate-600"
               }`}
               disabled={submitting}
             >
@@ -77,7 +77,7 @@ function RatingForm({ token, toUserId, toRole, hireReportId, onCreated }) {
       </div>
 
       <div className="mt-3">
-        <label className="block text-sm font-medium text-slate-300" htmlFor={`rating-comment-${hireReportId}`}>
+        <label className="block text-sm font-medium text-slate-600" htmlFor={`rating-comment-${hireReportId}`}>
           Comment
         </label>
         <textarea
@@ -91,14 +91,14 @@ function RatingForm({ token, toUserId, toRole, hireReportId, onCreated }) {
         />
       </div>
 
-      {error && <p className="mt-3 text-sm text-rose-300">{error}</p>}
+      {error && <p className="mt-3 text-sm text-rose-700">{error}</p>}
 
       <div className="mt-4">
         <button
           type="submit"
           disabled={submitting}
           className={`rounded-2xl px-4 py-2 text-sm font-semibold ${
-            submitting ? "bg-slate-700 text-slate-400" : "bg-cyan-500 text-slate-950"
+            submitting ? "bg-slate-100 text-slate-500" : "bg-cyan-500 text-slate-950"
           }`}
         >
           {submitting ? "Submitting..." : "Submit Rating"}

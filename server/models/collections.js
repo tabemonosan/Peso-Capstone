@@ -77,8 +77,14 @@ const nsrpWorkExperienceSchema = new Schema({
 }, { _id: false })
 
 const applicantSchema = new Schema({
+  nsrpAutoEnabledAtCreation: { type: Boolean, select: false },
   sessionVersion: { type: Number, default: 0 },
   deletedAt: Date,
+  applyingSuspendedAt: Date,
+  applyingSuspensionReason: { type: String, select: false },
+  applyingSuspensionHistory: { type: [{ action: String, reason: String, by: String, at: Date }], select: false },
+  trustValue: { type: Number, default: 100, min: 0, max: 100, select: false },
+  trustEvents: { type: [Schema.Types.Mixed], select: false },
   retainedEmail: { type: String, select: false },
   email: { type: String, required: true, unique: true },  passwordHash: { type: String, required: true },
   ...emailVerificationFields,
@@ -116,6 +122,7 @@ const applicantSchema = new Schema({
     nsrp: { type: Schema.Types.Mixed, default: undefined },
     traits: String,
     summary: String,
+    summarySource: { type: String, enum: ['personal'] },
     profileImage: String,
     bannerImage: String,
   },
@@ -168,6 +175,9 @@ export function applicantDisplayName(applicant) {
 }
 
 const employerSchema = new Schema({
+  receivingApplicantsSuspendedAt: Date,
+  receivingApplicantsSuspensionReason: String,
+  applicationAccessHistory: [{ action: String, reason: String, by: String, at: Date }],
   email: { type: String, required: true, unique: true },
   passwordHash: { type: String, required: true },
   ...emailVerificationFields,
@@ -185,6 +195,7 @@ const employerSchema = new Schema({
   },
   approvalNoticePending: { type: Boolean, default: false },
   establishmentAddress: {
+    barangay: { type: String, trim: true, maxlength: 80 },
     city: { type: String, trim: true, maxlength: 80 },
     province: { type: String, trim: true, maxlength: 80 },
   },
@@ -243,12 +254,17 @@ const referralSchema = new Schema({
   jobId: { type: Schema.Types.ObjectId, ref: 'Job', required: true },
   applicantId: { type: Schema.Types.ObjectId, ref: 'Applicant', required: true },
   employerId: { type: Schema.Types.ObjectId, ref: 'Employer', required: true },
-  referredBy: { type: Schema.Types.ObjectId, ref: 'Admin', required: true },
-  status: { type: String, enum: ['pending', 'accepted', 'declined'], default: 'pending' },
+  referredBy: { type: Schema.Types.ObjectId, ref: 'Admin' },
+  applicationId: { type: Schema.Types.ObjectId, ref: 'JobApplication' },
+  source: { type: String, enum: ['auto', 'admin'], default: 'admin' },
+  deliveryState: { type: String, enum: ['processing', 'ready'], default: 'ready' },
+  status: { type: String, enum: ['pending', 'accepted', 'declined', 'withdrawn_by_admin', 'withdrawn'], default: 'pending' },
+  history: [{ action: String, status: String, by: String, reason: String, at: Date }],
   createdAt: { type: Date, default: Date.now },
 }, { collection: 'referrals', timestamps: true })
 referralSchema.index({ employerId: 1, createdAt: -1, _id: 1 })
 referralSchema.index({ createdAt: -1, _id: 1 })
+referralSchema.index({ applicantId: 1, jobId: 1 }, { unique: true })
 
 const hireReportSchema = new Schema({
   referralId: { type: Schema.Types.ObjectId, ref: 'Referral' },
@@ -389,12 +405,15 @@ async function createUserInRole(role, data) {
 }
 
 async function updateUserProfileByEmail(email, profile) {
+  // Patch editable values without replacing NSRP answers or qualifications
+  // that were not part of the profile editor's request.
+  const fields = Object.fromEntries(Object.entries(profile).filter(([key]) => !key.includes('.') && !key.startsWith('$')).map(([key, value]) => [`profile.${key}`, value]))
   // Try updating in each collection; return updated doc if found
-  let user = await Applicant.findOneAndUpdate({ email }, { profile }, { new: true })
+  let user = await Applicant.findOneAndUpdate({ email }, { $set: fields }, { returnDocument: 'after' })
   if (user) return { user, type: 'Applicant' }
-  user = await Employer.findOneAndUpdate({ email }, { profile }, { new: true })
+  user = await Employer.findOneAndUpdate({ email }, { $set: fields }, { returnDocument: 'after' })
   if (user) return { user, type: 'Employer' }
-  user = await Admin.findOneAndUpdate({ email }, { profile }, { new: true })
+  user = await Admin.findOneAndUpdate({ email }, { $set: fields }, { returnDocument: 'after' })
   if (user) return { user, type: 'Admin' }
   return null
 }

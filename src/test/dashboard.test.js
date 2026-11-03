@@ -13,7 +13,7 @@ function makeService() {
       aggregate: agg([{ _id: 'pending', count: 4 }, { _id: 'approved', count: 6 }]),
       find: vi.fn(() => ({ select: () => ({ lean: async () => [{ _id: 'j1' }] }) })),
     },
-    JobApplication: { countDocuments: vi.fn(async () => 9), aggregate: agg([{ _id: '2026-10-25', count: 3 }]) },
+    JobApplication: { countDocuments: vi.fn(async () => 9), aggregate: vi.fn(async (p) => p.at(-1)?.$count ? [{ count: 9 }] : [{ _id: '2026-10-25', count: 3 }]) },
     Referral: { aggregate: agg([{ _id: 'pending', count: 2 }, { _id: 'accepted', count: 1 }]) },
     HireReport: { countDocuments: vi.fn(async () => 1) },
     Notification: { find: vi.fn(() => ({ sort: () => ({ limit: () => ({ select: () => ({ lean: async () => [{ _id: 'n1', type: 't', title: 'T', message: 'M', createdAt: now }] }) }) }) })) },
@@ -49,7 +49,8 @@ describe('getDashboard', () => {
   it('employer data is scoped to the employer own jobs and id', async () => {
     const { service, models } = makeService()
     const data = await service.getDashboard({ id: 'e', objectId: 'oid', role: 'Employer', email: 'e@x.com' }, now)
-    expect(models.JobPosting.find).toHaveBeenCalledWith({ createdBy: 'e@x.com' })
+    expect(models.JobPosting.find).not.toHaveBeenCalled()
+    expect(models.JobApplication.aggregate.mock.calls[0][0][1].$match['ownedJob.createdBy']).toBe('e@x.com')
     expect(models.JobPosting.aggregate.mock.calls[0][0][0]).toEqual({ $match: { createdBy: 'e@x.com' } })
     expect(models.Referral.aggregate.mock.calls[0][0][0]).toEqual({ $match: { employerId: 'oid' } })
     expect(data.stats.applicants).toBe(9)

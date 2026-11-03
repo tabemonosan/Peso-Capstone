@@ -48,7 +48,11 @@ Verification codes and notifications are sent via the mailer in `server/mailer.j
 
 ## Employer account verification
 
+The landing page includes **Fill out an NSRP form online** for applicants (Form 1) and employers (Form 2). Visitors can complete the form, generate a preview, and download the PDF without an account or email verification. This does not submit a registration. Standalone form answers remain in memory while the form is open; leaving or refreshing clears them, and existing signup drafts are preserved.
+
 New employer accounts remain on the Account verification page until an admin approves their NSRP Form 2. Job posting, applicant, referral, hire-report, and rating routes enforce approval on the server; existing employers whose verification status is already approved keep access. Declined or resubmitted documents retain version history and can be reviewed from Employer Requests.
+
+Verified applicants are automatically referred to the job's employer when they apply and confirm profile sharing. Admins use **Referrals and applications** for oversight, pull back, employer receiving suspension and manual referral. The **Automatic referral** switch defaults ON; OFF keeps the existing manual queue. See [automatic referral documentation](docs/automatic-referrals.md) for statuses, error codes, limits, privacy and operating assumptions.
 
 ### Quick start (development, no account needed): Ethereal
 

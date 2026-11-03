@@ -1,4 +1,8 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import ApplicantSuitability from './ApplicantSuitability'
+import ApplicantProfileModal from './ApplicantProfileModal'
+import EmployerInterviewPanel from './EmployerInterviewPanel'
+import ApplicationStages from './ApplicationStages'
 import { API_URL } from "../config"
 import HireReportForm from "./HireReportForm"
 import RatingForm from "./RatingForm"
@@ -6,8 +10,10 @@ import Pagination from "./Pagination"
 import { usePagination } from "../hooks/usePagination"
 import { formatFullName } from "../../shared/nameFields.js"
 import { outcomeLabel } from "../../shared/employmentReporting.js"
+import { ApplicationTimeline } from './AdminReferralsPage'
+import ApplicationResumeButton from './ApplicationResumeButton'
 
-function ReferralList({ token, employerId }) {
+function ReferralList({ token, employerId, profileImage = '' }) {
   const [referrals, setReferrals] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
@@ -15,6 +21,24 @@ function ReferralList({ token, employerId }) {
   const referralsPagination = usePagination({ syncUrl: false })
   const [ratedHireReports, setRatedHireReports] = useState({})
   const [selectedProfile, setSelectedProfile] = useState(null)
+  const [selectedJobId, setSelectedJobId] = useState(null)
+  const referralsPanelRef = useRef(null)
+  useEffect(() => {
+    if (!token || !employerId) return undefined
+    let cancelled = false
+    const refresh = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/referrals/employer/${employerId}`, { headers: { Authorization: `Bearer ${token}` } })
+        const items = await response.json()
+        if (!response.ok || cancelled || !Array.isArray(items)) return
+        setReferrals(items)
+        setSelectedProfile((current) => current && !items.some((entry) => String(entry.applicantId?._id || '') === String(current._id || current.id)) ? null : current)
+      } catch { /* Preserve the last authorized response on a connection failure. */ }
+    }
+    const timer = setInterval(refresh, 10000)
+    window.addEventListener('focus', refresh)
+    return () => { cancelled = true; clearInterval(timer); window.removeEventListener('focus', refresh) }
+  }, [token, employerId])
 
   useEffect(() => {
     if (!token) {
@@ -80,7 +104,7 @@ function ReferralList({ token, employerId }) {
       }
 
       setReferrals((current) =>
-        current.map((item) => (String(item._id) === String(referralId) ? { ...item, status: data.status } : item)),
+        current.map((item) => (String(item._id) === String(referralId) ? { ...item, status: data.status, history: data.history || item.history } : item)),
       )
     } catch (err) {
       setReferrals(previous)
@@ -113,7 +137,7 @@ function ReferralList({ token, employerId }) {
 
     referrals.forEach((referral) => {
       const jobId = String(referral.jobId?._id || referral.jobId?.id || referral.jobId || "unknown-job")
-      const applicantId = String(referral.applicantId?._id || referral.applicantId?.id || referral.applicantId || "unknown-applicant")
+      const applicantId = String(referral.applicantId?._id || referral.applicantId?.id || referral.applicantId || `withdrawn-${referral._id}`)
       const existingGroup = groups.get(jobId)
       if (existingGroup) {
         if (!existingGroup.applicantIds.has(applicantId)) {
@@ -135,10 +159,15 @@ function ReferralList({ token, employerId }) {
     return Array.from(groups.values())
   }, [referrals])
 
+  const visibleGroups = referralsPagination.paginate(referralGroups)
+  const selectedGroup = visibleGroups.find((group) => group.jobId === selectedJobId) || visibleGroups[0]
+  useEffect(() => { if (referralsPanelRef.current) referralsPanelRef.current.scrollTop = 0 }, [selectedGroup?.jobId])
+
   return (
     <section className="employer-referrals-card rounded-2xl border border-slate-300 bg-white p-6 text-black">
-      <h2 className="text-xl font-semibold text-black">Referrals</h2>
-      <p className="mt-3 text-black">PESO facilitates referrals and retains the NSRP form. Contact applicants directly for hiring and decide deployment timing. Report the outcome to PESO; applicants must also report once officially hired or deployed.</p>
+      <h2 className="text-xl font-semibold text-black">Applications and referrals</h2>
+      {referrals.some((entry) => entry.employerSuspended) && <p role="status" className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">Receiving new applicants is suspended. Existing applications remain available unless PESO pulls them back.</p>}
+      <p className="mt-3 text-black">Applicants are ranked by job-relevant NSRP qualifications, with the highest fit first for each job. PESO facilitates referrals and retains the NSRP form. Contact applicants directly for hiring and report the outcome to PESO.</p>
 
       {loading && <p className="mt-4 text-black">Loading referrals…</p>}
       {!loading && error && <p className="mt-4 text-sm text-rose-700">{error}</p>}
@@ -148,28 +177,33 @@ function ReferralList({ token, employerId }) {
       )}
 
       {!loading && referrals.length > 0 && (
-        <div className="mt-6 space-y-4">
-          {referralsPagination.paginate(referralGroups).map((group) => (
-            <div
-              key={group.jobId}
-              className="rounded-2xl border border-slate-300 bg-white p-4"
-            >
-              <h3 className="text-lg font-semibold text-black">{group.jobTitle}</h3>
-              {group.job && (
-                <div className="mt-2 space-y-1 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-black">
-                  <p>Company: {group.job.company || 'N/A'}</p>
-                  <p>Location: {group.job.location || 'Remote'}</p>
-                  <p>Salary: {group.job.salary || 'Not specified'}</p>
-                  {group.job.requirements && <p>Requirements: {group.job.requirements}</p>}
-                  {group.job.description && <p>Description: {group.job.description}</p>}
-                </div>
-              )}
+        <div className="employer-job-browser employer-referral-browser">
+          <section className="job-browser-list" aria-label="Jobs with referrals" tabIndex={0}>
+            {visibleGroups.map((group) => {
+              const selected = group.jobId === selectedGroup?.jobId
+              return <div key={group.jobId}>
+                <button type="button" className={`job-browser-row ${selected ? 'is-selected' : ''}`} aria-label={`View referrals for ${group.jobTitle}`} aria-pressed={selected} aria-controls="employer-referrals-panel" onClick={() => setSelectedJobId(group.jobId)}>
+                  <span className="job-browser-company-mark">{profileImage ? <img src={profileImage} alt="" /> : (group.job?.company || 'Employer').trim().charAt(0).toUpperCase()}</span>
+                  <span className="job-browser-row-copy"><strong>{group.jobTitle}</strong><span>{group.job?.company || 'Employer'}</span><span className="job-browser-muted">{group.job?.location || 'Location not specified'}</span><span className="job-browser-match">{group.referrals.length} {group.referrals.length === 1 ? 'applicant' : 'applicants'}</span></span>
+                </button>
+                {selected && group.job && <div className="referral-sidebar-job-details">
+                  <p className="font-semibold">{group.job.salary || 'Salary not specified'}</p>
+                  <details className="mt-2"><summary>Job details</summary><div className="mt-3 space-y-3">{group.job.requirements && <div><p className="font-semibold">Requirements</p><p className="mt-1 whitespace-pre-wrap">{group.job.requirements}</p></div>}{group.job.description && <div><p className="font-semibold">Description</p><p className="mt-1 whitespace-pre-wrap">{group.job.description}</p></div>}</div></details>
+                </div>}
+              </div>
+            })}
+          </section>
+          <section ref={referralsPanelRef} id="employer-referrals-panel" className="job-browser-details" aria-label={selectedGroup ? `${selectedGroup.jobTitle} referrals` : 'Selected job referrals'} tabIndex={0}>
+          {(selectedGroup ? [selectedGroup] : []).map((group) => (
+            <div key={group.jobId} className="p-4 sm:p-5">
+              <h3 className="text-lg font-semibold text-black">{group.jobTitle} referrals</h3>
+              <p className="mt-1 text-sm text-slate-600">{group.referrals.length} {group.referrals.length === 1 ? 'applicant' : 'applicants'} ranked for this job</p>
               <div className="mt-4 space-y-4">
                 {group.referrals.map((referral) => {
             const applicantName =
               formatFullName(referral.applicantId?.profile) ||
               referral.applicantId?.email ||
-              "Unknown applicant"
+              (['withdrawn', 'withdrawn_by_admin'].includes(referral.status) ? 'Application no longer shared' : 'Unknown applicant')
             const jobTitle = referral.jobId?.title || "Untitled job"
             const status = referral.status || "pending"
             const referralId = String(referral._id)
@@ -204,6 +238,9 @@ function ReferralList({ token, employerId }) {
                     </span>
                     <div>
                       <p className="text-lg font-semibold text-black">{applicantName}</p>
+                      <ApplicantSuitability suitability={referral.suitability} />
+                      {referral.application?.details && <div className="mt-2 text-sm text-slate-700"><p>Completed bachelor's degree: {referral.application.details.bachelorDegree}</p><p>Work experience: {referral.application.details.hasExperience}{referral.application.details.experience ? ` - ${referral.application.details.experience}` : ''}</p><p>Mobile: {referral.application.details.mobile}</p></div>}
+                      <ApplicationResumeButton token={token} application={referral.application} />
                       <p className="mt-1 text-sm text-black">Job: {jobTitle}</p>
                       {referral.applicantId?.email && (
                         <p className="mt-1 text-sm text-black">Email: {referral.applicantId.email}</p>
@@ -222,10 +259,13 @@ function ReferralList({ token, employerId }) {
                   <span
                     className={`inline-flex rounded-full px-3 py-1 text-xs uppercase tracking-[0.2em] ${getStatusClasses(status)}`}
                   >
-                    {status}
+                    {status === 'withdrawn_by_admin' ? 'Returned to PESO review' : status}
                   </span>
                 </div>
 
+                <p className="mt-2 text-xs text-slate-600">Source: {referral.source === 'auto' ? 'Automatic application' : 'Admin referral'}</p>
+                <details className="mt-3 text-sm"><summary>Application timeline</summary><ApplicationTimeline history={referral.history || []} /></details>
+                {!['withdrawn', 'withdrawn_by_admin'].includes(status) ? <EmployerInterviewPanel token={token} referralId={referralId} referralStatus={status} outcome={hireReport?.status} /> : <ApplicationStages audience="employer" application={{ status }} />}
                 {status === "pending" && (
                   <div className="mt-4 flex flex-wrap items-center gap-2">
                     <button
@@ -238,7 +278,7 @@ function ReferralList({ token, employerId }) {
                     <button
                       type="button"
                       onClick={() => handleRespond(referral._id, "declined")}
-                      className="rounded-2xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-200"
+                      className="rounded-2xl border border-slate-300 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-800"
                     >
                       Decline
                     </button>
@@ -279,6 +319,7 @@ function ReferralList({ token, employerId }) {
               </div>
             </div>
           ))}
+          </section>
         </div>
       )}
 
@@ -294,59 +335,8 @@ function ReferralList({ token, employerId }) {
         />
       )}
 
-      {selectedProfile && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4"
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setSelectedProfile(null)}
-        >
-          <div
-            className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-300 bg-white text-black shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div
-              className="h-28 w-full bg-slate-200 bg-cover bg-center"
-              style={selectedProfile.profile?.bannerImage ? { backgroundImage: `url(${selectedProfile.profile.bannerImage})` } : undefined}
-            />
-            <div className="flex items-end gap-4 px-6">
-              <span className="-mt-10 flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl border-4 border-white bg-cyan-100 text-2xl font-bold text-cyan-800">
-                {selectedProfile.profile?.profileImage ? (
-                  <img src={selectedProfile.profile.profileImage} alt="Applicant" className="h-full w-full object-cover" />
-                ) : (
-                  (formatFullName(selectedProfile.profile) || selectedProfile.email || 'A').trim().charAt(0).toUpperCase()
-                )}
-              </span>
-              <h3 className="pb-1 text-lg font-semibold text-black">{formatFullName(selectedProfile.profile) || 'Applicant Profile'}</h3>
-            </div>
-            <div className="flex items-start justify-end px-6 pt-3">
-              <button
-                type="button"
-                onClick={() => setSelectedProfile(null)}
-                className="rounded-full border border-slate-300 bg-white px-3 py-1 text-sm font-semibold text-black"
-              >
-                Close
-              </button>
-            </div>
-            <div className="space-y-2 px-6 pb-6 pt-1 text-sm text-black">
-              <p><span className="font-semibold">Name:</span> {formatFullName(selectedProfile.profile) || 'N/A'}</p>
-              <p><span className="font-semibold">Email:</span> {selectedProfile.email || 'N/A'}</p>
-              <p><span className="font-semibold">Phone:</span> {selectedProfile.phone || 'N/A'}</p>
-              <p><span className="font-semibold">Location:</span> {selectedProfile.profile?.location || 'N/A'}</p>
-              <p><span className="font-semibold">Skills:</span> {Array.isArray(selectedProfile.profile?.skills) && selectedProfile.profile.skills.length > 0 ? selectedProfile.profile.skills.join(', ') : 'N/A'}</p>
-              {selectedProfile.profile?.traits && <p><span className="font-semibold">Traits:</span> {selectedProfile.profile.traits}</p>}
-              {selectedProfile.profile?.summary && <p><span className="font-semibold">Summary:</span> {selectedProfile.profile.summary}</p>}
-              {['education', 'technicalTraining', 'workExperience'].map((key) => selectedProfile.profile?.[key]?.length > 0 && (
-                <div key={key}>
-                  <p className="font-semibold">{{ education: 'Education', technicalTraining: 'Training', workExperience: 'Work experience' }[key]}:</p>
-                  <ul className="list-disc pl-5">{selectedProfile.profile[key].map((entry, index) => <li key={index}>{Object.values(entry).filter(Boolean).join(' · ')}</li>)}</ul>
-                </div>
-              ))}
-              <p className="text-xs text-slate-500">The NSRP form and supporting verification documents are retained by PESO.</p>
-            </div>
-          </div>
-        </div>
-      )}
+      {selectedProfile && <ApplicantProfileModal applicant={selectedProfile} onClose={() => setSelectedProfile(null)} />}
+
     </section>
   )
 }

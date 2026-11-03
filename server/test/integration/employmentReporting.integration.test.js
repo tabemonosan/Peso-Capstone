@@ -33,7 +33,7 @@ describe('PESO employment reporting', () => {
   it('rejects referrals to unapproved jobs or restricted applicants before creating records', async () => {
     await JobPosting.updateOne({ _id: job._id }, { status: 'pending' })
     const url = '/api/referrals'
-    const body = { jobId: String(job._id), applicantIds: [String(applicant._id)] }
+    const body = { jobId: String(job._id), applicantIds: [String(applicant._id)], reason: 'Manual referral eligibility check' }
     expect((await request(app).post(url).set(auth('Admin')).send(body)).status).toBe(409)
     await JobPosting.updateOne({ _id: job._id }, { status: 'approved' })
     await Applicant.updateOne({ _id: applicant._id }, { verificationStatus: 'restricted' })

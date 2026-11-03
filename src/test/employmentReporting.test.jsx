@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import HireReportForm from '../components/HireReportForm'
 import ApplicantEmploymentReports from '../components/ApplicantEmploymentReports'
 import ReferralList from '../components/ReferralList'
@@ -10,6 +10,50 @@ const response = (body, ok = true) => ({ ok, json: async () => body })
 beforeEach(() => { vi.restoreAllMocks(); global.fetch = vi.fn() })
 
 describe('employment updates', () => {
+  it.each([
+    ['invited', null, '1. Invitation sent', /Waiting for the applicant response/],
+    ['confirmed', null, '2. Invitation accepted', /The applicant accepted/],
+    ['held', null, '3. Post-interview task', /Provide any post-interview task/],
+    ['attended', 'hired', '4. Hiring outcome', /You reported this applicant as hired/],
+    ['held', 'not_hired', '4. Hiring outcome', /You reported this applicant as not hired/],
+  ])('shows employer progress for interview %s and outcome %s', async (meetingStatus, outcome, stage, message) => {
+    const referral = { _id: 'r1', status: 'accepted', applicantId: { _id: 'a1', profile: { firstName: 'Ana', lastName: 'Cruz' } }, jobId: { _id: 'j1', title: 'Office Clerk' } }
+    fetch.mockImplementation(async url => {
+      if (url.includes('/api/workflow/referrals/')) return response({ id: 'meeting1', status: meetingStatus, scheduledAt: new Date(Date.now() + 86400000).toISOString(), mode: 'In person', location: 'Demo office' })
+      if (url.endsWith('/api/hire-reports')) return response(outcome ? [{ _id: 'report1', referralId: 'r1', status: outcome }] : [])
+      return response([referral])
+    })
+    render(<ReferralList token="token" employerId="e1" />)
+    const graph = await screen.findByRole('list', { name: 'Application stages' })
+    await waitFor(() => expect(graph.querySelector('[aria-current="step"]')).toHaveTextContent(stage))
+    expect(within(graph).getAllByRole('listitem')).toHaveLength(4)
+    expect(within(graph.closest('section')).getByRole('status')).toHaveTextContent(message)
+  })
+  it('keeps job details in the sidebar and focuses the main panel on the selected job referrals', async () => {
+    let referrals = [
+      { _id: 'r1', status: 'pending', applicantId: { _id: 'a1', profile: { firstName: 'Ana', lastName: 'Cruz' } }, jobId: { _id: 'j1', title: 'Office Clerk', company: 'Example Works', location: 'Manito, Albay', description: 'Organize office records', requirements: 'Office skills' } },
+      { _id: 'r2', status: 'pending', applicantId: { _id: 'a2', profile: { firstName: 'Ben', lastName: 'Reyes' } }, jobId: { _id: 'j2', title: 'Delivery Driver', company: 'Example Works', location: 'Manito, Albay', description: 'Deliver orders', requirements: 'Valid license' } },
+    ]
+    fetch.mockImplementation(async url => response(url.includes('/api/referrals/employer/') ? referrals : []))
+    render(<ReferralList token="token" employerId="e1" profileImage="/company.jpg" />)
+    const sidebar = await screen.findByRole('region', { name: 'Jobs with referrals' })
+    const clerk = within(sidebar).getByRole('button', { name: 'View referrals for Office Clerk' })
+    expect(clerk).toHaveAttribute('aria-pressed', 'true')
+    expect(clerk.querySelector('img')).toHaveAttribute('src', '/company.jpg')
+    expect(within(sidebar).getByText('Organize office records')).toBeInTheDocument()
+    const firstPanel = screen.getByRole('region', { name: 'Office Clerk referrals' })
+    expect(within(firstPanel).getByText('Ana Cruz')).toBeInTheDocument()
+    expect(within(firstPanel).queryByText('Organize office records')).not.toBeInTheDocument()
+    expect(screen.queryByText('Ben Reyes')).not.toBeInTheDocument()
+    fireEvent.click(within(sidebar).getByRole('button', { name: 'View referrals for Delivery Driver' }))
+    expect(within(screen.getByRole('region', { name: 'Delivery Driver referrals' })).getByText('Ben Reyes')).toBeInTheDocument()
+    expect(screen.queryByText('Ana Cruz')).not.toBeInTheDocument()
+    expect(within(sidebar).getByText('Valid license')).toBeInTheDocument()
+    referrals = [referrals[0]]
+    fireEvent(window, new Event('focus'))
+    expect(await screen.findByRole('region', { name: 'Office Clerk referrals' })).toBeInTheDocument()
+    expect(screen.queryByText('Ben Reyes')).not.toBeInTheDocument()
+  })
   it('shows admin tracking names and job titles even without loaded directory records', async () => {
     fetch.mockImplementation(async (url) => response(url.endsWith('/api/hire-reports') ? [{ _id: 'report1', applicantId: 'private-applicant-id', employerId: 'private-employer-id', jobId: 'private-job-id', status: 'hired', applicant: { name: 'Juan Cruz', email: 'juan@example.com' }, employer: { name: 'Example Works', email: 'hr@example.com' }, job: { title: 'Office Clerk' } }] : []))
     render(<PesoReferralPanel token="token" adminUsers={[]} />)

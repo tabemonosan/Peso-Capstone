@@ -4,6 +4,7 @@
 // an invalid value can never reach the database as a 500.
 import { SUFFIX_OPTIONS, validateNameFields } from './nameFields.js'
 import { NSRP_ROW_LIMITS } from './nsrpTableLimits.js'
+import { validateApplicantLocation } from './phLocations.js'
 
 export const CURRENT_YEAR = new Date().getFullYear()
 export const MIN_YEAR = 1950
@@ -66,6 +67,7 @@ export const NSRP_REQUIRED_FIELDS = [
 ]
 
 export const SEX_OPTIONS = ['Male', 'Female']
+export const RELIGION_OPTIONS = ['Roman Catholic', 'Islam', 'Iglesia ni Cristo', 'Iglesia Filipina Independiente (Aglipayan)', 'Protestant', 'Baptist', 'Born Again Christian', 'Evangelical Christian', 'Seventh-day Adventist', "Jehovah’s Witnesses", 'Church of Jesus Christ of Latter-day Saints', 'Buddhism', 'Hinduism', 'Judaism', 'Others', 'None', 'Prefer not to say']
 export const CIVIL_STATUS_OPTIONS = ['Single', 'Married', 'Widowed', 'Separated', 'Live-in']
 export const EMPLOYMENT_STATUS_OPTIONS = ['Employed', 'Unemployed']
 export const EMPLOYED_TYPES = ['Wage Employed', 'Self Employed']
@@ -249,6 +251,7 @@ export function validateNsrpBasicInfo(input = {}) {
     }
   }
 
+  Object.assign(fieldErrors, validateApplicantLocation(cleaned, { barangay: false }))
   return { values: cleaned, fieldErrors }
 }
 
