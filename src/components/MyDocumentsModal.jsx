@@ -17,7 +17,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
   const [correctionReason, setCorrectionReason] = useState('')
   const [success, setSuccess] = useState('')
   const nsrpDocument = info.documents?.find((doc) => doc.docKey === 'nsrpForm')
-  const [editingNsrp, setEditingNsrp] = useState(() => new URLSearchParams(window.location.search).get("editNsrp") === "1" && ['missing', 'rejected'].includes(nsrpDocument?.status) && nsrpDocument.uploadsRemaining !== 0)
+  const [editingNsrp, setEditingNsrp] = useState(() => new URLSearchParams(window.location.search).get("editNsrp") === "1" && ['missing', 'rejected', 'needs_resubmission'].includes(nsrpDocument?.status) && nsrpDocument.uploadsRemaining !== 0)
   const documents = [...(info.documents || [])]
   if (!documents.some((doc) => doc.docKey === 'validId2')) documents.push({ docKey: 'validId2', label: 'Valid ID #2', required: false, status: 'missing', uploadsRemaining: 5 })
   const closeEditor = () => {
@@ -97,7 +97,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
       pending: "border-amber-300 bg-amber-100 text-amber-800",
       missing: "border-slate-300 bg-slate-100 text-slate-600",
     }
-    const label = { approved: 'Approved', rejected: 'Needs correction', pending: 'Pending review', missing: 'Missing' }[status] || status || 'Missing'
+    const label = { approved: 'Approved', rejected: 'Needs correction', needs_resubmission: 'Please resubmit', pending: 'Pending review', missing: 'Missing' }[status] || status || 'Missing'
     return <span className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${styles[status] || styles.missing}`}>{label}</span>
   }
 
@@ -150,7 +150,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
 
       <ul className="mt-5 space-y-3">
         {documents.map((doc) => {
-          const canReplace = ["rejected", "missing"].includes(doc.status) && doc.uploadsRemaining !== 0
+          const canReplace = ["rejected", "needs_resubmission", "missing"].includes(doc.status) && doc.uploadsRemaining !== 0
           const locked = doc.status === "approved"
           return (
             <li key={doc.docKey} className="rounded-xl bg-slate-50 p-3 text-sm">
@@ -196,7 +196,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
                 <p className="mt-1 text-xs text-slate-400">Not uploaded yet.</p>
               )}
 
-              {doc.status === "rejected" && doc.latest?.reviewReason && (
+              {["rejected", "needs_resubmission"].includes(doc.status) && doc.latest?.reviewReason && (
                 <p className="mt-2 rounded-lg border border-rose-300 bg-rose-50 p-2 text-xs text-rose-700">
                   PESO feedback: {doc.latest.reviewReason}
                 </p>

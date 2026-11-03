@@ -68,7 +68,8 @@ describe('connected portal lifecycle', () => {
     const employerToken = await login(employerEmail)
     expect((await request(app).post('/api/jobs').set(auth(employerToken)).send({})).status).toBe(403)
     const employerRequest = await EmployerRequest.findOne({ email: employerEmail })
-    expect((await request(app).put(`/api/employer-requests/${employerRequest._id}/status`).set(auth(adminToken)).send({ status: 'approved' })).status).toBe(200)
+    const employerQueue = await request(app).get(`/api/admin/document-verification/queue?recordId=${employerRequest._id}`).set(auth(adminToken)).expect(200)
+    expect((await request(app).put(`/api/employer-requests/${employerRequest._id}/status`).set(auth(adminToken)).send({ status: 'approved', reason: 'Document and employer details reviewed', unresolved: employerQueue.body.items[0].unresolved })).status).toBe(200)
     const employer = await Employer.findOne({ email: employerEmail })
     expect(employer.phone).toBe('09171234567')
     const posting = { ...emptyJobPosting(), title: 'Other', customTitle: 'Lifecycle Clerk', description: 'Assist clients', skills: ['Excel'], city: 'Legazpi City', province: 'Albay', salaryMin: 15000, salaryMax: 20000, slots: 2, deadline: deadlineBounds().min }
@@ -79,7 +80,9 @@ describe('connected portal lifecycle', () => {
     // A complete registration still awaits PESO approval until its documents are reviewed.
     expect((await request(app).post(`/api/jobs/${jobId}/apply`).set(auth(applicantToken)).send({ sharingConsent: true })).status).toBe(403)
     for (const key of ['nsrpForm', 'birthCertificate', 'validId1']) {
-      const review = await request(app).put(`/api/applicants/${applicant._id}/verification-documents/${key}`).set(auth(adminToken)).send({ status: 'approved' })
+      const current = await request(app).get(`/api/applicants/${applicant._id}/verification-documents`).set(auth(adminToken))
+      const unresolved = current.body.documents.find(doc => doc.docKey === key).unresolved
+      const review = await request(app).put(`/api/applicants/${applicant._id}/verification-documents/${key}`).set(auth(adminToken)).send({ status: 'approved', reason: 'Document reviewed', unresolved })
       expect(review.status, JSON.stringify(review.body)).toBe(200)
     }
     await mongoose.model('JobPosting').updateOne({ _id: jobId }, { deadline: new Date('2000-01-01') })

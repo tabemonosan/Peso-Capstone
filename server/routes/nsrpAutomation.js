@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import mongoose from 'mongoose'
 
-export function createNsrpAutomationRouter({ automation, authenticate }) {
+export function createNsrpAutomationRouter({ automation, authenticate, review, Admin }) {
   const router = Router()
   router.use((req, res, next) => {
     try {
@@ -44,9 +44,16 @@ export function createNsrpAutomationRouter({ automation, authenticate }) {
   })
   router.post('/revoke', async (req, res) => {
     try {
+      if (review && (await automation.getSettings()).reviewToolsEnabled) {
+        const decision = await automation.decisions().findOne({ _id: req.body?.id, result: 'Auto-approved' })
+        if (!decision) return res.status(409).json({ error: 'Approval already changed; refresh the record.' })
+        const admin = await Admin.findOne({ email: req.nsrpAdmin.email }).select('_id').lean()
+        if (!admin) return res.status(403).json({ error: 'Admins only' })
+        return res.json(await review({ role: decision.role, accountId: String(decision.accountId), docKey: decision.role === 'Applicant' ? 'nsrpForm' : 'employerNsrpForm' }, { ...req.nsrpAdmin, id: String(admin._id) }, { action: 'revoke', version: decision.version, reason: req.body?.reason }))
+      }
       const revoked = await automation.revoke(req.body?.id, req.nsrpAdmin.email, req.body?.reason)
       res.status(revoked ? 200 : 409).json(revoked ? { ok: true } : { error: 'Approval already changed; refresh the record.' })
-    } catch (err) { res.status(400).json({ error: err.message }) }
+    } catch (err) { res.status(err.status || 400).json({ error: err.status ? err.message : 'Revoke unavailable; refresh the record' }) }
   })
   router.post('/dismiss-finding', async (req, res) => {
     const { id, code, reason } = req.body || {}
@@ -54,6 +61,13 @@ export function createNsrpAutomationRouter({ automation, authenticate }) {
     const record = await automation.decisions().findOne({ _id: id })
     const finding = record?.report?.findings?.find((entry) => entry.code === code)
     if (!finding) return res.status(404).json({ error: 'Finding not found' })
+    if (review && (await automation.getSettings()).reviewToolsEnabled) {
+      try {
+        const admin = await Admin.findOne({ email: req.nsrpAdmin.email }).select('_id').lean()
+        if (!admin) return res.status(403).json({ error: 'Admins only' })
+        return res.json(await review({ role: record.role, accountId: String(record.accountId), docKey: record.role === 'Applicant' ? 'nsrpForm' : 'employerNsrpForm' }, { ...req.nsrpAdmin, id: String(admin._id) }, { action: 'resolve', version: record.version, reason, ruleId: code }))
+      } catch (error) { return res.status(error.status || 503).json({ error: error.status ? error.message : 'Finding resolution unavailable' }) }
+    }
     await automation.decisions().updateOne({ _id: id }, { $set: { ...(finding.severity === 'critical' ? { dismissedCritical: true } : {}) }, $push: { dismissals: { code, reason: reason.trim(), by: req.nsrpAdmin.email, at: new Date() } } })
     res.json({ ok: true })
   })

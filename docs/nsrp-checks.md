@@ -20,7 +20,8 @@ valid IDs, other documents, job postings and accounts are never automatically
 approved by this service. Existing applicant status calculation still requires
 all three required documents to be approved. Employer Form 2 approval does not
 grant employer access: the existing administrator account decision remains
-required. The system records `System (auto-approval)` as the NSRP reviewer.
+required. The system records `System (verification engine)` as the NSRP reviewer.
+Legacy `System (auto-approval)` entries remain reviewable.
 
 All of these conditions must hold:
 
@@ -34,7 +35,7 @@ All of these conditions must hold:
 - The account has no dismissed critical finding in any earlier check report.
 - The employer is not Government, Recruitment & Placement Agency (Local),
   Licensed Recruitment Agency (Overseas), or DO 174-17 Subcontractor.
-- The crypto-random audit sample did not select it (default 10%).
+- The crypto-random audit sample did not select it (default 20% for new settings).
 - Fewer than the configured limit (default 5; configurable 1–5) were reserved for
   either its IP or normalized mobile number in the preceding rolling 24 hours.
 
@@ -43,6 +44,15 @@ checks or to auto-approval eligibility. Existing form validation is separate.
 An ineligible check always means manual review; this service never rejects.
 
 ### Safeguards and administrator controls
+
+Phase 1 document verification foundations add a master automatic approval switch,
+supporting-document switches, an independent-evidence requirement (the default),
+an OCR switch, account holds, and review queues. Independent document readers are
+not implemented yet, so the default evidence setting leaves generated NSRPs pending.
+The explicit `none` evidence option enables the existing typed-data approval path.
+The master switch, account holds, and evidence setting apply to that path too.
+See [verification-phase-1.md](verification-phase-1.md) for settings, actions,
+privacy boundaries, file changes, and rollback instructions.
 
 Verification rules has applicant/employer switches (both ON by default), an
 audit sample percentage (0–100), a rate guard limit, a settings audit history and

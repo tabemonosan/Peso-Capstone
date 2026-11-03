@@ -2,6 +2,7 @@ import mongoose from 'mongoose'
 import { normalizeEmail } from '../utils/emailVerification.js'
 import { formatFullName, formatDisplayName } from '../../shared/nameFields.js'
 import { EMPLOYER_VERIFICATION_STATUSES, EMPLOYER_VERIFICATION_STATUS } from '../../shared/employerVerification.js'
+import { verificationVersionFields, verificationAccountFields } from './verification.js'
 
 const { Schema } = mongoose
 
@@ -33,7 +34,7 @@ const verificationDocVersionSchema = new Schema({
     data: { type: Buffer, select: false },
   },
   version: { type: Number, required: true },
-  status: { type: String, enum: ['pending', 'approved', 'rejected', 'superseded'], default: 'pending' },
+  ...verificationVersionFields,
   // nsrpForm only: whether the document was generated from online answers or
   // uploaded as a pre-filled form.
   sourceType: { type: String, enum: ['generated', 'uploaded'], default: undefined },
@@ -77,6 +78,7 @@ const nsrpWorkExperienceSchema = new Schema({
 }, { _id: false })
 
 const applicantSchema = new Schema({
+  ...verificationAccountFields,
   nsrpAutoEnabledAtCreation: { type: Boolean, select: false },
   sessionVersion: { type: Number, default: 0 },
   deletedAt: Date,
@@ -175,6 +177,7 @@ export function applicantDisplayName(applicant) {
 }
 
 const employerSchema = new Schema({
+  ...verificationAccountFields,
   receivingApplicantsSuspendedAt: Date,
   receivingApplicantsSuspensionReason: String,
   applicationAccessHistory: [{ action: String, reason: String, by: String, at: Date }],

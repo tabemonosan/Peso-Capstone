@@ -21,6 +21,10 @@ import { Applicant, Employer, Admin, JobTitle, Notification, Referral, HireRepor
 import { sendEmail, sendVerificationEmail, initMailer } from './mailer.js'
 import { createNsrpAutomation, SYSTEM_REVIEWER } from './services/nsrpAutomation.js'
 import { createNsrpAutomationRouter } from './routes/nsrpAutomation.js'
+import { verificationVersionFields } from './models/verification.js'
+import { createDocumentVerification } from './services/documentVerification.js'
+import { createDocumentVerificationRouter } from './routes/documentVerification.js'
+import { openFlags } from '../shared/verification.js'
 import { applicantSkillQuery } from './utils/jobSkillMatching.js'
 import { jobSkillMatchCount } from '../shared/jobSkills.js'
 import { rankEmployerReferrals } from './services/applicantRanking.js'
@@ -308,10 +312,11 @@ const employerRequestSchema = new Schema({
     data: { type: Buffer, select: false },
     version: Number,
     sourceType: { type: String, enum: ['uploaded', 'generated'] },
-    status: { type: String, enum: ['pending', 'approved', 'rejected', 'superseded'], default: 'pending' },
+    status: { type: String, enum: ['pending', 'approved', 'rejected', 'needs_resubmission', 'superseded'], default: 'pending' },
   },
   requirementsVersions: {
     type: [{
+      ...verificationVersionFields,
       version: { type: Number, required: true },
       originalName: String,
       filename: String,
@@ -319,7 +324,6 @@ const employerRequestSchema = new Schema({
       mimetype: String,
       size: Number,
       sourceType: { type: String, enum: ['uploaded', 'generated'] },
-      status: { type: String, enum: ['pending', 'approved', 'rejected', 'superseded'], default: 'pending' },
       uploadedAt: Date,
       reviewedAt: Date,
       reviewedBy: String,
@@ -342,7 +346,7 @@ const employerRequestSchema = new Schema({
 })
 employerRequestSchema.index({ status: 1, createdAt: -1, _id: 1 })
 const EmployerRequest = mongoose.model('EmployerRequest', employerRequestSchema)
-export const nsrpAutomation = createNsrpAutomation({ Applicant, Employer, EmployerRequest, notify, notifyAdmins, recomputeApplicant: async (id) => {
+async function refreshApplicantVerification(id) {
   const account = await Applicant.findById(id)
   if (!account) return
   recomputeVerificationStatus(account)
@@ -352,9 +356,12 @@ export const nsrpAutomation = createNsrpAutomation({ Applicant, Employer, Employ
     match[`verificationDocuments.${key}.versions`] = { $size: versions.length }
     if (versions.length) match[`verificationDocuments.${key}.versions.${versions.length - 1}.status`] = versions.at(-1).status
   }
-  await Applicant.updateOne(match, { $set: { verificationStatus: account.verificationStatus } })
-} })
-app.use('/api/admin/nsrp-automation', createNsrpAutomationRouter({ automation: nsrpAutomation, authenticate: authenticateRequest }))
+  await Applicant.updateOne(match, { $set: { verificationStatus: account.verificationStatus, ...(account.verificationReason ? { verificationReason: account.verificationReason } : {}) }, ...(!account.verificationReason ? { $unset: { verificationReason: '' } } : {}) })
+}
+export const nsrpAutomation = createNsrpAutomation({ Applicant, Employer, EmployerRequest, notify, notifyAdmins, recomputeApplicant: refreshApplicantVerification })
+app.use('/api/admin/nsrp-automation', createNsrpAutomationRouter({ automation: nsrpAutomation, authenticate: authenticateRequest, Admin, review: (...args) => documentVerification.act(...args) }))
+export const documentVerification = createDocumentVerification({ Applicant, Employer, EmployerRequest, automation: nsrpAutomation, notify, recomputeApplicant: refreshApplicantVerification })
+app.use('/api/admin/document-verification', createDocumentVerificationRouter({ service: documentVerification, authenticate: authenticateRequest, automation: nsrpAutomation, Admin }))
 
 const requirementsDirectory = path.join(process.cwd(), 'server', 'uploads', 'employer-requirements')
 fs.mkdirSync(requirementsDirectory, { recursive: true })
@@ -587,6 +594,7 @@ function summarizeVerificationDocuments(applicant, { withUrls = false, includeHi
       uploadsUsed: slot?.uploads || 0,
       uploadsRemaining: Math.max(0, MAX_UPLOADS_PER_DOC - (slot?.uploads || 0)),
       resubmitted: (slot?.versions?.length || 0) > 1 && currentDocStatus(slot) === 'pending',
+      ...(includeHistory ? { unresolved: openFlags(latest?.findings).length } : {}),
       latest: latest
         ? {
             version: latest.version,
@@ -619,7 +627,7 @@ function summarizeVerificationDocuments(applicant, { withUrls = false, includeHi
 // Count of documents that need the user's attention (rejected or missing required)
 function attentionCount(applicant) {
   const docs = applicant?.verificationDocuments || {}
-  return REQUIRED_DOC_KEYS.filter((key) => ['rejected', 'missing'].includes(currentDocStatus(docs[key]))).length
+  return REQUIRED_DOC_KEYS.filter((key) => ['rejected', 'needs_resubmission', 'missing'].includes(currentDocStatus(docs[key]))).length
 }
 
 // Recompute the account-level status from the latest version of each required document
@@ -1315,7 +1323,7 @@ async function appendVerificationVersion(applicant, docKey, file, idType = '', s
   const versionNumber = (slot.versions?.length || 0) + 1
   await storeDocumentFile(applicant._id, docKey, versionNumber, 'front', file)
   const cleanup = () => DocumentFile.deleteOne({ applicant: applicant._id, slot: docKey, version: versionNumber, side: 'front' }).catch(() => {})
-  if (current && ['pending', 'rejected'].includes(current.status)) current.status = 'superseded'
+  if (current && ['pending', 'rejected', 'needs_resubmission'].includes(current.status)) current.status = 'superseded'
   const version = {
     originalName: file.originalname,
     storedName: crypto.randomBytes(16).toString('hex'),
@@ -1622,6 +1630,13 @@ app.get('/api/applicants/:id/verification-documents', async (req, res) => {
       await applicant.save()
     }
     const nsrp = applicant.profile?.nsrp || {}
+    if (decoded.role === 'Admin') {
+      const current = latestVersion(applicant.verificationDocuments?.nsrpForm)
+      if (current && !current.findings?.length) {
+        const decision = await nsrpAutomation.decisions().findOne({ _id: `Applicant:${applicant._id}:${current.version}` })
+        if (decision?.report?.findings) current.findings = decision.report.findings.map(f => ({ ruleId: f.code, severity: f.severity, fieldGroup: 'registration', evidence: 'self-declared', status: decision.dismissals?.some(d => d.code === f.code) ? 'dismissed' : 'open' }))
+      }
+    }
     res.json({
       documents: summarizeVerificationDocuments(applicant, { withUrls: true, includeHistory: decoded.role === 'Admin' }),
       verificationStatus: applicant.verificationStatus,
@@ -1716,6 +1731,16 @@ app.put('/api/applicants/:id/verification-documents/:docKey', async (req, res) =
     })
     if (guard) return res.status(guard.status).json({ code: guard.code, error: guard.message })
 
+    if ((await nsrpAutomation.getSettings()).reviewToolsEnabled) {
+      const admin = await Admin.findOne({ email: decoded.email }).select('_id').lean()
+      await documentVerification.act({ role: 'Applicant', accountId: String(applicant._id), docKey }, { ...decoded, ...(admin ? { id: String(admin._id) } : {}) }, {
+        action: isRevert ? 'revoke' : status === 'approved' ? 'approve' : 'decline', reason,
+        version: current.version, unresolved: req.body?.unresolved ?? 0,
+      })
+      const fresh = await Applicant.findById(applicant._id)
+      return res.json({ id: String(fresh._id), verificationStatus: fresh.verificationStatus, verificationReason: fresh.verificationReason, documents: summarizeVerificationDocuments(fresh) })
+    }
+
     if (isRevert && docKey === 'nsrpForm' && current.reviewedBy === SYSTEM_REVIEWER) {
       const revoked = await nsrpAutomation.revoke(`Applicant:${applicant._id}:${current.version}`, decoded.email, String(reason || ''))
       if (!revoked) return res.status(409).json({ error: 'The approval changed. Refresh the document.' })
@@ -1776,6 +1801,7 @@ app.put('/api/applicants/:id/verification-documents/:docKey', async (req, res) =
     }
     res.json({ id: String(applicant._id), verificationStatus: applicant.verificationStatus, verificationReason: applicant.verificationReason, documents: summarizeVerificationDocuments(applicant) })
   } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message })
     console.error(err)
     res.status(500).json({ error: 'Server error' })
   }
@@ -3829,6 +3855,8 @@ app.put('/api/employer-requests/:id/status', async (req, res) => {
     const request = await EmployerRequest.findById(req.params.id)
     if (!request) return res.status(404).json({ error: 'Request not found' })
     const reviewReason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : ''
+    const foundationReview = (await nsrpAutomation.getSettings()).reviewToolsEnabled
+    if (foundationReview && !reviewReason) return res.status(400).json({ error: 'A reason is required for every review decision.' })
     if (status !== EMPLOYER_VERIFICATION_STATUS.APPROVED && !reviewReason) {
       return res.status(400).json({ error: 'A reason is required when declining or requesting a new document.' })
     }
@@ -3838,9 +3866,20 @@ app.put('/api/employer-requests/:id/status', async (req, res) => {
       return res.status(400).json({ error: 'Request already processed' })
     }
     const reviewedAt = new Date()
+    const reviewingAdmin = await Admin.findOne({ email: decoded.email }).select('_id').lean()
+    const reviewingAdminId = String(reviewingAdmin?._id || decoded.email)
+    if (foundationReview && status === 'approved') {
+      const version = request.requirementsVersions?.at(-1)
+      const legacy = version && await nsrpAutomation.decisions().findOne({ _id: `Employer:${verification.employer._id}:${version.version}` })
+      const unresolved = version?.findings?.length ? openFlags(version.findings).length : (legacy?.report?.findings || []).filter(f => ['warning', 'critical'].includes(f.severity) && !legacy.dismissals?.some(d => d.code === f.code)).length
+      if ((req.body?.unresolved ?? 0) !== unresolved) return res.status(409).json({ error: 'Flags changed; confirm the unresolved flag count again' })
+    }
+    const publicReason = foundationReview
+      ? status === 'approved' ? '' : status === 'needs_resubmission' ? 'Please submit a clearer or corrected NSRP Form 2 for PESO review.' : 'PESO could not approve this registration. Please contact the office for assistance.'
+      : reviewReason
     request.status = status
     request.adminDecision = status
-    request.reviewReason = reviewReason || undefined
+    request.reviewReason = publicReason || undefined
     request.reviewedBy = decoded.email
     request.reviewedAt = reviewedAt
     request.reviewHistory = [...(request.reviewHistory || []), { decision: status, reason: reviewReason || undefined, by: decoded.email, at: reviewedAt }]
@@ -3858,7 +3897,12 @@ app.put('/api/employer-requests/:id/status', async (req, res) => {
       latestVersion.status = status === EMPLOYER_VERIFICATION_STATUS.APPROVED ? 'approved' : 'rejected'
       latestVersion.reviewedAt = reviewedAt
       latestVersion.reviewedBy = decoded.email
-      latestVersion.reviewReason = reviewReason || undefined
+      latestVersion.reviewReason = publicReason || undefined
+      if (foundationReview) {
+        latestVersion.verificationAudit.push({ action: status === 'approved' ? 'approve' : status === 'needs_resubmission' ? 'resubmit' : 'decline', reason: reviewReason, by: reviewingAdminId, at: reviewedAt })
+        if (status === 'approved' && !latestVersion.autoApproved) latestVersion.approvedBy = reviewingAdminId
+        latestVersion.reviewRevision = (latestVersion.reviewRevision || 0) + 1
+      }
     }
     if (status === EMPLOYER_VERIFICATION_STATUS.APPROVED
       && !request.requirementsFile?.data
@@ -3872,7 +3916,7 @@ app.put('/api/employer-requests/:id/status', async (req, res) => {
       {
         $set: {
           verificationStatus: status,
-          verificationReason: reviewReason || undefined,
+          verificationReason: publicReason || undefined,
           approvalNoticePending: status === EMPLOYER_VERIFICATION_STATUS.APPROVED,
         },
         $push: { verificationHistory: { status, reason: reviewReason || undefined, by: decoded.email, at: reviewedAt } },
@@ -3886,15 +3930,13 @@ app.put('/api/employer-requests/:id/status', async (req, res) => {
       await notify({
         recipient: { id: employerAccount._id, role: 'Employer', email: employerAccount.email },
         type: approved ? 'employer_approved' : needsResubmission ? 'employer_resubmission_requested' : 'employer_declined',
-        title: approved ? 'Account approved' : needsResubmission ? 'Document needs resubmission' : `Account declined: ${reviewReason}`,
+        title: approved ? 'Account approved' : needsResubmission ? 'Document needs resubmission' : 'Registration review update',
         message: approved
           ? 'Your employer account is approved. You can now post jobs.'
-          : needsResubmission
-            ? `Please submit a new NSRP Form 2. Reason: ${reviewReason}`
-            : `Your employer account was declined. Reason: ${reviewReason}`,
+          : publicReason,
         link: '/verification',
         email: true,
-        metadata: { status, reason: reviewReason || undefined },
+        metadata: { status, ...(!foundationReview ? { reason: reviewReason || undefined } : {}) },
       })
     }
 

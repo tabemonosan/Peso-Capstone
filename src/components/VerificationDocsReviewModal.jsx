@@ -73,7 +73,7 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
       const response = await fetch(`${API_URL}/api/applicants/${applicant.id}/verification-documents/${docKey}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify(isRevert ? { action: "revert", reason: reason.trim() } : { status: decision, reason: reason.trim() }),
+        body: JSON.stringify(isRevert ? { action: "revert", reason: reason.trim() } : { status: decision, reason: reason.trim(), ...(decision === 'approved' ? { unresolved: documents?.find(doc => doc.docKey === docKey)?.unresolved || 0 } : {}) }),
       })
       const data = await response.json().catch(() => null)
       if (!response.ok || data?.error) {
@@ -400,7 +400,7 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
         )}
 
         {toast && (
-          <p role="status" className="fixed bottom-4 left-1/2 z-[90] -translate-x-1/2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-lg">
+          <p role="status" className="fixed bottom-4 left-1/2 z-[90] -translate-x-1/2 rounded-xl border border-green-300 bg-white px-4 py-2 text-sm font-semibold text-green-900 shadow-lg">
             {toast}
           </p>
         )}
@@ -423,12 +423,13 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
             return (
               <ConfirmDialog
                 title={`Approve ${docLabel} for ${applicantName}?`}
-                note="The applicant will be notified."
+                note={`${doc?.unresolved || 0} flags unresolved. Approve anyway? The applicant will be notified.`}
                 confirmLabel="Yes, approve"
                 busyLabel="Approving..."
                 busy={actionBusy}
+                requireReason reasonMinLength={1} reasonMaxLength={500}
                 error={actionError}
-                onConfirm={() => review(confirmAction.docKey, "approved")}
+                onConfirm={(reason) => review(confirmAction.docKey, "approved", reason)}
                 onCancel={() => setConfirmAction(null)}
               />
             )

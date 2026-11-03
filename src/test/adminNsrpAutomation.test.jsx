@@ -1,6 +1,7 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { beforeEach, afterEach, it, expect, vi } from 'vitest'
 import AdminNsrpAutomation, { AdminNsrpAccountDecision } from '../components/AdminNsrpAutomation'
+import { VERIFICATION_DEFAULTS } from '../../shared/verification.js'
 
 const fetchMock = vi.fn()
 const settings = { applicant: true, employer: true, auditPercent: 10, rateLimit: 5, history: [] }
@@ -20,7 +21,7 @@ it('loads the ON banner, validates settings controls, and saves admin choices', 
   fireEvent.click(screen.getByRole('button', { name: 'Save verification rules' }))
   await screen.findByRole('status')
   const request = fetchMock.mock.calls.find(([, options]) => options.method === 'PUT')
-  expect(JSON.parse(request[1].body)).toEqual({ applicant: false, employer: true, auditPercent: 25, rateLimit: 5 })
+  expect(JSON.parse(request[1].body)).toEqual({ ...VERIFICATION_DEFAULTS, applicant: false, employer: true, auditPercent: 25, rateLimit: 5 })
   expect(request[1].headers.Authorization).toBe('Bearer admin-token')
 })
 

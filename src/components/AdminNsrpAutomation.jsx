@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { API_URL } from '../config'
 import ConfirmDialog from './ConfirmDialog'
+import { VERIFICATION_DEFAULTS } from '../../shared/verification.js'
 
 const control = 'shared-form-control rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900'
 
@@ -58,7 +59,7 @@ export default function AdminNsrpAutomation({ token, bannerOnly = false }) {
     try {
       const response = await fetch(`${API_URL}/api/admin/nsrp-automation/settings`, { headers: { Authorization: `Bearer ${token}` } })
       if (!response.ok) throw new Error('Verification rules unavailable')
-      setSettings(await response.json())
+      setSettings({ ...VERIFICATION_DEFAULTS, ...await response.json() })
     } catch (err) { setError(err.message) }
   }, [token])
   useEffect(() => { load() }, [load])
@@ -74,15 +75,15 @@ export default function AdminNsrpAutomation({ token, bannerOnly = false }) {
   const save = async (event) => {
     event.preventDefault(); setBusy(true); setError(''); setNotice('')
     try {
-      const { applicant, employer, auditPercent, rateLimit } = settings
-      const response = await fetch(`${API_URL}/api/admin/nsrp-automation/settings`, { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ applicant, employer, auditPercent: Number(auditPercent), rateLimit: Number(rateLimit) }) })
+      const changes = Object.fromEntries(Object.keys(VERIFICATION_DEFAULTS).map(key => [key, ['auditPercent', 'rateLimit'].includes(key) ? Number(settings[key]) : settings[key]]))
+      const response = await fetch(`${API_URL}/api/admin/nsrp-automation/settings`, { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(changes) })
       const body = await response.json()
       if (!response.ok) throw new Error(body.error)
-      setSettings(body); setNotice('Verification rules saved. Existing approvals are unchanged.')
+      setSettings({ ...VERIFICATION_DEFAULTS, ...body }); setNotice('Verification rules saved. Existing approvals are unchanged.')
     } catch (err) { setError(err.message) }
     finally { setBusy(false) }
   }
-  const enabled = settings?.applicant || settings?.employer
+  const enabled = settings?.automaticApproval
   const dismissFinding = async (reason) => {
     setBusy(true)
     try {
@@ -99,7 +100,11 @@ export default function AdminNsrpAutomation({ token, bannerOnly = false }) {
     {!bannerOnly && <>
       <h2 className="mt-4 text-xl font-semibold">Verification rules</h2>
       {settings && <form onSubmit={save} className="my-4 grid gap-4 sm:grid-cols-2">
+        <label><input type="checkbox" checked={settings.automaticApproval} onChange={event => setSettings({ ...settings, automaticApproval: event.target.checked })} /> Automatic approval</label>
         {['applicant', 'employer'].map((key) => <label key={key}><input type="checkbox" checked={settings[key]} onChange={(event) => setSettings({ ...settings, [key]: event.target.checked })} /> Auto-approve {key} NSRPs</label>)}
+        {[['birthCertificate', 'Auto-approve birth certificates'], ['validId', 'Auto-approve valid IDs'], ['ocrTextReading', 'OCR text reading'], ['reviewToolsEnabled', 'Document review queues and actions']].map(([key, label]) => <label key={key}><input type="checkbox" checked={settings[key]} onChange={event => setSettings({ ...settings, [key]: event.target.checked })} /> {label}</label>)}
+        <label>Minimum evidence<select className={`${control} block`} value={settings.minimumEvidence} onChange={event => setSettings({ ...settings, minimumEvidence: event.target.value })}><option value="independent">Independent evidence (recommended)</option><option value="none">None: typed data only, not recommended</option></select></label>
+        <p className="text-sm text-slate-600 sm:col-span-2">Checks assess consistency and evidence, not authenticity. Image reading and supporting-document automatic approval will be available in later phases. The independent evidence default keeps typed-only submissions pending.</p>
         <label>Audit sample percentage<input type="number" min="0" max="100" required className={`${control} block`} value={settings.auditPercent} onChange={(event) => setSettings({ ...settings, auditPercent: event.target.value })} /></label>
         <label>Rate guard per IP and mobile / 24 hours<input type="number" min="1" max="5" required className={`${control} block`} value={settings.rateLimit} onChange={(event) => setSettings({ ...settings, rateLimit: event.target.value })} /></label>
         <button disabled={busy} type="submit" className="rounded-lg border border-cyan-500 bg-cyan-50 px-4 py-2">Save verification rules</button>

@@ -8,7 +8,7 @@ import { createNsrpAutomation, SYSTEM_REVIEWER } from '../../services/nsrpAutoma
 import { checkNsrp, NSRP_RULES_VERSION } from '../../../shared/nsrpChecks.js'
 vi.mock('../../mailer.js', async (original) => ({ ...await original(), sendEmail: vi.fn(async () => ({ delivered: true })), initMailer: vi.fn() }))
 const { app, nsrpAutomation } = await import('../../index.js')
-const { Applicant, Employer, Notification } = await import('../../models/collections.js')
+const { Applicant, Employer, Admin, Notification } = await import('../../models/collections.js')
 const EmployerRequest = mongoose.model('EmployerRequest')
 const notify = vi.fn(async () => {})
 let service
@@ -20,8 +20,9 @@ beforeAll(startTestDb, 180000)
 afterAll(stopTestDb)
 beforeEach(async () => {
   await clearDb(); notify.mockClear()
+  await Admin.create({ email: 'admin@example.com', passwordHash: 'test' })
   service = createNsrpAutomation({ Applicant, Employer, EmployerRequest, notify, random: () => 0.99 })
-  await service.updateSettings({ auditPercent: 0 }, 'test-admin')
+  await service.updateSettings({ auditPercent: 0, minimumEvidence: 'none' }, 'test-admin')
 })
 
 async function applicant(options = {}) {
@@ -46,9 +47,9 @@ const run = async (account, role = 'Applicant', instance = service, ip = '192.0.
 }
 
 describe('NSRP automation with a real MongoDB database', () => {
-  it('defaults both switches ON with a ten percent audit sample and limit five', async () => {
+  it('defaults switches ON with independent evidence, a twenty percent audit sample and limit five', async () => {
     await mongoose.connection.db.collection('nsrp_auto_settings').deleteMany({})
-    expect(await service.getSettings()).toMatchObject({ applicant: true, employer: true, auditPercent: 10, rateLimit: 5 })
+    expect(await service.getSettings()).toMatchObject({ automaticApproval: true, applicant: true, employer: true, minimumEvidence: 'independent', auditPercent: 20, rateLimit: 5 })
   })
   it('approves only the clean NSRP, records its report and audit, and notifies once under concurrent runs', async () => {
     const account = await applicant()
@@ -64,7 +65,7 @@ describe('NSRP automation with a real MongoDB database', () => {
     expect(decision).toMatchObject({ result: 'Auto-approved', report: { level: 'clear', documentVersion: 1, rulesVersion: NSRP_RULES_VERSION } })
     // Existing manual approval flow still controls completion of the account.
     for (const doc of ['birthCertificate', 'validId1']) {
-      const response = await request(app).put(`/api/applicants/${account._id}/verification-documents/${doc}`).set('Authorization', `Bearer ${token()}`).send({ status: 'approved' })
+      const response = await request(app).put(`/api/applicants/${account._id}/verification-documents/${doc}`).set('Authorization', `Bearer ${token()}`).send({ status: 'approved', reason: 'Document reviewed' })
       expect(response.status).toBe(200)
     }
     expect((await Applicant.findById(account._id)).verificationStatus).toBe('approved')

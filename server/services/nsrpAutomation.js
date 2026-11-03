@@ -2,9 +2,10 @@ import crypto from 'node:crypto'
 import mongoose from 'mongoose'
 import { checkNsrp, checkSummary, NSRP_RULES_VERSION } from '../../shared/nsrpChecks.js'
 import { checkNsrp2 } from '../../shared/nsrp2Checks.js'
+import { VERIFICATION_DEFAULTS, REVIEWER_LABELS, openFlags } from '../../shared/verification.js'
 
-export const SYSTEM_REVIEWER = 'System (auto-approval)'
-const DEFAULTS = { applicant: true, employer: true, auditPercent: 10, rateLimit: 5 }
+export const SYSTEM_REVIEWER = REVIEWER_LABELS.system
+const DEFAULTS = VERIFICATION_DEFAULTS
 const DAY = 86400000
 const MANUAL_TYPES = new Set(['government', 'recruitment & placement agency (local)', 'licensed recruitment agency (overseas)', 'do 174-17 subcontractor'])
 const normalizeMobile = (value) => String(value || '').replace(/\D/g, '').replace(/^63(?=9\d{9}$)/, '0')
@@ -39,18 +40,19 @@ export function createNsrpAutomation({ Applicant, Employer, EmployerRequest, not
 
   async function getSettings() {
     await settings().updateOne({ _id: 'settings' }, { $setOnInsert: { ...DEFAULTS, history: [] } }, { upsert: true })
-    return settings().findOne({ _id: 'settings' })
+    return { ...DEFAULTS, ...await settings().findOne({ _id: 'settings' }) }
   }
 
   async function creationEnabled(role) {
-    try { return Boolean((await getSettings())[role === 'Applicant' ? 'applicant' : 'employer']) }
+    try { const config = await getSettings(); return Boolean(config.automaticApproval && config[role === 'Applicant' ? 'applicant' : 'employer']) }
     catch { console.error('[nsrp-auto] settings unavailable; manual review required'); return false }
   }
 
   async function updateSettings(changes, admin) {
     const allowed = Object.keys(DEFAULTS)
     if (Object.keys(changes).some((key) => !allowed.includes(key))) throw new Error('Unknown setting')
-    for (const key of ['applicant', 'employer']) if (key in changes && typeof changes[key] !== 'boolean') throw new Error('Switches must be boolean')
+    for (const key of Object.keys(DEFAULTS).filter(key => typeof DEFAULTS[key] === 'boolean')) if (key in changes && typeof changes[key] !== 'boolean') throw new Error('Switches must be boolean')
+    if ('minimumEvidence' in changes && !['independent', 'none'].includes(changes.minimumEvidence)) throw new Error('Choose independent or none evidence')
     if ('auditPercent' in changes && (!Number.isFinite(changes.auditPercent) || changes.auditPercent < 0 || changes.auditPercent > 100)) throw new Error('Audit percentage must be 0 to 100')
     if ('rateLimit' in changes && (!Number.isInteger(changes.rateLimit) || changes.rateLimit < 1 || changes.rateLimit > 5)) throw new Error('Rate limit must be 1 to 5 per 24 hours')
     await getSettings()
@@ -103,7 +105,7 @@ export function createNsrpAutomation({ Applicant, Employer, EmployerRequest, not
     let key
     let approved = false
     try {
-      const account = await (role === 'Applicant' ? Applicant : Employer).findById(accountId).select('+nsrpAutoEnabledAtCreation').lean()
+      const account = await (role === 'Applicant' ? Applicant : Employer).findById(accountId).select('+nsrpAutoEnabledAtCreation +holdAutoApproval').lean()
       if (!account) return
       const record = role === 'Applicant' ? account : await EmployerRequest.findOne({ email: account.email }).select('+nsrpAutoEnabledAtCreation').lean()
       if (!record) return
@@ -124,13 +126,24 @@ export function createNsrpAutomation({ Applicant, Employer, EmployerRequest, not
       const config = await getSettings()
       const dismissedCritical = await decisions().findOne({ role, accountId: account._id, dismissedCritical: true })
       let reason = manualReason({ sourceType: version.sourceType, version: version.version, emailVerified: account.emailVerified,
-        enabledAtCreation: record.nsrpAutoEnabledAtCreation === true, enabled: config[role === 'Applicant' ? 'applicant' : 'employer'],
+        enabledAtCreation: record.nsrpAutoEnabledAtCreation === true, enabled: config.automaticApproval && config[role === 'Applicant' ? 'applicant' : 'employer'],
         dismissedCritical: Boolean(dismissedCritical), employerType: role === 'Employer' ? record.registrationDetails?.employerType : '', report })
+      if (!reason && account.holdAutoApproval) reason = 'Hold'
+      if (!reason && (account.applyingSuspendedAt || account.receivingApplicantsSuspendedAt || account.verificationStatus === 'restricted')) reason = 'Hold'
+      const allFindings = role === 'Applicant' ? Object.values(account.verificationDocuments || {}).flatMap(slot => slot.versions?.at(-1)?.findings || []) : version.findings || []
+      if (!reason && openFlags(allFindings).length) reason = 'Flagged'
+      if (!reason && version.explanation?.status && version.explanation.status !== 'reviewed') reason = 'Explanation'
+      // No independent reader exists in Phase 1. Typed data cannot satisfy the default.
+      if (!reason && config.minimumEvidence === 'independent') reason = 'Not independent'
       let sampled = false
       if (!reason && random() * 100 < config.auditPercent) { reason = 'Audit sample'; sampled = true }
       if (!reason && !await reserveRate(key, ip, role === 'Applicant' ? data.cellphone || account.phone : record.phone, config.rateLimit)) reason = 'Rate guard'
       if (reason) {
         await decisions().updateOne({ _id: key }, { $set: { result: 'Manual', reason, sampled, report, finishedAt: new Date() } })
+        const base = role === 'Applicant' ? `verificationDocuments.nsrpForm.versions.${versions.length - 1}` : `requirementsVersions.${versions.length - 1}`
+        await (role === 'Applicant' ? Applicant : EmployerRequest).collection.updateOne({ _id: record._id, [`${base}.status`]: 'pending', [`${base}.version`]: version.version }, { $set: {
+          [`${base}.reviewReasons`]: [reason], [`${base}.findings`]: report.findings.map(f => ({ ruleId: f.code, severity: f.severity, fieldGroup: 'registration', evidence: 'self-declared', status: 'open' })),
+        } })
         return
       }
       if (beforeApproval) await beforeApproval()
@@ -139,9 +152,16 @@ export function createNsrpAutomation({ Applicant, Employer, EmployerRequest, not
       const base = role === 'Applicant' ? `verificationDocuments.nsrpForm.versions.${index}` : `requirementsVersions.${index}`
       const model = role === 'Applicant' ? Applicant : EmployerRequest
       const match = { _id: record._id, [`${base}.status`]: 'pending', [`${base}.version`]: 1,
+        $or: [{ [`${base}.reviewRevision`]: version.reviewRevision || 0 }, ...(!version.reviewRevision ? [{ [`${base}.reviewRevision`]: { $exists: false } }] : [])],
         ...(role === 'Applicant' ? { emailVerified: true, verificationStatus: { $ne: 'restricted' }, deletedAt: { $exists: false }, 'verificationDocuments.nsrpForm.versions': { $size: 1 } } : { requirementsVersions: { $size: 1 }, status: { $in: ['pending', 'under_review'] } }) }
       const summary = JSON.stringify({ rulesVersion: NSRP_RULES_VERSION, ...report.summary })
-      const set = { [`${base}.status`]: 'approved', [`${base}.reviewedBy`]: SYSTEM_REVIEWER, [`${base}.reviewedAt`]: now }
+      const latestConfig = await getSettings()
+      const currentAccount = await (role === 'Applicant' ? Applicant : Employer).findById(accountId).select('+holdAutoApproval').lean()
+      if (!latestConfig.automaticApproval || !latestConfig[role === 'Applicant' ? 'applicant' : 'employer'] || latestConfig.minimumEvidence !== 'none' || currentAccount?.holdAutoApproval) {
+        await decisions().updateOne({ _id: key }, { $set: { result: 'Manual', reason: 'Controls changed during review', finishedAt: now } }); return
+      }
+      const set = { [`${base}.status`]: 'approved', [`${base}.reviewedBy`]: SYSTEM_REVIEWER, [`${base}.reviewedAt`]: now,
+        [`${base}.autoApproved`]: true, [`${base}.approvedBy`]: 'system', [`${base}.autoApprovalSummary`]: [{ ruleId: 'nsrp-data-clear', level: 'clear' }], [`${base}.reviewReasons`]: [] }
       if (role === 'Employer') set['requirementsFile.status'] = 'approved'
       const push = role === 'Applicant'
         ? { 'verificationDocuments.nsrpForm.history': { action: 'auto-approved', reason: summary, by: SYSTEM_REVIEWER, at: now } }
@@ -174,12 +194,13 @@ export function createNsrpAutomation({ Applicant, Employer, EmployerRequest, not
     const base = role === 'Applicant' ? `verificationDocuments.nsrpForm.versions.${index}` : `requirementsVersions.${index}`
     const model = role === 'Applicant' ? Applicant : EmployerRequest
     const now = new Date()
-    const set = { [`${base}.status`]: 'pending', [`${base}.reviewedBy`]: admin, [`${base}.reviewedAt`]: now, [`${base}.reviewReason`]: reason.trim() }
+    const set = { [`${base}.status`]: 'pending', [`${base}.reviewedBy`]: admin, [`${base}.reviewedAt`]: now, [`${base}.reviewReason`]: 'Your document has returned to PESO review.', [`${base}.autoApproved`]: false, [`${base}.reviewReasons`]: ['Revoked approval'] }
     if (role === 'Employer') { set['requirementsFile.status'] = 'pending'; set.status = 'under_review' }
     const push = role === 'Applicant' ? { 'verificationDocuments.nsrpForm.history': { action: 'revoke-auto-approval', reason: reason.trim(), by: admin, at: now } }
       : { reviewHistory: { decision: 'needs_resubmission', reason: `Revoke NSRP auto-approval: ${reason.trim()}`, by: admin, at: now } }
-    const changed = await model.collection.updateOne({ _id: recordId, [`${base}.status`]: 'approved', [`${base}.reviewedBy`]: SYSTEM_REVIEWER }, {
-      $set: set, $push: push, ...(role === 'Employer' ? { $unset: { adminDecision: '', approvedAt: '', approvedBy: '' } } : {}),
+    push[`${base}.verificationAudit`] = { action: 'revoke', reason: reason.trim(), by: admin, at: now }
+    const changed = await model.collection.updateOne({ _id: recordId, [`${base}.status`]: 'approved', [`${base}.reviewedBy`]: { $in: [SYSTEM_REVIEWER, 'System (auto-approval)'] } }, {
+      $set: set, $push: push, $unset: { [`${base}.approvedBy`]: '', [`${base}.adminConfirmedBy`]: '', [`${base}.adminConfirmedAt`]: '', ...(role === 'Employer' ? { adminDecision: '', approvedAt: '', approvedBy: '' } : {}) },
     })
     if (!changed.modifiedCount) return false
     if (role === 'Applicant') await Applicant.updateOne({ _id: accountId, verificationStatus: { $ne: 'restricted' }, [`${base}.status`]: 'pending' }, { $set: { verificationStatus: 'under_review' }, $unset: { verificationReason: '' } })

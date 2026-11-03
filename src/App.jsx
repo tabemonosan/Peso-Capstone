@@ -22,6 +22,7 @@ import PasswordChecklist from "./components/PasswordChecklist"
 import ApplicantSignupWizard from "./components/ApplicantSignupWizard"
 import EmployerSignupWizard from "./components/EmployerSignupWizard"
 import AdminNsrpAutomation, { AdminNsrpAccountDecision } from './components/AdminNsrpAutomation'
+import AdminDocumentVerification, { VerificationQueueBadge } from './components/AdminDocumentVerification'
 import EmployerVerificationPage from "./components/EmployerVerificationPage"
 import { validatePassword } from "./utils/passwordPolicy"
 import { SUFFIX_OPTIONS, capitalizeName, validateNameField, formatFullName, formatDisplayName } from "../shared/nameFields.js"
@@ -72,6 +73,8 @@ const navigationByRole = {
     { id: "applicants", label: "Applicants" },
     { id: "requests", label: "Employer Requests" },
     { id: "verification-rules", label: "Verification rules" },
+    { id: "verification-flagged", label: "Flagged for review" },
+    { id: "verification-auto", label: "Auto-approved" },
     { id: "account-deletions", label: "Account Deletions" },
     { id: "jobs", label: "Job Postings" },
     { id: "job-titles", label: "Job Titles" },
@@ -1111,14 +1114,14 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
     }
   }
 
-  const handleReviewEmployerRequest = async (requestId, status, reason = '') => {
+  const handleReviewEmployerRequest = async (requestId, status, reason = '', unresolved = 0) => {
     const token = getToken()
     if (!token) return { error: 'Not authenticated' }
     try {
       const response = await fetch(`${API_URL}/api/employer-requests/${requestId}/status`, {
         method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ status, reason: status === 'approved' ? '' : reason.trim() }),
+      body: JSON.stringify({ status, reason: reason.trim(), unresolved }),
     })
     const data = await response.json().catch(() => null)
     if (!response.ok || data?.error) return { error: data?.error || 'Failed to update employer request' }
@@ -1134,20 +1137,30 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
   }
 
   // All employer request decisions go through the shared confirm dialog
-  const confirmEmployerRequest = (requestId, companyName, status) => {
+  const confirmEmployerRequest = async (requestId, companyName, status) => {
     if (status === 'approved') {
+      let unresolved = 0
+      try {
+        const response = await fetch(`${API_URL}/api/admin/document-verification/queue?recordId=${encodeURIComponent(requestId)}&docKey=employerNsrpForm`, { headers: { Authorization: `Bearer ${getToken()}` } })
+        // The original account review remains available when the new tools are disabled.
+        if (response.status !== 409) {
+          if (!response.ok) throw new Error('Could not load the current document flags')
+          unresolved = (await response.json()).items?.[0]?.unresolved || 0
+        }
+      } catch (error) { setAppMessage({ type: 'error', text: error.message }); return }
       return requestConfirm({
         title: `Approve ${companyName || 'this employer'}?`,
-        note: 'The employer will be notified and gain access to employer features.',
+        note: `${unresolved} flags unresolved. Approve anyway? The employer will be notified and gain access to employer features.`,
         confirmLabel: 'Yes, approve',
         busyLabel: 'Approving...',
-        onConfirm: () => handleReviewEmployerRequest(requestId, 'approved'),
+        requireReason: true,
+        onConfirm: reason => handleReviewEmployerRequest(requestId, 'approved', reason, unresolved),
       })
     }
     const needsResubmission = status === 'needs_resubmission'
     return requestConfirm({
       title: `${needsResubmission ? 'Request a new document from' : 'Decline'} ${companyName || 'this employer'}?`,
-      note: 'The employer will be notified with your reason.',
+      note: 'The employer will receive a neutral review update. Your reason is kept in the PESO audit.',
       confirmLabel: needsResubmission ? 'Request new document' : 'Confirm decline',
       confirmTone: 'danger',
       busyLabel: needsResubmission ? 'Requesting...' : 'Declining...',
@@ -2197,6 +2210,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
               >
                 <PortalNavIcon name={activeRole === 'Applicant' && item.id === 'dashboard' ? 'home' : item.id} />
                 <span>{item.label}</span>
+                {activeRole === 'Admin' && item.id === 'verification-flagged' && <VerificationQueueBadge token={getToken()} />}
               </button>
             ))}
           </nav>
@@ -2222,6 +2236,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
           <main className="space-y-6">
           {activeRole === 'Admin' && <AutomaticReferralBanner token={getToken()} onOpen={() => setActiveView('peso-referrals')} />}
           {activeRole === 'Admin' && <AdminNsrpAutomation key={activeView} token={getToken()} bannerOnly={activeView !== 'verification-rules'} />}
+          {activeRole === 'Admin' && ['verification-flagged', 'verification-auto'].includes(activeView) && <AdminDocumentVerification key={activeView} token={getToken()} queue={activeView === 'verification-auto' ? 'auto' : 'flagged'} />}
           {appMessage && createPortal(
             <div
               role="status"
