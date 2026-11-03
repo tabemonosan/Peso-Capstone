@@ -4,6 +4,9 @@ import { DOCUMENT_LABELS, openFlags } from '../../shared/verification.js'
 import Modal from './Modal'
 import ConfirmDialog from './ConfirmDialog'
 import VerificationDocsReviewModal from './VerificationDocsReviewModal'
+import AdminDocumentImageViewer from './AdminDocumentImageViewer'
+import ManualDocumentChecklist from './ManualDocumentChecklist'
+import { needsManualChecklist, completeChecklist } from '../../shared/manualDocumentReview.js'
 
 const control = 'shared-form-control rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900'
 const labels = { approve: 'Approve', resubmit: 'Request resubmission', decline: 'Decline', resolve: 'Resolve flag', explain: 'Ask for explanation', checked: 'Mark checked', revoke: 'Revoke', hold: 'Hold auto-approval', 'release-hold': 'Release auto-approval hold' }
@@ -36,6 +39,7 @@ export default function AdminDocumentVerification({ token, queue = 'flagged' }) 
   const [confirmation, setConfirmation] = useState(null)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
+  const [checklist, setChecklist] = useState({})
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try {
@@ -55,7 +59,7 @@ export default function AdminDocumentVerification({ token, queue = 'flagged' }) 
     try {
       const response = await fetch(`${API_URL}/api/admin/document-verification/action`, {
         method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ role: item.role, accountId: item.accountId, docKey: item.docKey, version: item.version, action, reason, ruleId, unresolved: openFlags(item.findings).length }),
+        body: JSON.stringify({ role: item.role, accountId: item.accountId, docKey: item.docKey, version: item.version, action, reason, ruleId, unresolved: openFlags(item.findings).length, checklist }),
       })
       const body = await response.json()
       if (!response.ok) throw new Error(body.error || 'Review action unavailable')
@@ -64,7 +68,7 @@ export default function AdminDocumentVerification({ token, queue = 'flagged' }) 
     } catch (err) { setError(err.message) }
     finally { setBusy(false) }
   }
-  const actionButton = (item, action, ruleId) => <button type="button" className={`${control} text-cyan-800`} onClick={() => { setError(''); setConfirmation({ item, action, ruleId }) }}>{labels[action]}</button>
+  const actionButton = (item, action, ruleId) => <button type="button" className={`${control} text-cyan-800`} onClick={() => { setError(''); setChecklist({}); setConfirmation({ item, action, ruleId }) }}>{labels[action]}</button>
   return <section className="rounded-xl border border-slate-200 bg-white p-4 text-slate-900">
     <h1 className="text-xl font-semibold">{queue === 'auto' ? 'Auto-approved' : 'Flagged for review'}</h1>
     <p className="mt-1 text-sm text-slate-600">Checks assess consistency and evidence, not authenticity. Review reasons and notes stay with PESO.</p>
@@ -104,6 +108,7 @@ export default function AdminDocumentVerification({ token, queue = 'flagged' }) 
     </article>)}
     <div className="mt-4 flex items-center gap-4"><button type="button" className={control} disabled={page <= 1 || loading} onClick={() => setPage(page - 1)}>Previous</button><span>Page {page} of {Math.max(1, Math.ceil(data.total / data.limit))}</span><button type="button" className={control} disabled={page * data.limit >= data.total || loading} onClick={() => setPage(page + 1)}>Next</button></div>
     {selected && <Modal onClose={() => setSelected(null)} labelledBy="document-review-details"><h2 id="document-review-details" className="text-lg font-semibold">{selected.label}: review details</h2>
+      {selected.role === 'Applicant' && <AdminDocumentImageViewer token={token} accountId={selected.accountId} docKey={selected.docKey} />}
       <p className="my-2">{selected.email} · {selected.unresolved} unresolved flags</p>
       {selected.findings.map(f => <div key={f.ruleId} className="my-3 rounded-lg border border-slate-200 bg-white p-3"><p>{f.ruleId} · {f.severity} · {f.fieldGroup} · {f.evidence} · {f.status}</p>{f.note && <p>{f.note}</p>}{f.status !== 'dismissed' && actionButton(selected, 'resolve', f.ruleId)}</div>)}
       {selected.explanation && <div className="my-3"><h3 className="font-semibold">Explanation</h3><p>{selected.explanation.status} · {selected.explanation.category}</p><p>{selected.explanation.note}</p></div>}
@@ -115,6 +120,9 @@ export default function AdminDocumentVerification({ token, queue = 'flagged' }) 
       note={confirmation.action === 'approve' ? `${openFlags(confirmation.item.findings).length} flags unresolved. Approve anyway?` : 'A reason is required and will be recorded for PESO. Do not enter personal document values in notes.'}
       requireReason reasonMinLength={1} reasonMaxLength={500} busy={busy} error={error}
       initialReason={confirmation.action === 'resubmit' ? openFlags(confirmation.item.findings).map(f => `Please review ${f.fieldGroup || 'document details'}`).filter((value, index, values) => values.indexOf(value) === index).join('; ') : ''}
-      onConfirm={confirm} onCancel={() => { if (!busy) { setConfirmation(null); setError('') } }} />}
+      confirmDisabled={confirmation.action === 'approve' && needsManualChecklist(confirmation.item.docKey) && !completeChecklist(checklist)}
+      onConfirm={confirm} onCancel={() => { if (!busy) { setConfirmation(null); setError('') } }}>
+      {confirmation.action === 'approve' && needsManualChecklist(confirmation.item.docKey) && <ManualDocumentChecklist value={checklist} onChange={setChecklist} />}
+    </ConfirmDialog>}
   </section>
 }

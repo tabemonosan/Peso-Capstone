@@ -65,7 +65,7 @@ describe('NSRP automation with a real MongoDB database', () => {
     expect(decision).toMatchObject({ result: 'Auto-approved', report: { level: 'clear', documentVersion: 1, rulesVersion: NSRP_RULES_VERSION } })
     // Existing manual approval flow still controls completion of the account.
     for (const doc of ['birthCertificate', 'validId1']) {
-      const response = await request(app).put(`/api/applicants/${account._id}/verification-documents/${doc}`).set('Authorization', `Bearer ${token()}`).send({ status: 'approved', reason: 'Document reviewed' })
+      const response = await request(app).put(`/api/applicants/${account._id}/verification-documents/${doc}`).set('Authorization', `Bearer ${token()}`).send({ status: 'approved', reason: 'Document reviewed', checklist: { nameMatches: true, photoClear: true, notExpired: true, typeMatches: true, bothSides: true } })
       expect(response.status).toBe(200)
     }
     expect((await Applicant.findById(account._id)).verificationStatus).toBe('approved')

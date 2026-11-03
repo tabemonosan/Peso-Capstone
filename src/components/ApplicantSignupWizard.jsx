@@ -657,6 +657,7 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
           payload.append("nsrpAnswers", JSON.stringify(requestAnswers))
         }
         payload.append("id1Type", docs.id1.type)
+        payload.append('verificationDetails', JSON.stringify({ birthCertificate: docs.birthDetails || {}, validId1: { number: docs.id1.number, expiry: docs.id1.expiry, format: docs.id1.format }, validId2: { number: docs.id2.number, expiry: docs.id2.expiry, format: docs.id2.format } }))
         payload.append("id2Type", docs.id2.type)
         payload.append("birthCertificate", docs.birthCertificate)
         payload.append("validId1Front", docs.id1.front)
@@ -997,7 +998,7 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
           <button type="button" onClick={() => setShowPassword((value) => !value)} className="self-start text-sm text-cyan-800">{showPassword ? "Hide password" : "Show password"}</button>
           <label className="flex items-start gap-2 text-sm text-slate-700">
             <input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} className="mt-1" />
-            <span>I agree to the collection and processing of my personal information and documents for account verification, in accordance with the Data Privacy Act of 2012 (RA 10173).</span>
+            <span>I agree to the collection and processing of my personal information and documents for account verification, including automatic image and consistency checks, in accordance with the Data Privacy Act of 2012 (RA 10173). These checks assess consistency and evidence, not authenticity.</span>
           </label>
           {fieldErrors.consent && <p role="alert" className="text-xs text-rose-600">{fieldErrors.consent}</p>}
         </>

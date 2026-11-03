@@ -25,6 +25,8 @@ import { verificationVersionFields } from './models/verification.js'
 import { createDocumentVerification } from './services/documentVerification.js'
 import { createDocumentVerificationRouter } from './routes/documentVerification.js'
 import { openFlags } from '../shared/verification.js'
+import { prepareDocument, parseDocumentDetails, saveAuthorization } from './services/documentUpload.js'
+import { processApplicantImages } from './services/imageChecks.js'
 import { applicantSkillQuery } from './utils/jobSkillMatching.js'
 import { jobSkillMatchCount } from '../shared/jobSkills.js'
 import { rankEmployerReferrals } from './services/applicantRanking.js'
@@ -456,7 +458,7 @@ const applicantSignupUpload = multer({
   },
 })
 
-const VALID_ID_TYPES = ['SSS', 'Passport', 'PRC', 'Pag-IBIG', "Voter's ID", 'Philippine Postal ID', 'UMID']
+const VALID_ID_TYPES = ['SSS', 'Passport', 'PRC', 'Pag-IBIG', "Voter's ID", 'Philippine Postal ID', 'UMID', 'PhilSys National ID']
 const MAX_UPLOADS_PER_DOC = 5
 // Projection to re-include the select:false buffers when streaming
 const VERIFICATION_DATA_SELECT = VERIFICATION_DOC_KEYS.flatMap((key) => [
@@ -1015,6 +1017,18 @@ app.post('/api/signup', applicantSignupUpload.fields([
       }
     }
 
+    const documentReviews = {}
+    const declaredDocuments = parseDocumentDetails(req.body?.verificationDetails)
+    if ((await nsrpAutomation.getSettings()).imageChecks) {
+      for (const [slot, field, idType] of [['birthCertificate', 'birthCertificate', ''], ['validId1', 'validId1Front', id1Type], ['validId2', 'validId2Front', id2Type]]) {
+        if (!fileFor(field)) continue
+        try {
+          documentReviews[slot] = await prepareDocument(fileFor(field), slot, idType, declaredDocuments[slot], slot === 'validId2' ? declaredDocuments.validId1?.number : undefined)
+          const back = fileFor(slot + 'Back')
+          if (back) { const backReview = await prepareDocument(back, slot, idType, declaredDocuments[slot]); documentReviews[slot].quality.warnings.push(...backReview.quality.warnings) }
+        } catch (error) { if (error.status) return res.status(422).json({ error: 'Check your document before you upload.', fieldErrors: { [slot]: error.message } }); throw error }
+      }
+    }
     const passwordHash = await bcrypt.hash(password, 10)
     const uploadedAt = new Date()
     // File bytes are stored in the document_files collection after the applicant
@@ -1031,6 +1045,7 @@ app.post('/api/signup', applicantSignupUpload.fields([
         version: 1,
         status: 'pending',
         sourceType,
+        ...documentReviews[slot],
       }
     }
     const slotFor = (slot, sourceType) => (file, idType) => ({
@@ -1142,6 +1157,7 @@ app.post('/api/signup', applicantSignupUpload.fields([
       for (const { slot, version, side, file } of filesToStore) {
         await storeDocumentFile(user._id, slot, version, side, file)
       }
+      await saveAuthorization(user._id, 'birthCertificate', 1, declaredDocuments.birthCertificate)
     } catch (err) {
       // Roll back so no half-created account or orphaned files remain
       if (user?._id) await Applicant.deleteOne({ _id: user._id }).catch(() => {})
@@ -1154,6 +1170,10 @@ app.post('/api/signup', applicantSignupUpload.fields([
     await nsrpAutomation.process({ role: 'Applicant', accountId: user._id, ip: req.ip })
     // Refresh metadata after the atomic automation write; never save a stale user.
     user = await Applicant.findById(user._id)
+    {
+      const imageSettings = await nsrpAutomation.getSettings()
+      for (const slot of ['birthCertificate', 'validId1', 'validId2']) if (user.verificationDocuments?.[slot]?.versions?.length && !documentReviews[slot]?.quality?.pages) setImmediate(() => processApplicantImages({ accountId: user._id, docKey: slot, version: 1, settings: imageSettings }))
+    }
 
     // No link-verification email is sent: these accounts are verified by code.
     // The link-based flow (verify-email / resend) stays for older accounts.
@@ -1333,6 +1353,7 @@ async function appendVerificationVersion(applicant, docKey, file, idType = '', s
     version: versionNumber,
     status: 'pending',
     sourceType,
+    ...(file.verificationReview || {}),
   }
   slot.uploads = (slot.uploads || 0) + 1
   slot.versions = [...(slot.versions || []), version]
@@ -1461,6 +1482,9 @@ app.post('/api/profile/verification-documents/:docKey', verificationUpload.singl
     // Ownership + account state checks: restricted accounts cannot upload
     if (applicant.verificationStatus === 'restricted') return res.status(403).json({ error: 'This account is restricted. Please contact PESO support.' })
 
+    const declared = parseDocumentDetails(req.body?.verificationDetails)
+    if (docKey !== 'nsrpForm' && (await nsrpAutomation.getSettings()).imageChecks) req.file.verificationReview = await prepareDocument(req.file, docKey, idType, declared)
+
     const { slot, version, cleanup } = await appendVerificationVersion(applicant, docKey, req.file, idType, docKey === 'nsrpForm' ? 'uploaded' : undefined)
     try {
       await applicant.save()
@@ -1470,6 +1494,8 @@ app.post('/api/profile/verification-documents/:docKey', verificationUpload.singl
     }
 
     if (docKey === 'nsrpForm') await nsrpAutomation.process({ role: 'Applicant', accountId: applicant._id, ip: req.ip })
+    await saveAuthorization(applicant._id, docKey, version.version, declared)
+    if (docKey !== 'nsrpForm') { const imageSettings = await nsrpAutomation.getSettings(); setImmediate(() => processApplicantImages({ accountId: applicant._id, docKey, version: version.version, settings: imageSettings })) }
 
     await notifyAdmins({
       type: 'document_resubmitted',
@@ -1735,7 +1761,7 @@ app.put('/api/applicants/:id/verification-documents/:docKey', async (req, res) =
       const admin = await Admin.findOne({ email: decoded.email }).select('_id').lean()
       await documentVerification.act({ role: 'Applicant', accountId: String(applicant._id), docKey }, { ...decoded, ...(admin ? { id: String(admin._id) } : {}) }, {
         action: isRevert ? 'revoke' : status === 'approved' ? 'approve' : 'decline', reason,
-        version: current.version, unresolved: req.body?.unresolved ?? 0,
+        version: current.version, unresolved: req.body?.unresolved ?? 0, checklist: req.body?.checklist,
       })
       const fresh = await Applicant.findById(applicant._id)
       return res.json({ id: String(fresh._id), verificationStatus: fresh.verificationStatus, verificationReason: fresh.verificationReason, documents: summarizeVerificationDocuments(fresh) })

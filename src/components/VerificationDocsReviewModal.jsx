@@ -14,6 +14,8 @@ const QUICK_REJECT_REASONS = ["Blurry or unreadable", "Wrong document type", "Na
 // - Version history is expandable so admins can compare with previous versions.
 // - Reject requires a reason; the applicant only has to re-upload that document.
 import { AdminNsrpAccountDecision } from './AdminNsrpAutomation'
+import ManualDocumentChecklist from './ManualDocumentChecklist'
+import { needsManualChecklist, completeChecklist } from '../../shared/manualDocumentReview.js'
 
 export default function VerificationDocsReviewModal({ applicant, token, onClose, onReviewed, onRestrict, onUnrestrict, readOnly = false }) {
   const [documents, setDocuments] = useState(null)
@@ -22,6 +24,8 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
   const [expanded, setExpanded] = useState({}) // docKey -> bool
   // confirmAction: { docKey, action: 'approved' | 'rejected' | 'revert' } | null
   const [confirmAction, setConfirmAction] = useState(null)
+  const [checklist, setChecklist] = useState({})
+  useEffect(() => { setChecklist({}) }, [confirmAction])
   const [accountAction, setAccountAction] = useState(null)
   const [actionBusy, setActionBusy] = useState(false)
   const [actionError, setActionError] = useState("")
@@ -73,7 +77,7 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
       const response = await fetch(`${API_URL}/api/applicants/${applicant.id}/verification-documents/${docKey}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify(isRevert ? { action: "revert", reason: reason.trim() } : { status: decision, reason: reason.trim(), ...(decision === 'approved' ? { unresolved: documents?.find(doc => doc.docKey === docKey)?.unresolved || 0 } : {}) }),
+        body: JSON.stringify(isRevert ? { action: "revert", reason: reason.trim() } : { status: decision, reason: reason.trim(), ...(decision === 'approved' ? { unresolved: documents?.find(doc => doc.docKey === docKey)?.unresolved || 0, checklist } : {}) }),
       })
       const data = await response.json().catch(() => null)
       if (!response.ok || data?.error) {
@@ -431,7 +435,8 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
                 error={actionError}
                 onConfirm={(reason) => review(confirmAction.docKey, "approved", reason)}
                 onCancel={() => setConfirmAction(null)}
-              />
+                confirmDisabled={needsManualChecklist(confirmAction.docKey) && !completeChecklist(checklist)}
+              >{needsManualChecklist(confirmAction.docKey) && <ManualDocumentChecklist value={checklist} onChange={setChecklist} />}</ConfirmDialog>
             )
           }
           if (confirmAction.action === "rejected") {

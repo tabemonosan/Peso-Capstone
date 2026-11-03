@@ -24,6 +24,10 @@ export function createDocumentVerificationRouter({ service, authenticate, automa
       res.json({ flagged: flagged.total, automatic: automatic.total })
     } catch { res.status(503).json({ error: 'Review counts unavailable' }) }
   })
+  router.get('/details', async (req, res) => {
+    try { res.set('Cache-Control', 'no-store'); res.json(await service.details(req.query)) }
+    catch (error) { res.status(error.status || 503).json({ error: error.status ? error.message : 'Document details unavailable' }) }
+  })
   router.post('/action', async (req, res) => {
     try {
       const { role, accountId, docKey } = req.body || {}

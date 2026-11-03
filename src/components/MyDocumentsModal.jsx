@@ -4,6 +4,7 @@ import Modal from "./Modal"
 import { ID_TYPE_OPTIONS } from "./VerificationDocumentsForm"
 import ApplicantSignupWizard from "./ApplicantSignupWizard"
 import { NSRP_SOURCE_LABELS } from "../../shared/verificationDocs.js"
+import DeclaredDocumentFields from './DeclaredDocumentFields'
 
 // Applicant-facing documents modal: one card per requirement with a status
 // badge, file details, View (signed expiring URL), and Replace/Upload for
@@ -11,6 +12,7 @@ import { NSRP_SOURCE_LABELS } from "../../shared/verificationDocs.js"
 export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
   const [pendingFile, setPendingFile] = useState({})
   const [pendingIdType, setPendingIdType] = useState({})
+  const [declared, setDeclared] = useState({})
   const [uploading, setUploading] = useState(null)
   const [error, setError] = useState("")
   const [correctionDoc, setCorrectionDoc] = useState(null)
@@ -49,6 +51,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
     try {
       const payload = new FormData()
       payload.append("document", file)
+      payload.append('verificationDetails', JSON.stringify(declared[docKey] || {}))
       if (docKey.startsWith("validId") && pendingIdType[docKey]) payload.append("idType", pendingIdType[docKey])
       const response = await fetch(`${API_URL}/api/profile/verification-documents/${docKey}`, {
         method: "POST",
@@ -246,6 +249,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
                     </>
                   ) : (
                     <>
+                  {doc.docKey !== 'nsrpForm' && <DeclaredDocumentFields docKey={doc.docKey} idType={pendingIdType[doc.docKey] || doc.idType} value={declared[doc.docKey]} onChange={value => setDeclared(current => ({ ...current, [doc.docKey]: value }))} />}
                   {doc.docKey.startsWith("validId") && (
                     <select
                       value={pendingIdType[doc.docKey] || ""}

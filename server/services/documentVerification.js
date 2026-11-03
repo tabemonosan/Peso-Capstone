@@ -1,5 +1,7 @@
 import mongoose from 'mongoose'
 import { DOCUMENT_KEYS, DOCUMENT_LABELS, REVIEW_ACTIONS, openFlags } from '../../shared/verification.js'
+import { clearAuthorization } from './documentUpload.js'
+import { needsManualChecklist, completeChecklist } from '../../shared/manualDocumentReview.js'
 
 const fail = (status, message) => { const error = new Error(message); error.status = status; throw error }
 const oid = value => {
@@ -123,7 +125,9 @@ export function createDocumentVerification({ Applicant, Employer, EmployerReques
     const { accountModel, account, model, record, document, path, base, count } = ctx
     if (input.version !== document.version) fail(409, 'Document version changed; refresh the queue')
     const by = adminId(actor), at = new Date()
+    if (action === 'approve' && needsManualChecklist(target.docKey) && !completeChecklist(input.checklist)) fail(400, 'Complete the manual document review checklist')
     const audit = { action, reason, by, at, ...(input.ruleId ? { ruleId: input.ruleId } : {}) }
+    if (action === 'approve' && needsManualChecklist(target.docKey)) audit.checklist = input.checklist
     if (['hold', 'release-hold'].includes(action)) {
       const held = action === 'hold'
       const result = await accountModel.collection.updateOne({ _id: account._id, holdAutoApproval: { $ne: held } }, { $set: { holdAutoApproval: held }, $push: { autoApprovalHoldHistory: audit } })
@@ -175,6 +179,7 @@ export function createDocumentVerification({ Applicant, Employer, EmployerReques
       $or: [{ [`${base}.reviewRevision`]: revision }, ...(revision === 0 ? [{ [`${base}.reviewRevision`]: { $exists: false } }] : [])] }
     const changed = await model.collection.updateOne(match, { $set: set, $push: push, $inc: { [`${base}.reviewRevision`]: 1 }, ...(Object.keys(unset).length ? { $unset: unset } : {}) })
     if (!changed.modifiedCount) fail(409, 'Document changed; refresh the queue')
+    if (['approve', 'decline', 'resubmit', 'checked'].includes(action)) await clearAuthorization(account._id, target.docKey, document.version)
     if (target.role === 'Applicant' && ['approve', 'decline', 'resubmit', 'revoke'].includes(action)) await recomputeApplicant(account._id)
     if (target.role === 'Applicant' && action === 'approve' && account.verificationStatus !== 'approved'
       && (await Applicant.findById(account._id).select('verificationStatus').lean())?.verificationStatus === 'approved') {
@@ -192,5 +197,10 @@ export function createDocumentVerification({ Applicant, Employer, EmployerReques
     }
     return { ok: true }
   }
-  return { list, act }
+  async function details(target) {
+    const { account, document } = await locate(target)
+    const secret = target.docKey === 'birthCertificate' ? await mongoose.connection.db.collection('verification_private').findOne({ _id: `${account._id}:${target.docKey}:${document.version}` }, { projection: { code: 1 } }) : null
+    return { declaredDetails: document.declaredDetails || {}, quality: document.quality, qr: document.qr, comparisons: document.imageComparisons || [], authorizationCode: secret?.code || '', nsrp: account.profile?.nsrp || {}, version: document.version }
+  }
+  return { list, act, details }
 }

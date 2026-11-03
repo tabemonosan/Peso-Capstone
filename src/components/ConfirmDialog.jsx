@@ -31,6 +31,8 @@ export default function ConfirmDialog({
   error = "",
   onConfirm,
   onCancel,
+  children,
+  confirmDisabled = false,
 }) {
   const [reason, setReason] = useState(initialReason)
   const cancelRef = useRef(null)
@@ -56,6 +58,7 @@ export default function ConfirmDialog({
       <div>
         <h3 id="confirm-dialog-title" className="text-lg font-bold text-slate-900">{title}</h3>
         {note && <p id="confirm-dialog-note" className="mt-1 text-sm text-slate-600">{note}</p>}
+        {children}
 
         {requireReason && (
           <div className="mt-3">
@@ -109,7 +112,7 @@ export default function ConfirmDialog({
             <button
               type="button"
               onClick={() => onConfirm(reason)}
-              disabled={busy || (requireReason && reasonError)}
+              disabled={busy || confirmDisabled || (requireReason && reasonError)}
               className={`rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40 ${confirmTone === 'danger' ? 'bg-red-600' : 'bg-green-600'}`}
             >
               Retry
@@ -118,7 +121,7 @@ export default function ConfirmDialog({
             <button
               type="button"
               onClick={() => onConfirm(reason)}
-              disabled={busy || (requireReason && reasonError)}
+              disabled={busy || confirmDisabled || (requireReason && reasonError)}
               className={`rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40 ${confirmTone === 'danger' ? 'bg-red-600' : 'bg-green-600'}`}
             >
               {busy ? busyLabel : confirmLabel}

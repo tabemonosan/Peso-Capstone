@@ -1637,6 +1637,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
       })
       signupPayload.append('consent', 'true')
       signupPayload.append('id1Type', signupDocs.id1.type)
+      signupPayload.append('verificationDetails', JSON.stringify({ birthCertificate: signupDocs.birthDetails || {}, validId1: { number: signupDocs.id1.number, expiry: signupDocs.id1.expiry, format: signupDocs.id1.format }, validId2: { number: signupDocs.id2.number, expiry: signupDocs.id2.expiry, format: signupDocs.id2.format } }))
       signupPayload.append('nsrpForm', signupDocs.nsrpForm)
       signupPayload.append('birthCertificate', signupDocs.birthCertificate)
       signupPayload.append('validId1Front', signupDocs.id1.front)

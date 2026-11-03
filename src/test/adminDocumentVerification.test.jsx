@@ -30,6 +30,7 @@ it('requires a reason and explicit unresolved flag confirmation before approving
   expect(within(dialog).getByRole('button', { name: 'Confirm' })).toBeDisabled()
   expect(fetchMock.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false)
   fireEvent.change(within(dialog).getByRole('textbox', { name: 'Reason' }), { target: { value: 'Original document reviewed' } })
+  within(dialog).getAllByRole('checkbox').forEach(checkbox => fireEvent.click(checkbox))
   fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm' }))
   await screen.findByText('Approve recorded.')
   const [, options] = fetchMock.mock.calls.find(([, options]) => options?.method === 'POST')

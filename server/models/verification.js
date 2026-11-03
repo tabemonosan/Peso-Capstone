@@ -11,6 +11,10 @@ const findingSchema = new mongoose.Schema({
   dismissedBy: String, note: { type: String, maxlength: 500 },
 }, { _id: false })
 export const verificationVersionFields = {
+  quality: { passed: Boolean, width: Number, height: Number, pages: Number, warnings: [String] },
+  declaredDetails: { type: mongoose.Schema.Types.Mixed },
+  qr: { found: Boolean, domain: String, allowlisted: Boolean },
+  imageComparisons: { type: [mongoose.Schema.Types.Mixed], default: [] },
   status: { type: String, enum: DOCUMENT_STATUSES, default: 'pending' },
   autoApproved: { type: Boolean, default: false }, approvedBy: String,
   autoApprovalSummary: { type: [{ ruleId: String, level: { type: String, enum: FINDING_LEVELS } }], default: [] },
@@ -19,7 +23,7 @@ export const verificationVersionFields = {
   reviewReasons: { type: [String], default: [] },
   explanation: { requestedAt: Date, status: { type: String, enum: ['requested', 'submitted', 'reviewed'] }, category: String, note: String },
   reviewRevision: { type: Number, default: 0 },
-  verificationAudit: { type: [{ action: String, reason: String, by: String, at: Date, ruleId: String }], default: [] },
+  verificationAudit: { type: [{ action: String, reason: String, by: String, at: Date, ruleId: String, checklist: { type: mongoose.Schema.Types.Mixed } }], default: [] },
 }
 export const verificationAccountFields = {
   holdAutoApproval: { type: Boolean, default: false, select: false },

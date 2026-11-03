@@ -216,4 +216,15 @@ describe('Document verification foundations', () => {
     expect(JSON.stringify(report)).not.toMatch(/P1234567|09171234567|Juan|Cruz/)
     expect((await Applicant.findById(second._id)).verificationDocuments.nsrpForm.versions[0].status).toBe('pending')
   })
+  it('limits authorization codes to admin details and deletes them after a manual result', async () => {
+    const account = await applicant({}, { verificationDocuments: { birthCertificate: { versions: [{ version: 1, status: 'pending', declaredDetails: { copyType: 'PSA e-Certificate', referenceNumber: 'demo-reference' } }] } } })
+    await mongoose.connection.db.collection('verification_private').insertOne({ _id: `${account._id}:birthCertificate:1`, code: 'PRIVATE-CODE' })
+    const details = `/details?role=Applicant&accountId=${account._id}&docKey=birthCertificate`
+    expect((await api('get', details).expect(200)).body.authorizationCode).toBe('PRIVATE-CODE')
+    await api('get', details, 'Applicant', account).expect(403)
+    expect(JSON.stringify((await api('get', '/queue').expect(200)).body)).not.toContain('PRIVATE-CODE')
+    await action(account, 'approve', { docKey: 'birthCertificate' }).expect(400)
+    await action(account, 'approve', { docKey: 'birthCertificate', checklist: { nameMatches: true, photoClear: true, notExpired: true, typeMatches: true, bothSides: true } }).expect(200)
+    expect(await mongoose.connection.db.collection('verification_private').countDocuments()).toBe(0)
+  })
 })

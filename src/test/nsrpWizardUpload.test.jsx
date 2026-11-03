@@ -80,7 +80,7 @@ async function fillDocuments() {
   const files = fieldset.querySelectorAll('input[type="file"]')
   fireEvent.change(files[0], { target: { files: [pdfFile('birth.pdf')] } })
   fireEvent.change(files[1], { target: { files: [pdfFile('id1.pdf')] } })
-  fireEvent.change(fieldset.querySelector('select'), { target: { value: 'SSS' } })
+  fireEvent.change(screen.getByLabelText('Valid ID #1 type'), { target: { value: 'SSS' } })
   await screen.findByText('birth.pdf')
   fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
 }

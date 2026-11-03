@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react"
+import DeclaredDocumentFields from './DeclaredDocumentFields'
+import { IMAGE_LIMITS } from '../../shared/documentImage.js'
 
 export const ID_TYPE_OPTIONS = [
   "SSS",
@@ -8,6 +10,7 @@ export const ID_TYPE_OPTIONS = [
   "Voter's ID",
   "Philippine Postal ID",
   "UMID",
+  "PhilSys National ID",
 ]
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024 // 5 MB per file (matches server)
@@ -131,6 +134,12 @@ export const emptyVerificationDocs = {
 
 export default function VerificationDocumentsForm({ docs, setDocs, disabled, fieldErrors = {} }) {
   const [errors, setErrors] = useState({})
+  const [qualityChoice, setQualityChoice] = useState(null)
+  const acceptFile = async (path, file) => {
+    const processed = await compressImageIfNeeded(file)
+    setDocs(current => path.length === 1 ? { ...current, [path[0]]: processed } : { ...current, [path[0]]: { ...current[path[0]], [path[1]]: processed } })
+    setQualityChoice(null)
+  }
 
   const setFile = async (path, file) => {
     if (!file) {
@@ -146,13 +155,19 @@ export default function VerificationDocumentsForm({ docs, setDocs, disabled, fie
     const errorKey = path.join(".")
     setErrors((current) => ({ ...current, [errorKey]: validationError || undefined }))
     if (validationError) return
-    const processed = await compressImageIfNeeded(file)
-    setDocs((current) => {
-      const next = { ...current }
-      if (path.length === 1) next[path[0]] = processed
-      else next[path[0]] = { ...next[path[0]], [path[1]]: processed }
-      return next
-    })
+    if (file.type !== 'application/pdf' && typeof createImageBitmap === 'function') {
+      try {
+        const bitmap = await createImageBitmap(file)
+        if (Math.max(bitmap.width, bitmap.height) < IMAGE_LIMITS.minWidth || Math.min(bitmap.width, bitmap.height) < IMAGE_LIMITS.minHeight) { bitmap.close(); setErrors(current => ({ ...current, [errorKey]: 'Use an image at least 600 × 380 pixels.' })); return }
+        const canvas = document.createElement('canvas'); canvas.width = 120; canvas.height = 80
+        const context = canvas.getContext('2d'); context.drawImage(bitmap, 0, 0, 120, 80); bitmap.close()
+        const pixels = context.getImageData(0, 0, 120, 80).data
+        let sum = 0; for (let i = 0; i < pixels.length; i += 4) sum += (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3
+        const mean = sum / (pixels.length / 4)
+        if (mean < IMAGE_LIMITS.darkMean || mean > IMAGE_LIMITS.glareMean) { setQualityChoice({ path, file }); return }
+      } catch { /* Server checks always enforce quality when browser decoding is unavailable. */ }
+    }
+    await acceptFile(path, file)
   }
 
   const id1Type = docs.id1.type
@@ -163,6 +178,9 @@ export default function VerificationDocumentsForm({ docs, setDocs, disabled, fie
     <fieldset className="space-y-4 rounded-[10px] border border-[#c4d4e5] bg-[#f8fbfe] p-4">
       <legend className="px-2 text-sm font-semibold text-[#071c35]">Verification documents</legend>
       <p className={helperCls}>{helperText}</p>
+      <p className={helperCls}>Check your document before you upload: use good light, keep all edges visible, and make the text clear.</p>
+      {qualityChoice && <div role="status" className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">This photo may be too dark or have glare. <button type="button" className="rounded border bg-white px-2 py-1" onClick={() => setQualityChoice(null)}>Retake</button> <button type="button" className="rounded border bg-white px-2 py-1" onClick={() => acceptFile(qualityChoice.path, qualityChoice.file)}>Use anyway</button></div>}
+      <DeclaredDocumentFields docKey="birthCertificate" value={docs.birthDetails} onChange={value => setDocs(current => ({ ...current, birthDetails: value }))} disabled={disabled} />
       {fieldErrors.verificationDocuments && <p role="alert" className="text-xs font-medium text-rose-600">{fieldErrors.verificationDocuments}</p>}
 
       <FileField
@@ -179,9 +197,10 @@ export default function VerificationDocumentsForm({ docs, setDocs, disabled, fie
         <p className={labelCls}>Valid ID #1 <span className="text-rose-600">*</span></p>
         {fieldErrors.validId1 && <p role="alert" className="text-xs text-rose-600">{fieldErrors.validId1}</p>}
         <select
+          aria-label="Valid ID #1 type"
           value={docs.id1.type}
           disabled={disabled}
-          onChange={(e) => setDocs((current) => ({ ...current, id1: { ...current.id1, type: e.target.value } }))}
+          onChange={(e) => setDocs((current) => ({ ...current, id1: { ...current.id1, type: e.target.value, number: '', expiry: '', format: '' } }))}
           className={selectCls}
         >
           <option value="">Select ID type…</option>
@@ -189,6 +208,7 @@ export default function VerificationDocumentsForm({ docs, setDocs, disabled, fie
             <option key={option} value={option}>{option}</option>
           ))}
         </select>
+        <DeclaredDocumentFields docKey="validId1" idType={docs.id1.type} value={docs.id1} onChange={value => setDocs(current => ({ ...current, id1: { ...current.id1, ...value } }))} disabled={disabled} />
         <FileField
           label="Front of ID"
           required
@@ -212,9 +232,10 @@ export default function VerificationDocumentsForm({ docs, setDocs, disabled, fie
         <p className={labelCls}>Valid ID #2 <span className="text-xs font-normal text-[#5c7490]">(optional)</span></p>
         {fieldErrors.validId2 && <p role="alert" className="text-xs text-rose-600">{fieldErrors.validId2}</p>}
         <select
+          aria-label="Valid ID #2 type"
           value={docs.id2.type}
           disabled={disabled}
-          onChange={(e) => setDocs((current) => ({ ...current, id2: { ...current.id2, type: e.target.value } }))}
+          onChange={(e) => setDocs((current) => ({ ...current, id2: { ...current.id2, type: e.target.value, number: '', expiry: '', format: '' } }))}
           className={selectCls}
         >
           <option value="">Select ID type…</option>
@@ -227,6 +248,7 @@ export default function VerificationDocumentsForm({ docs, setDocs, disabled, fie
         )}
         {docs.id2.type && (
           <>
+            <DeclaredDocumentFields docKey="validId2" idType={docs.id2.type} value={docs.id2} onChange={value => setDocs(current => ({ ...current, id2: { ...current.id2, ...value } }))} disabled={disabled} />
             <FileField
               label="Front of ID"
               required

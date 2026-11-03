@@ -82,7 +82,7 @@ describe('connected portal lifecycle', () => {
     for (const key of ['nsrpForm', 'birthCertificate', 'validId1']) {
       const current = await request(app).get(`/api/applicants/${applicant._id}/verification-documents`).set(auth(adminToken))
       const unresolved = current.body.documents.find(doc => doc.docKey === key).unresolved
-      const review = await request(app).put(`/api/applicants/${applicant._id}/verification-documents/${key}`).set(auth(adminToken)).send({ status: 'approved', reason: 'Document reviewed', unresolved })
+      const review = await request(app).put(`/api/applicants/${applicant._id}/verification-documents/${key}`).set(auth(adminToken)).send({ status: 'approved', reason: 'Document reviewed', unresolved, checklist: { nameMatches: true, photoClear: true, notExpired: true, typeMatches: true, bothSides: true } })
       expect(review.status, JSON.stringify(review.body)).toBe(200)
     }
     await mongoose.model('JobPosting').updateOne({ _id: jobId }, { deadline: new Date('2000-01-01') })

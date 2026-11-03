@@ -635,7 +635,7 @@ export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCance
             </Field>
             <label className="flex items-start gap-2 text-sm text-slate-700">
               <input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} aria-invalid={Boolean(errors.consent) || undefined} />
-              <span>{CONSENT_TEXT}<span className="text-rose-600"> *</span></span>
+              <span>{CONSENT_TEXT} Verification includes automatic consistency and document checks. These assess evidence, not authenticity.<span className="text-rose-600"> *</span></span>
             </label>
             {errors.consent && <p role="alert" className="text-xs text-rose-600">{errors.consent}</p>}
           </div>
