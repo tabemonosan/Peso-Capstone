@@ -9,7 +9,7 @@ export const REVIEWER_LABELS = { system: 'System (verification engine)', admin: 
 export const VERIFICATION_DEFAULTS = Object.freeze({
   automaticApproval: true, applicant: true, employer: true,
   birthCertificate: true, validId: true, minimumEvidence: 'independent',
-  auditPercent: 20, rateLimit: 5, ocrTextReading: true, reviewToolsEnabled: true,
+  auditPercent: 20, rateLimit: 5, ocrTextReading: true, reviewToolsEnabled: true, dataChecks: true,
 })
 export const DOCUMENT_LABELS = {
   ...VERIFICATION_DOC_LABELS, nsrpForm: 'Generated NSRP Form 1', employerNsrpForm: 'Employer NSRP Form 2',

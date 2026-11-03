@@ -4,6 +4,7 @@ import { NSRP_SKILL_LABELS } from "../../shared/nsrpSkills.js"
 import { NSRP_ROW_LIMITS } from "../../shared/nsrpTableLimits.js"
 import NsrpPdfPreview from "./NsrpPdfPreview"
 import NsrpWarningPanel from "./NsrpWarningPanel"
+import NsrpDoubleCheckPanel from './NsrpDoubleCheckPanel'
 import NsrpSignatureInput from "./NsrpSignatureInput"
 import VerificationDocumentsForm, { emptyVerificationDocs, validateVerificationDocs } from "./VerificationDocumentsForm"
 import PasswordChecklist from "./PasswordChecklist"
@@ -1253,6 +1254,7 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
           {!answers.signatureDataUrl && <p className="rounded-lg bg-slate-50 p-2 text-xs text-slate-700">No signature added; you can sign the printed copy by hand.</p>}
           <NsrpPdfPreview blob={previewBlob} blobUrl={previewUrl} loading={busy} error={!previewUrl ? error : ""} onRetry={generatePreview} viewerClassName="h-[55vh] min-h-[360px]" downloadName="NSRP-Registration-Form.pdf" />
           <NsrpWarningPanel warnings={warnings} onFix={fixWarning} onFixAllCutOff={() => fixWarning(warnings.find((warning) => warning.reason === "truncated")?.field || "")} />
+          <NsrpDoubleCheckPanel answers={{ ...answers, email }} onFix={target => { setStep(target); setPreviewUrl(''); setPreviewBlob(null) }} />
           <div className="flex flex-wrap gap-2">{STEP_NAMES.slice(1, 7).map((name, index) => <button key={name} type="button" onClick={() => { setStep(index + 1); setPreviewUrl(""); setPreviewBlob(null) }} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-cyan-800">Edit {name}</button>)}</div>
           <button type="button" onClick={generatePreview} disabled={busy} className="rounded-lg border border-cyan-700 px-3 py-2 text-sm font-semibold text-cyan-800">Regenerate preview</button>
         </div>

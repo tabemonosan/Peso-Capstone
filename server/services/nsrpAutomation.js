@@ -1,6 +1,6 @@
 import crypto from 'node:crypto'
 import mongoose from 'mongoose'
-import { checkNsrp, checkSummary, NSRP_RULES_VERSION } from '../../shared/nsrpChecks.js'
+import { checkNsrp, checkSummary, NSRP_RULES_VERSION, normalizedText } from '../../shared/nsrpChecks.js'
 import { checkNsrp2 } from '../../shared/nsrp2Checks.js'
 import { VERIFICATION_DEFAULTS, REVIEWER_LABELS, openFlags } from '../../shared/verification.js'
 
@@ -17,7 +17,8 @@ export function manualReason({ sourceType, version, emailVerified, enabledAtCrea
   if (!emailVerified) return 'Email unverified'
   if (dismissedCritical) return 'Always manual: dismissed critical finding'
   if (MANUAL_TYPES.has(String(employerType || '').trim().toLowerCase().replace(/,\s*subcontractor$/, ' subcontractor'))) return 'Always manual: agency type'
-  if (report?.rulesVersion !== NSRP_RULES_VERSION || report?.level !== 'clear' || report?.summary?.critical !== 0 || report?.summary?.warning !== 0
+  const blocking = report?.findings?.filter(f => f.approvalBlocking !== false) || []
+  if (report?.rulesVersion !== NSRP_RULES_VERSION || checkSummary(blocking).level !== 'clear'
     || report?.findings?.some((finding) => /duplicate|cross_account/.test(finding.code))) return 'Needs attention'
   return ''
 }
@@ -98,6 +99,17 @@ export function createNsrpAutomation({ Applicant, Employer, EmployerRequest, not
       const employerDuplicate = kind === 'tin' && await EmployerRequest.exists({ ...(role === 'Employer' ? { email: { $ne: data.email } } : {}), 'registrationDetails.taxIdentificationNumber': value })
       if (claim.owners.some((entry) => entry !== owner) || applicantDuplicate || employerDuplicate) findings.push({ code: `duplicate_${kind}`, severity: 'critical' })
     }
+    if ((await getSettings()).dataChecks) {
+      const extra = role === 'Applicant'
+        ? [['passport', normalizedText(data.passportNo), 'critical'], ['mobile', normalizeMobile(data.cellphone), 'warning'], ['name_birth', data.surname && data.firstName && data.dob ? normalizedText(data.surname + data.firstName + (data.middleName || '')) + ':' + data.dob : '', 'warning']]
+        : [['mobile', normalizeMobile(data.phone), 'warning'], ['establishment_city', data.companyName && data.registrationDetails?.cityMunicipality ? normalizedText(data.companyName) + ':' + normalizedText(data.registrationDetails.cityMunicipality) : '', 'warning']]
+      for (const [kind, value, severity] of extra) {
+        if (!value) continue
+        const id = await hash(kind, value)
+        await identifiers().updateOne({ _id: id }, { $addToSet: { owners: owner } }, { upsert: true })
+        if ((await identifiers().findOne({ _id: id })).owners.some(entry => entry !== owner)) findings.push({ code: 'duplicate_' + kind, severity, fieldGroup: 'registration', evidence: 'self-declared', status: 'open' })
+      }
+    }
     return findings
   }
 
@@ -118,6 +130,7 @@ export function createNsrpAutomation({ Applicant, Employer, EmployerRequest, not
       } catch (err) { if (err.code === 11000) return; throw err }
       const data = role === 'Applicant' ? account.profile?.nsrp || {} : record
       const report = runCheck ? await runCheck(role, data) : role === 'Applicant' ? checkNsrp(data) : checkNsrp2(data)
+      if (!(await getSettings()).dataChecks && !runCheck) report.findings = report.findings.filter(f => /^missing_|^(workExperience|technicalTraining)_date_order$|^(tin|gsisSss|pagibig|philhealth)_repeated_digits$/.test(f.code))
       report.findings = [...report.findings, ...await duplicateFindings(role, account._id, data)]
       Object.assign(report, checkSummary(report.findings), { documentVersion: version.version, checkedAt: new Date() })
       // Store the report before deciding; subsequent approval is conditional on
@@ -128,10 +141,10 @@ export function createNsrpAutomation({ Applicant, Employer, EmployerRequest, not
       let reason = manualReason({ sourceType: version.sourceType, version: version.version, emailVerified: account.emailVerified,
         enabledAtCreation: record.nsrpAutoEnabledAtCreation === true, enabled: config.automaticApproval && config[role === 'Applicant' ? 'applicant' : 'employer'],
         dismissedCritical: Boolean(dismissedCritical), employerType: role === 'Employer' ? record.registrationDetails?.employerType : '', report })
-      if (!reason && account.holdAutoApproval) reason = 'Hold'
+      if (account.holdAutoApproval) reason = 'Hold'
       if (!reason && (account.applyingSuspendedAt || account.receivingApplicantsSuspendedAt || account.verificationStatus === 'restricted')) reason = 'Hold'
       const allFindings = role === 'Applicant' ? Object.values(account.verificationDocuments || {}).flatMap(slot => slot.versions?.at(-1)?.findings || []) : version.findings || []
-      if (!reason && openFlags(allFindings).length) reason = 'Flagged'
+      if (!reason && openFlags(allFindings).some(f => f.approvalBlocking !== false)) reason = 'Flagged'
       if (!reason && version.explanation?.status && version.explanation.status !== 'reviewed') reason = 'Explanation'
       // No independent reader exists in Phase 1. Typed data cannot satisfy the default.
       if (!reason && config.minimumEvidence === 'independent') reason = 'Not independent'
@@ -142,7 +155,7 @@ export function createNsrpAutomation({ Applicant, Employer, EmployerRequest, not
         await decisions().updateOne({ _id: key }, { $set: { result: 'Manual', reason, sampled, report, finishedAt: new Date() } })
         const base = role === 'Applicant' ? `verificationDocuments.nsrpForm.versions.${versions.length - 1}` : `requirementsVersions.${versions.length - 1}`
         await (role === 'Applicant' ? Applicant : EmployerRequest).collection.updateOne({ _id: record._id, [`${base}.status`]: 'pending', [`${base}.version`]: version.version }, { $set: {
-          [`${base}.reviewReasons`]: [reason], [`${base}.findings`]: report.findings.map(f => ({ ruleId: f.code, severity: f.severity, fieldGroup: 'registration', evidence: 'self-declared', status: 'open' })),
+          [`${base}.reviewReasons`]: [reason], [`${base}.findings`]: report.findings.map(f => ({ ruleId: f.code, severity: f.severity, fieldGroup: f.fieldGroup || 'registration', evidence: 'self-declared', status: 'open', approvalBlocking: f.approvalBlocking !== false })),
         } })
         return
       }

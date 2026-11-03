@@ -22,7 +22,7 @@ beforeEach(async () => {
   await clearDb(); notify.mockClear()
   await Admin.create({ email: 'admin@example.com', passwordHash: 'test' })
   service = createNsrpAutomation({ Applicant, Employer, EmployerRequest, notify, random: () => 0.99 })
-  await service.updateSettings({ auditPercent: 0, minimumEvidence: 'none' }, 'test-admin')
+  await service.updateSettings({ auditPercent: 0, minimumEvidence: 'none', dataChecks: false }, 'test-admin')
 })
 
 async function applicant(options = {}) {

@@ -7,6 +7,7 @@ const findingSchema = new mongoose.Schema({
   fieldGroup: { type: String, maxlength: 60 },
   evidence: { type: String, enum: ['independent', 'self-declared'], default: 'self-declared' },
   status: { type: String, enum: ['open', 'dismissed'], default: 'open' },
+  approvalBlocking: { type: Boolean, default: true },
   dismissedBy: String, note: { type: String, maxlength: 500 },
 }, { _id: false })
 export const verificationVersionFields = {
