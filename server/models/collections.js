@@ -1,4 +1,5 @@
 import mongoose from 'mongoose'
+import { APPLICANT_STATUSES } from '../../shared/consistencyWaitlist.js'
 import { normalizeEmail } from '../utils/emailVerification.js'
 import { formatFullName, formatDisplayName } from '../../shared/nameFields.js'
 import { EMPLOYER_VERIFICATION_STATUSES, EMPLOYER_VERIFICATION_STATUS } from '../../shared/employerVerification.js'
@@ -90,7 +91,9 @@ const applicantSchema = new Schema({
   retainedEmail: { type: String, select: false },
   email: { type: String, required: true, unique: true },  passwordHash: { type: String, required: true },
   ...emailVerificationFields,
-  verificationStatus: { type: String, enum: ['under_review', 'approved', 'declined', 'restricted'], default: 'under_review' },
+  verificationStatus: { type: String, enum: APPLICANT_STATUSES, default: 'under_review' },
+  consistencyState: { type: Schema.Types.Mixed, select: false },
+  consistencyDeclined: { type: Boolean, default: false },
   verificationReason: String,
   consentGivenAt: Date, // RA 10173 consent recorded at sign up
   verificationDocuments: {

@@ -57,6 +57,8 @@ export function createNsrpAutomation({ Applicant, Employer, EmployerRequest, not
     if ('minimumEvidence' in changes && !['independent', 'none'].includes(changes.minimumEvidence)) throw new Error('Choose independent or none evidence')
     if ('auditPercent' in changes && (!Number.isFinite(changes.auditPercent) || changes.auditPercent < 0 || changes.auditPercent > 100)) throw new Error('Audit percentage must be 0 to 100')
     if ('rateLimit' in changes && (!Number.isInteger(changes.rateLimit) || changes.rateLimit < 1 || changes.rateLimit > 5)) throw new Error('Rate limit must be 1 to 5 per 24 hours')
+    if ('waitlistAttempts' in changes && (!Number.isInteger(changes.waitlistAttempts) || changes.waitlistAttempts < 1 || changes.waitlistAttempts > 5)) throw new Error('Correction chances must be 1 to 5')
+    for (const key of ['pesoContact', 'pesoOfficeHours']) if (key in changes && (typeof changes[key] !== 'string' || !changes[key].trim() || changes[key].length > 300)) throw new Error('Enter PESO contact details and hours using 1 to 300 characters')
     await getSettings()
     await settings().updateOne({ _id: 'settings' }, { $set: changes, $push: { history: { changes, by: admin, at: new Date() } } })
     return getSettings()

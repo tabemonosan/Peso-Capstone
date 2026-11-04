@@ -8,6 +8,7 @@ import NsrpDoubleCheckPanel from './NsrpDoubleCheckPanel'
 import NsrpSignatureInput from "./NsrpSignatureInput"
 import VerificationDocumentsForm, { emptyVerificationDocs, validateVerificationDocs } from "./VerificationDocumentsForm"
 import PasswordChecklist from "./PasswordChecklist"
+import { BIRTH_COPY_TYPES } from '../../shared/documentImage.js'
 import { getNsrpWarningSection, getNsrpFieldLabel, NSRP_SECTION_WIZARD_STEP } from "../../shared/nsrpFieldLabels.js"
 import { SUFFIX_OPTIONS } from "../../shared/nameFields.js"
 import { PH_LOCATIONS, applicantCityName } from "../../shared/phLocations.js"
@@ -513,6 +514,7 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
     if (validationStep === 7) {
       // The resume is optional and no longer collected at sign-up.
       const localErrors = {}
+      if (!BIRTH_COPY_TYPES.includes(docs.birthDetails?.copyType)) localErrors.birthCertificate = 'Select the birth certificate copy type.'
       if (!validateVerificationDocs(docs)) localErrors.validId2 = "Add a birth certificate and complete Valid ID #1."
       if (docs.id1.type && docs.id2.type && docs.id1.type === docs.id2.type) localErrors.validId2 = "Choose a different type for Valid ID #2."
       if (Object.keys(localErrors).length) showErrors(localErrors)
@@ -1205,7 +1207,7 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
       )}
       {step === 7 && !isUpdate && (
         <>
-          <VerificationDocumentsForm docs={docs} setDocs={setDocs} disabled={busy} fieldErrors={fieldErrors} />
+          <VerificationDocumentsForm docs={docs} setDocs={setDocs} disabled={busy} fieldErrors={fieldErrors} nsrp={answers} />
         </>
       )}
       {step === 8 && (

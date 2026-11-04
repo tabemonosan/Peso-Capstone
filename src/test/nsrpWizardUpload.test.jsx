@@ -81,6 +81,7 @@ async function fillDocuments() {
   fireEvent.change(files[0], { target: { files: [pdfFile('birth.pdf')] } })
   fireEvent.change(files[1], { target: { files: [pdfFile('id1.pdf')] } })
   fireEvent.change(screen.getByLabelText('Valid ID #1 type'), { target: { value: 'SSS' } })
+  fireEvent.change(screen.getByLabelText(/^Birth certificate copy type/), { target: { value: 'PSA copy on security paper' } })
   await screen.findByText('birth.pdf')
   fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
 }

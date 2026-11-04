@@ -1687,6 +1687,11 @@ const toggleSkill = (selected, skill) => {
   const accountNeedsVerification = Boolean(
     currentUser?.verificationStatus && currentUser.verificationStatus !== 'approved',
   )
+  useEffect(() => {
+    const update = event => { if (activeRole === 'Applicant' && event.detail?.status) setCurrentUser(current => ({ ...current, verificationStatus: event.detail.status })) }
+    window.addEventListener('applicant-consistency', update)
+    return () => window.removeEventListener('applicant-consistency', update)
+  }, [activeRole])
 
   useEffect(() => {
     if (activeView === 'all-dashboard') setActiveView('dashboard')
@@ -2062,7 +2067,7 @@ const toggleSkill = (selected, skill) => {
     if (item.id === 'complete') return ['Applicant', 'Employer'].includes(activeRole) && currentUser?.registration?.complete === false
     if (activeRole === 'Employer') return employerApproved && item.id !== 'verification'
     // Verification details stay in My Documents; the dashboard remains available.
-    if (activeRole === 'Applicant') return applicantApproved || item.id === 'dashboard'
+    if (activeRole === 'Applicant') return applicantApproved || item.id === 'dashboard' || currentUser?.verificationStatus === 'waitlisted' && item.id === 'notifications'
     return true
   })
   // Server state is the source of truth; this is just UI gating
@@ -2220,7 +2225,7 @@ const toggleSkill = (selected, skill) => {
                   <div>
                     <p className="portal-page-eyebrow">PESO Job Portal</p>
                     <h3 id="applicant-home-welcome-title">Welcome back, {formatFullName(profileData) || profileData.name || currentUser?.email || 'Applicant'}</h3>
-                    <p>{applicantApproved ? 'Discover local opportunities, track your applications, and keep your next step in view.' : 'Your registration is being reviewed by PESO. You can manage your profile while verification is in progress.'}</p>
+                    <p>{currentUser?.verificationStatus === 'waitlisted' ? 'Your account is waitlisted for PESO review. Open My Documents in your profile to correct or explain a difference. You can still view notifications and contact PESO.' : applicantApproved ? 'Discover local opportunities, track your applications, and keep your next step in view.' : 'Your registration is being reviewed by PESO. You can manage your profile while verification is in progress.'}</p>
                   </div>
                   <div className="applicant-home-actions">
                     {applicantApproved && <button type="button" onClick={() => setActiveView('jobs')} className="rounded-full bg-cyan-600 px-5 py-3 text-sm font-semibold text-white">Browse Jobs</button>}

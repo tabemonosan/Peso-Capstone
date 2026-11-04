@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import DeclaredDocumentFields from './DeclaredDocumentFields'
 import { IMAGE_LIMITS } from '../../shared/documentImage.js'
 import { PHILIPPINE_ID_TYPES } from '../../shared/philippineIds.js'
+import CheckDocumentsButton from './CheckDocumentsButton'
 
 export const ID_TYPE_OPTIONS = PHILIPPINE_ID_TYPES
 
@@ -124,7 +125,7 @@ export const emptyVerificationDocs = {
   id2: { type: "", front: null, back: null },
 }
 
-export default function VerificationDocumentsForm({ docs, setDocs, disabled, fieldErrors = {} }) {
+export default function VerificationDocumentsForm({ docs, setDocs, disabled, fieldErrors = {}, nsrp = {} }) {
   const [errors, setErrors] = useState({})
   const [qualityChoice, setQualityChoice] = useState(null)
   const acceptFile = async (path, file) => {
@@ -263,6 +264,7 @@ export default function VerificationDocumentsForm({ docs, setDocs, disabled, fie
       </div>
 
       {fieldErrors.validId2 && <p role="alert" className="text-xs font-medium text-rose-600">{fieldErrors.validId2}</p>}
+      <CheckDocumentsButton docs={docs} nsrp={nsrp} disabled={disabled} />
     </fieldset>
   )
 }

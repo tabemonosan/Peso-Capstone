@@ -36,7 +36,7 @@ async function runOcr(buffer, compare, { reserve = async () => true } = {}) {
       if (expired) { await worker.terminate(); return { result: 'could_not_read' } }
       const { data } = await worker.recognize(buffer)
       // The callback returns comparisons only. Recognized text never leaves this scope.
-      return await compare(data.text || '')
+      return await compare(data.text || '', data.confidence)
     })()
     return await Promise.race([operation, new Promise(resolve => { timer = setTimeout(() => resolve({ result: 'could_not_read' }), IMAGE_LIMITS.ocrTimeout) })])
   } catch { return { result: 'could_not_read' } }

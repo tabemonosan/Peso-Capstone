@@ -46,6 +46,7 @@ export function createDocumentVerification({ Applicant, Employer, EmployerReques
     return { $project: {
       _id: 0, role: { $literal: role }, recordId: '$_id',
       accountId: role === 'Applicant' ? '$_id' : '$account._id', email: 1,
+      accountStatus: '$verificationStatus', consistencyState: 1,
       holdAutoApproval: role === 'Applicant' ? { $ifNull: ['$holdAutoApproval', false] } : { $ifNull: ['$account.holdAutoApproval', false] },
       docKey: '$entry.docKey', version: '$entry.document.version', status: '$entry.document.status',
       sourceType: '$entry.document.sourceType', autoApproved: '$entry.document.autoApproved',
@@ -68,6 +69,7 @@ export function createDocumentVerification({ Applicant, Employer, EmployerReques
         { 'explanation.status': 'submitted' },
       ] }
     const filters = [match]
+    if (query.waitlisted === 'true') filters.push({ accountStatus: 'waitlisted' })
     if (query.recordId) filters.push({ recordId: oid(query.recordId) })
     if (query.docKey) { if (!DOCUMENT_KEYS.includes(query.docKey)) fail(400, 'Invalid document type'); filters.push({ docKey: query.docKey }) }
     if (query.role) { if (!['Applicant', 'Employer'].includes(query.role)) fail(400, 'Invalid role'); filters.push({ role: query.role }) }
@@ -105,10 +107,15 @@ export function createDocumentVerification({ Applicant, Employer, EmployerReques
       { $match: { $and: filters } },
       { $facet: { items: [{ $sort: { [sortKey]: direction, role: 1, accountId: 1, docKey: 1 } }, { $skip: (page - 1) * limit }, { $limit: limit }], count: [{ $count: 'total' }] } },
     ])
-    const items = result.items.map(item => ({ ...item, label: DOCUMENT_LABELS[item.docKey],
+    const config = await automation.getSettings()
+    const items = result.items.map(item => ({ ...item, label: DOCUMENT_LABELS[item.docKey], waitlistAttempts: config.waitlistAttempts,
+      waitlisted: item.accountStatus === 'waitlisted',
+      daysWaiting: item.consistencyState?.waitlistedAt ? Math.floor((Date.now() - +item.consistencyState.waitlistedAt) / 86400000) : 0,
+      staleWaitlist: item.accountStatus === 'waitlisted' && !item.consistencyState?.pausedAt && Date.now() - +new Date(item.consistencyState?.lastActivityAt || item.consistencyState?.waitlistedAt) >= 30 * 86400000,
       overdue: Date.now() - +item.at >= 7 * 86400000,
       unresolved: openFlags(item.findings).length,
       reasons: [...new Set([
+        ...(item.accountStatus === 'waitlisted' ? ['Cross-check mismatch'] : []),
         ...item.reasons, ...(openFlags(item.findings).length ? ['Flagged'] : []),
         ...(item.holdAutoApproval ? ['Hold'] : []),
         ...(item.explanation?.status === 'submitted' ? ['Explanation submitted'] : []),

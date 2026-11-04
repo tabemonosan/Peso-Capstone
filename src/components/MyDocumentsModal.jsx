@@ -7,6 +7,7 @@ import ApplicantSignupWizard from "./ApplicantSignupWizard"
 import { NSRP_SOURCE_LABELS } from "../../shared/verificationDocs.js"
 import DeclaredDocumentFields from './DeclaredDocumentFields'
 import DocumentExplanationForm from './DocumentExplanationForm'
+import ConsistencyWaitlistCard from './ConsistencyWaitlistCard'
 
 // Applicant-facing documents modal: one card per requirement with a status
 // badge, file details, View (signed expiring URL), and Replace/Upload for
@@ -155,10 +156,14 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
       {error && <p role="alert" className="mt-3 text-sm font-medium text-rose-600">{error}</p>}
       {success && <p role="status" className="mt-3 text-sm text-green-700">{success}</p>}
 
+      <ConsistencyWaitlistCard state={info.consistency} />
       <ul className="mt-5 space-y-3">
         {documents.map((doc) => {
-          const canReplace = ["rejected", "needs_resubmission", "missing"].includes(doc.status) && doc.uploadsRemaining !== 0
-          const locked = doc.status === "approved"
+          const relevant = (info.consistency?.issues || []).filter(issue => issue.chancesLeft !== null && (issue.document === doc.docKey || doc.docKey === 'nsrpForm'))
+          const flagged = info.consistency?.waitlisted && relevant.length > 0
+          const hasChances = !flagged || relevant.every(issue => issue.chancesLeft > 0)
+          const canReplace = (["rejected", "needs_resubmission", "missing"].includes(doc.status) || flagged) && doc.uploadsRemaining !== 0 && hasChances
+          const locked = doc.status === "approved" && !flagged
           return (
             <li key={doc.docKey} className="rounded-xl bg-slate-50 p-3 text-sm">
               <div className="flex flex-wrap items-center gap-2">

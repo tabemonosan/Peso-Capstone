@@ -70,6 +70,7 @@ export function createVerificationEngine({ Applicant, Employer, EmployerRequest,
       let reason = decisionReason(context), sampled = false
       if (document.qr?.domain && !document.qr.allowlisted) reason = 'Flagged'
       const base = `${path}.${versions.length - 1}`, at = new Date()
+      if (verifiedQr && role === 'Applicant') await model.collection.updateOne({ _id: record._id, [`${base}.version`]: document.version, [`${path}`]: { $size: versions.length } }, { $set: { [`${base}.imageComparisons`]: [...(document.imageComparisons || []), ...(providerResult.comparisons || []).map(c => ({ ...c, reliable: true }))] } })
       if (providerResult.result === 'failed') {
         const counter = await accountModel.findOneAndUpdate({ _id: account._id }, { $inc: { [`verificationFailureCounts.${docKey}`]: 1 } }, { returnDocument: 'after' }).select('+verificationFailureCounts').lean()
         const attempts = counter.verificationFailureCounts[docKey]
