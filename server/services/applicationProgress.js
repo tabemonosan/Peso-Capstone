@@ -11,7 +11,7 @@ export function publicApplication(record, suspended, now = new Date()) {
   let status = record.deliveryStatus === 'delivered' ? referral.status || 'pending' : record.deliveryStatus || 'pending_admin'
   if (!['withdrawn', 'withdrawn_by_admin', 'declined_by_admin', 'pending_admin'].includes(status)) {
     if (meeting) status = { invited: 'interview_invited', confirmed: 'interview_confirmed', reschedule_requested: 'reschedule_requested', declined: 'interview_declined', cancelled: 'interview_cancelled', held: 'interview_held', attended: 'interview_attended', missed: 'no_show_confirmed' }[meeting.status] || status
-    if (report) status = `no_show_${report.status || 'pending'}`
+    if (report && report.status !== 'dismissed') status = `no_show_${report.status || 'pending'}`
     if (outcome) status = outcome.status
   }
   const withdrawalDeadline = applicationWithdrawalDeadline(meeting)

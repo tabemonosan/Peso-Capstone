@@ -22,6 +22,19 @@ beforeEach(async () => {
   await Admin.create({ email: 'admin@example.com', passwordHash: 'unused' })
 })
 describe('job request and review API', () => {
+  it.each([
+    ['No placement fee, pay a registration fee to apply.', 'applicant_payment'],
+    ['Applicants must be at least 25 years old.', 'age_restriction'],
+  ])('keeps the audited screening bypass pending: %s', async (description, code) => {
+    await Employer.updateOne({ email: 'employer@example.com' }, { createdAt: new Date(Date.now() - 8 * 86400000) }, { timestamps: false, overwriteImmutable: true })
+    const response = await request(app).post('/api/jobs').set(auth('Employer')).send(payload({ description })).expect(200)
+    expect(response.body.status).toBe('pending')
+    expect(response.body.moderation.findings).toContainEqual(expect.objectContaining({ code }))
+    await createViewer()
+    const visible = await request(app).get('/api/jobs?status=approved').set(auth('Applicant')).expect(200)
+    expect(visible.body).toHaveLength(0)
+  })
+
   it('automatically publishes eligible posts, records the decision, notifies the owner, and hides screening from applicants', async () => {
     await Employer.updateOne({ email: 'employer@example.com' }, { createdAt: new Date(Date.now() - 8 * 86400000) }, { timestamps: false, overwriteImmutable: true })
     const result = await request(app).post('/api/jobs').set(auth('Employer')).send(payload()).expect(200)

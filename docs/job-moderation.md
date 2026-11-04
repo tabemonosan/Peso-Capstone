@@ -18,7 +18,7 @@ job review dialog. Employers receive a publication notification; admins receive
 an automatic-approval or pending-review notification. Admin approval/decline and
 their existing review history remain available for manual decisions.
 
-## Rules, version 2026-11-04.1
+## Rules, version 2026-11-04.2
 
 Every finding routes the posting to **pending**; the algorithm does not decline
 jobs, penalize accounts, or declare legal violations.
@@ -48,7 +48,9 @@ Text is normalized with NFKC, case folding and removal of invisible zero-width
 characters. Screening includes title, company, description, requirements and
 private notes. Explicit local negation such as "No placement fee" or "No MLM"
 does not itself trigger the corresponding rule; a separate positive requirement
-still triggers review. Inclusive language is not treated as an exclusion.
+still triggers review, including later matches in the same clause. Age screening
+includes common minimum/maximum-age phrases and ranges using hyphens or Unicode
+dashes. Inclusive language is not treated as an exclusion.
 
 ## Admin control and data
 

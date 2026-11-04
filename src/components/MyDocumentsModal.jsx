@@ -40,6 +40,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
   const pickFile = (docKey, file) => {
     setError("")
     if (!file) return setPendingFile((current) => ({ ...current, [docKey]: null }))
+    if (docKey === 'nsrpForm' && (file.type !== 'application/pdf' || !/\.pdf$/i.test(file.name))) return setError('The NSRP form must be a PDF file.')
     const acceptedTypes = ["image/jpeg", "image/png", "application/pdf"]
     if (!acceptedTypes.includes(file.type)) return setError("Only JPG, PNG, or PDF files are accepted.")
     if (file.size > 5 * 1024 * 1024) return setError(`"${file.name}" is too large. Maximum is 5 MB.`)
@@ -235,7 +236,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
                           <input
                             type="file"
                             aria-label="Replace NSRP file"
-                            accept="image/jpeg,image/png,application/pdf"
+                            accept="application/pdf,.pdf"
                             onChange={(e) => pickFile(doc.docKey, e.target.files?.[0] || null)}
                             className="text-xs text-slate-700 file:mr-2 file:rounded-lg file:border-0 file:bg-slate-200 file:px-2 file:py-1 file:text-xs file:font-semibold file:text-slate-900"
                           />

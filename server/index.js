@@ -975,10 +975,10 @@ app.post('/api/signup', applicantSignupUpload.fields([
     if (!fileFor('birthCertificate')) fieldErrors.birthCertificate = 'Birth certificate is required.'
     if (!VALID_ID_TYPES.includes(id1Type) || !fileFor('validId1Front')) fieldErrors.validId1 = 'Choose a valid type and upload the front of Valid ID #1.'
     if (nsrpMode === 'upload') {
-      if (!fileFor('nsrpFile')) fieldErrors.nsrpFile = 'Upload your filled NSRP form (PDF, JPG, or PNG).'
+      if (!fileFor('nsrpFile')) fieldErrors.nsrpFile = 'Upload your filled NSRP form (PDF only).'
       else if (fileFor('nsrpFile').size > VERIFICATION_MAX_BYTES) fieldErrors.nsrpFile = 'The NSRP form must be 5 MB or smaller.'
-      else if (!['application/pdf', 'image/jpeg', 'image/png'].includes(fileFor('nsrpFile').mimetype) || !fileMatchesDeclaredType(fileFor('nsrpFile'))) {
-        fieldErrors.nsrpFile = 'The NSRP form must be a PDF, JPG, or PNG file.'
+      else if (fileFor('nsrpFile').mimetype !== 'application/pdf' || !fileMatchesDeclaredType(fileFor('nsrpFile'))) {
+        fieldErrors.nsrpFile = 'The NSRP form must be a PDF file.'
       }
     }
     // The resume is no longer part of the application — reject it explicitly.
@@ -1491,6 +1491,7 @@ app.post('/api/profile/verification-documents/:docKey', verificationUpload.singl
     if (decoded.role !== 'Applicant') return res.status(403).json({ error: 'Only applicants can upload verification documents' })
     const { docKey } = req.params
     if (!VERIFICATION_DOC_KEYS.includes(docKey)) return res.status(400).json({ error: 'Unknown document type' })
+    if (docKey === 'nsrpForm' && (!req.file || req.file.mimetype !== 'application/pdf' || !fileMatchesDeclaredType(req.file))) return res.status(400).json({ error: 'The NSRP form must be a PDF file.' })
     if (!req.file) return res.status(400).json({ error: 'A JPG, PNG, or PDF file is required' })
     if (!VERIFICATION_DOC_TYPES.includes(req.file.mimetype) || !fileMatchesDeclaredType(req.file)) {
       return res.status(400).json({ error: 'Upload a genuine JPG, PNG, or PDF document' })
@@ -3250,8 +3251,20 @@ app.post('/api/hire-reports', requireVerifiedEmail, requireApprovedEmployer, asy
       notes: notes.trim(),
       reportedAt: new Date(),
     })
+    if (decoded.role === 'Employer') {
+      await HireReport.init()
+      hireReport.submissionKey = `employer:${employer._id}:job:${job._id}:applicant:${applicant._id}`
+    }
     if (decoded.role === 'Employer' && ['hired', 'deployed'].includes(status)) await referralWorkflow.reserveHireSlot(job, applicant._id)
-    await hireReport.save()
+    try { await hireReport.save() }
+    catch (error) {
+      if (decoded.role !== 'Employer' || error.code !== 11000) throw error
+      const saved = await HireReport.findOne({ applicantId, jobId, employerId: employer._id, ...roleFilter })
+      if (!saved) throw error
+      // A concurrent rejection may have won after this request reserved a slot.
+      if (saved.status === 'not_hired' && ['hired', 'deployed'].includes(status)) await JobPosting.updateOne({ _id: job._id }, { $pull: { hiredApplicantIds: applicant._id } })
+      return res.status(409).json({ code: 'EMPLOYER_REPORT_LOCKED', error: 'This employment report has already been submitted and cannot be edited. Contact PESO if a correction is needed.', report: saved })
+    }
     if (referral) await Referral.updateOne({ _id: referral._id }, { $push: { history: { action: 'employment_update', status, by: decoded.role, at: new Date() } } })
     if (decoded.role === 'Employer' && status === 'not_hired') await JobPosting.updateOne({ _id: job._id }, { $pull: { hiredApplicantIds: applicant._id } })
 
@@ -3272,7 +3285,9 @@ app.post('/api/hire-reports', requireVerifiedEmail, requireApprovedEmployer, asy
       })
     }
 
-    res.json(hireReport)
+    const result = hireReport.toObject()
+    delete result.submissionKey
+    res.json(result)
   } catch (err) {
     if (err instanceof ApplicationError) return res.status(err.status).json({ code: err.code, error: err.message })
     console.error(err)

@@ -159,7 +159,7 @@ const UPLOAD_FLOW = [0, 9, 10, 7, 11]
 const UPDATE_FLOW = [1, 2, 3, 4, 5, 6, 8]
 const UNDECIDED_FLOW = [0, 9]
 const stepTitle = (id) => (id === 9 ? "Your NSRP" : id === 10 ? "Basic information" : id === 11 ? "Review and submit" : STEP_NAMES[id])
-const NSRP_UPLOAD_TYPES = ["application/pdf", "image/jpeg", "image/png"]
+const NSRP_UPLOAD_TYPES = ["application/pdf"]
 const NSRP_UPLOAD_MAX = 5 * 1024 * 1024
 
 function safeDraft() {
@@ -203,12 +203,9 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
   const [previewBlob, setPreviewBlob] = useState(null)
   const [warnings, setWarnings] = useState([])
   const [complete, setComplete] = useState(false)
-  // Tab navigation state: furthest position reached in the current flow,
-  // per-step validity (edited = invalid until re-validated), and the currently
-  // focused field (for salary thousands-separator formatting on blur).
+  // Section navigation is unrestricted; completion tracks actual validation.
   const flow = isUpdate || isPublic ? UPDATE_FLOW : nsrpMode === "upload" ? UPLOAD_FLOW : nsrpMode === "online" ? ONLINE_FLOW : UNDECIDED_FLOW
   const flowPos = flow.indexOf(step)
-  const [maxPos, setMaxPos] = useState(isUpdate ? UPDATE_FLOW.length - 1 : Math.max(0, flow.indexOf(saved.step)))
   const [stepValidity, setStepValidity] = useState({})
   const [focusedField, setFocusedField] = useState(null)
   // Email-code verification (step 1). The code and proof token live in memory
@@ -222,6 +219,9 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
   const [codeBusy, setCodeBusy] = useState(false)
   const [resendIn, setResendIn] = useState(0)
   const codeRefs = useRef([])
+
+  useEffect(() => { setStepValidity(current => ({ ...current, 0: false })) }, [email, password, confirmPassword, consent, emailVerified])
+  useEffect(() => { setStepValidity(current => ({ ...current, 7: false })) }, [docs])
 
   useEffect(() => {
     const safeAnswers = { ...answers }
@@ -456,9 +456,9 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
     focusFirstError(errors || {})
   }
 
-  const validateCurrent = async () => {
+  const validateCurrent = async (validationStep = step) => {
     setError("")
-    if (step === 0) {
+    if (validationStep === 0) {
       const localErrors = {}
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) localErrors.email = "Enter a valid email address."
       if (!emailVerified) localErrors.email = "Verify your email with the 6-digit code before continuing."
@@ -468,8 +468,8 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
       if (Object.keys(localErrors).length) showErrors(localErrors)
       return Object.keys(localErrors).length === 0
     }
-    if (step >= 1 && step <= 6) {
-      if (step === 4) {
+    if (validationStep >= 1 && validationStep <= 6) {
+      if (validationStep === 4) {
         const languageErrors = validateNsrpLanguages(answers.languages)
         if (Object.keys(languageErrors).length) {
           showErrors(languageErrors)
@@ -480,26 +480,26 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
       const response = await fetch(`${API_URL}/api/nsrp/validate-signup`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ step: step - 1, answers: bodyAnswers }),
+        body: JSON.stringify({ step: validationStep - 1, answers: bodyAnswers }),
       })
       const data = await response.json().catch(() => null)
       if (!response.ok) showErrors(data?.fieldErrors || { nsrpAnswers: data?.error || "Validation failed." })
       else setFieldErrors({})
       return response.ok
     }
-    if (step === 9) {
+    if (validationStep === 9) {
       // Path choice: required; the upload path needs the file up front.
       const localErrors = {}
       if (!nsrpMode) localErrors.nsrpMode = "Choose how you want to provide your NSRP."
       if (nsrpMode === "upload") {
-        if (!nsrpUpload) localErrors.nsrpFile = "Upload your filled NSRP form (PDF, JPG, or PNG)."
-        else if (!NSRP_UPLOAD_TYPES.includes(nsrpUpload.type)) localErrors.nsrpFile = "The NSRP form must be a PDF, JPG, or PNG file."
+        if (!nsrpUpload) localErrors.nsrpFile = "Upload your filled NSRP form (PDF only)."
+        else if (!NSRP_UPLOAD_TYPES.includes(nsrpUpload.type) || !/\.pdf$/i.test(nsrpUpload.name)) localErrors.nsrpFile = "The NSRP form must be a PDF file."
         else if (nsrpUpload.size > NSRP_UPLOAD_MAX) localErrors.nsrpFile = "The NSRP form must be 5 MB or smaller."
       }
       if (Object.keys(localErrors).length) showErrors(localErrors)
       return Object.keys(localErrors).length === 0
     }
-    if (step === 10) {
+    if (validationStep === 10) {
       const response = await fetch(`${API_URL}/api/nsrp/validate-signup`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -510,7 +510,7 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
       else setFieldErrors({})
       return response.ok
     }
-    if (step === 7) {
+    if (validationStep === 7) {
       // The resume is optional and no longer collected at sign-up.
       const localErrors = {}
       if (!validateVerificationDocs(docs)) localErrors.validId2 = "Add a birth certificate and complete Valid ID #1."
@@ -520,22 +520,28 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
     }
     return true
   }
-  // Flow-position navigation. A position counts as OK when reached before and
-  // not edited (or re-validated) since.
+  // Visiting a section does not mark it complete.
   const posOk = (p) => {
     const id = flow[p]
-    if (id === 0 && !isUpdate) return stepValidity[0] !== false && emailVerified
-    return p <= maxPos && stepValidity[id] !== false
+    return stepValidity[id] === true && (id !== 0 || emailVerified)
   }
-  const firstInvalidPosBefore = (p) => {
-    for (let i = 0; i < p; i += 1) {
-      if (!posOk(i)) return i
+  const validateRequiredSections = async () => {
+    for (const id of flow.filter(id => id !== 8 && id !== 11)) {
+      const valid = await validateCurrent(id)
+      setStepValidity(current => ({ ...current, [id]: valid }))
+      if (!valid) { setStep(id); return false }
     }
-    return -1
+    return true
   }
-  // Tab navigation: back always allowed; forward up to the furthest reached
-  // position; one beyond after the current step validates. The last two steps
-  // of each flow (Documents onward) require every earlier step to be valid.
+  const openFinalStep = async () => {
+    setBusy(true)
+    try {
+      if (!(await validateRequiredSections())) return
+      if (flow.includes(8)) await generatePreview()
+      else setStep(11)
+    } catch (validationError) { setError(validationError.message || 'Could not validate your information. Please try again.') }
+    finally { setBusy(false) }
+  }
   const goToStep = async (targetId) => {
     if (busy) return
     const targetPos = flow.indexOf(targetId)
@@ -545,23 +551,8 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
       else setStep(targetId)
       return
     }
-    if (targetPos < flowPos) { setStep(targetId); return }
-    if (targetPos >= flow.length - 2) {
-      const invalid = firstInvalidPosBefore(flow.length - 2)
-      if (invalid >= 0) {
-        // Jump to a previously reached invalid step; positions beyond the
-        // furthest reached must be earned via Next (validation).
-        if (invalid <= maxPos) setStep(flow[invalid])
-        return
-      }
-    }
-    if (targetPos <= maxPos) { setStep(targetId); return }
-    if (targetPos > maxPos + 1) return
-    if (await validateCurrent()) {
-      setStepValidity((current) => ({ ...current, [step]: true }))
-      setMaxPos(targetPos)
-      setStep(targetId)
-    }
+    if (targetId === 8 || targetId === 11) await openFinalStep()
+    else setStep(targetId)
   }
   const next = async () => {
     if (isPublic) {
@@ -570,16 +561,11 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
       else if (target !== undefined) setStep(target)
       return
     }
+    const target = flow[flowPos + 1]
+    if (target === 8 || target === 11) { await openFinalStep(); return }
     if (!(await validateCurrent())) return
     setStepValidity((current) => ({ ...current, [step]: true }))
-    // Online path: generate the NSRP PDF preview before the final step.
-    if (((isUpdate || isPublic) && step === 6) || (!isUpdate && step === 7 && nsrpMode !== "upload")) {
-      await generatePreview()
-      return
-    }
-    const target = flow[flowPos + 1]
     if (target === undefined) return
-    setMaxPos((max) => Math.max(max, flowPos + 1))
     setStep(target)
   }
   const generatePreview = async () => {
@@ -615,7 +601,6 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
         setStepValidity(Object.fromEntries(flow.map((id) => [id, true])))
       }
       setStepValidity((current) => ({ ...current, [step]: true }))
-      setMaxPos(flow.length - 1)
       setStep(8)
       return true
     } catch (previewError) {
@@ -631,6 +616,7 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
     setBusy(true)
     setError("")
     try {
+      if (!(await validateRequiredSections())) return
       const payload = new FormData()
       const requestAnswers = { ...answers, email: isUpdate ? answers.email : email }
       let response
@@ -807,8 +793,8 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
           const name = formStepTitle(id)
           const tabErrorKeys = tabErrorKeysFor(id)
           const hasErrors = Object.keys(fieldErrors).some((key) => fieldErrors[key] && tabErrorKeys.some((field) => key === field || key.startsWith(`${field}[`)))
-          const done = isPublic ? stepValidity[id] === true : index < flowPos || posOk(index)
-          return <button key={id} type="button" onClick={() => goToStep(id)} aria-current={id === step ? "step" : undefined} className={`rounded-lg px-2 py-1.5 text-left text-[11px] font-semibold ${id === step ? "bg-cyan-500 text-slate-950" : index < flowPos ? "bg-cyan-100 text-cyan-900" : "bg-slate-100 text-slate-500"}`}>
+          const done = posOk(index)
+          return <button key={id} type="button" disabled={busy} onClick={() => goToStep(id)} aria-current={id === step ? "step" : undefined} className={`rounded-lg px-2 py-1.5 text-left text-[11px] font-semibold disabled:opacity-50 ${id === step ? "bg-cyan-500 text-slate-950" : done ? "bg-cyan-100 text-cyan-900" : "bg-slate-100 text-slate-700 hover:bg-cyan-50"}`}>
             {index + 1}. {name}
             {hasErrors && <span role="img" aria-label="has errors" className="ml-1 inline-block h-2 w-2 rounded-full bg-rose-500 align-middle" />}
             {!hasErrors && done && id !== step && <span aria-label="completed" className="ml-1 text-[10px] text-green-700">✓</span>}
@@ -819,13 +805,13 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
         <div className="h-full bg-cyan-500 transition-all" style={{ width: `${((flowPos + 1) / flow.length) * 100}%` }} />
       </div>
       <h2 className="text-lg font-semibold text-slate-900">{formStepTitle(step)}</h2>
-      {isPublic && <p className="text-sm text-slate-600">You can jump between sections. Complete all required fields before previewing or downloading your PDF.</p>}
+      <p className="text-sm text-slate-600">{isPublic ? 'You can jump between sections. Complete all required fields before previewing or downloading your PDF.' : 'You can jump between sections and complete them in any order. All required sections must be valid before previewing or submitting.'}</p>
       {step === 9 && !isUpdate && (
         <section aria-label="Choose how to provide your NSRP" className="space-y-3">
           <p className="text-sm text-slate-600">The NSRP form is required for your PESO registration. Choose one option:</p>
           <div role="radiogroup" aria-label="NSRP options" className="grid gap-3 sm:grid-cols-2">
             {[
-              { value: "upload", title: "I already have a filled NSRP form", text: "Upload a PDF, JPG, or PNG (max 5 MB)." },
+              { value: "upload", title: "I already have a filled NSRP form", text: "Upload a PDF only (max 5 MB)." },
               { value: "online", title: "Fill out my NSRP online", text: "Answer the form step by step and we generate the PDF for you." },
             ].map((option) => (
               <button
@@ -848,11 +834,11 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
           {fieldErrors.nsrpMode && <p id="error-nsrpMode" role="alert" className="text-xs text-rose-600">{fieldErrors.nsrpMode}</p>}
           {nsrpMode === "upload" && (
             <div className="rounded-xl border border-slate-200 p-3">
-              <label className="block text-sm font-medium text-slate-800">Filled NSRP form (PDF, JPG, or PNG; max 5 MB)
+              <label className="block text-sm font-medium text-slate-800">Filled NSRP form (PDF only; max 5 MB)
                 <input
                   id="field-nsrpFile"
                   type="file"
-                  accept="application/pdf,.pdf,image/jpeg,.jpg,.jpeg,image/png,.png"
+                  accept="application/pdf,.pdf"
                   onChange={(event) => {
                     const file = event.target.files?.[0] || null
                     setNsrpUpload(file)
@@ -1260,7 +1246,7 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
           <NsrpWarningPanel warnings={warnings} onFix={fixWarning} onFixAllCutOff={() => fixWarning(warnings.find((warning) => warning.reason === "truncated")?.field || "")} />
           <NsrpDoubleCheckPanel answers={{ ...answers, email }} onFix={target => { setStep(target); setPreviewUrl(''); setPreviewBlob(null) }} />
           <div className="flex flex-wrap gap-2">{STEP_NAMES.slice(1, 7).map((name, index) => <button key={name} type="button" onClick={() => { setStep(index + 1); setPreviewUrl(""); setPreviewBlob(null) }} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-cyan-800">Edit {name}</button>)}</div>
-          <button type="button" onClick={generatePreview} disabled={busy} className="rounded-lg border border-cyan-700 px-3 py-2 text-sm font-semibold text-cyan-800">Regenerate preview</button>
+          <button type="button" onClick={isPublic ? generatePreview : openFinalStep} disabled={busy} className="rounded-lg border border-cyan-700 px-3 py-2 text-sm font-semibold text-cyan-800">Regenerate preview</button>
         </div>
       )}
       {error && <p role="alert" className="rounded-lg border border-rose-300 bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}

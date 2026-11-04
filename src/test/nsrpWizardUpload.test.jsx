@@ -86,6 +86,18 @@ async function fillDocuments() {
 }
 
 describe('NSRP path choice', () => {
+  it.each([['image/png', 'nsrp.png'], ['image/jpeg', 'nsrp.jpg'], ['application/pdf', 'nsrp.jpg']])('rejects non-PDF selections (%s, %s)', async (type, name) => {
+    await completeAccountStep()
+    fireEvent.click(screen.getByRole('radio', { name: /I already have a filled NSRP form/i }))
+    const input = screen.getByLabelText(/Filled NSRP form/i)
+    expect(input).toHaveAttribute('accept', 'application/pdf,.pdf')
+    expect(screen.getByText('Upload a PDF only (max 5 MB).')).toBeInTheDocument()
+    fireEvent.change(input, { target: { files: [new File(['test'], name, { type })] } })
+    fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
+    expect(await screen.findByText('The NSRP form must be a PDF file.')).toBeInTheDocument()
+    expect(screen.queryByLabelText(/^First name$/i)).not.toBeInTheDocument()
+  })
+
   it('offers expanded Philippine IDs in both document dropdowns', async () => {
     await completeAccountStep()
     await chooseUpload()
@@ -120,7 +132,7 @@ describe('NSRP path choice', () => {
     await screen.findByText('Choose how you want to provide your NSRP.')
     fireEvent.click(screen.getByRole('radio', { name: /I already have a filled NSRP form/i }))
     fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
-    await screen.findByText('Upload your filled NSRP form (PDF, JPG, or PNG).')
+    await screen.findByText('Upload your filled NSRP form (PDF only).')
   })
 
   it('switching paths keeps both drafts and shows the note', async () => {

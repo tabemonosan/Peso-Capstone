@@ -1,6 +1,6 @@
 import mongoose from 'mongoose'
 
-export const JOB_POLICY_VERSION = '2026-11-04.1'
+export const JOB_POLICY_VERSION = '2026-11-04.2'
 export const JOB_MODERATION_DEFAULTS = { enabled: true }
 const DAY = 86400000
 const normalize = value => String(value || '').normalize('NFKC').replace(/[\u200B-\u200D\uFEFF]/g, '').toLowerCase()
@@ -9,7 +9,7 @@ const rules = [
   ['applicant_payment', 'Prohibited content', 'Possible applicant payment or investment requirement.', /\b(?:(?:pay|send|deposit|invest|magbayad)\b.{0,45}\b(?:fee|deposit|investment|registration|gcash|money|bayad)|(?:registration|placement|processing|joining|training) fee|buy (?:a |the )?starter kit)\b/],
   ['illegal_activity', 'Prohibited content', 'Possible illegal activity or document fraud.', /\b(?:money laundering|money mule|fake (?:ids?|documents?|passports?)|sell(?:ing)? illegal drugs|drug trafficking|illegal gambling|identity theft|stolen (?:accounts|credit cards))\b/],
   ['explicit_content', 'Prohibited content', 'Possible explicit sexual services or content.', /\b(?:porn(?:ography|ographic)?|sexual services|escort services|nude (?:model|photos?|videos?)|adult (?:cam|entertainment)|cybersex)\b/],
-  ['age_restriction', 'Equal opportunity', 'Age preference or restriction requires PESO review.', /\b(?:(?:ages?|aged|edad)\s*:?\s*(?:\d{2}\s*(?:-|to|hanggang)\s*\d{2}|(?:under|below|above|over)\s*\d{2})|\d{2}\s*(?:-|to)\s*\d{2}\s*(?:years? old|y\/?o)|(?:under|below)\s*\d{2}\s*(?:years?|only)|young (?:and energetic|applicants?))\b/],
+  ['age_restriction', 'Equal opportunity', 'Age preference or restriction requires PESO review.', /\b(?:(?:ages?|aged|edad)\s*:?\s*(?:\d{1,3}\s*(?:[-–—]|to|hanggang)\s*\d{1,3}|(?:under|below|above|over)\s*\d{1,3})|\d{1,3}\s*(?:[-–—]|to)\s*\d{1,3}\s*(?:years? old|y\/?o)|(?:at least|at most|under|below|above|over|no older than|no younger than|not older than|not younger than)\s*\d{1,3}\s*(?:years?(?:\s+old)?|y\/?o|only)|(?:minimum|maximum|min|max)\s+age\s*(?:of|is|:)?\s*\d{1,3}|\d{1,3}\s*(?:\+|and (?:above|below|older|younger))\s*(?:years?(?:\s+old)?|y\/?o)|young (?:and energetic|applicants?))\b/],
   ['gender_restriction', 'Equal opportunity', 'Gender or civil-status restriction requires PESO review.', /\b(?:(?:male|female|men|women|single|unmarried)\s+(?:only|required|preferred|applicants?)|only\s+(?:male|female|men|women)|(?:must be|looking for|seeking)\s+(?:male|female|single|unmarried)|(?:lalaki|babae|binata|dalaga)\s+(?:lamang|lang|only))\b/],
   ['protected_trait_restriction', 'Equal opportunity', 'Possible exclusion based on protected or personal characteristics.', /\b(?:(?:no|not accepting|exclude)\s+(?:pwd|disabled|pregnant|muslims?|christians?|lgbt\w*)|(?:christian|catholic|muslim)\s+(?:only|required|preferred)|(?:must be|looking for)\s+(?:beautiful|pretty|fair.skinned)|pleasing personality)\b/],
   ['high_risk_job', 'Higher-risk work', 'Recruitment or earnings claims need additional verification.', /\b(?:overseas|work abroad|crypto(?:currency)?|investment trader|guaranteed (?:income|earnings|returns)|earn\b.{0,25}\b(?:daily|per day)|no work permit|tourist visa)\b/],
@@ -21,13 +21,13 @@ export function screenJobContent(job) {
     const clauses = normalize(job[field]).split(/[.!?;\n]|\bbut\b|\bhowever\b/).filter(Boolean)
     for (const [code, category, message, pattern] of rules) {
       if (clauses.some(clause => {
-        const match = pattern.exec(clause)
-        if (!match) return false
-        // Exempt an explicit statement rejecting a prohibited practice, rather
-        // than hiding an entire advertisement containing the word "no".
-        const before = clause.slice(Math.max(0, match.index - 45), match.index)
-        const negated = ['prohibited_mlm', 'applicant_payment', 'illegal_activity', 'explicit_content'].includes(code) && /\b(?:no|never|without|do not require|does not require|not a|not an|walang|bawal ang)\s*$/.test(before)
-        return !negated
+        // Negation applies to one occurrence, not every later match in a clause.
+        for (const match of clause.matchAll(new RegExp(pattern.source, 'g'))) {
+          const before = clause.slice(Math.max(0, match.index - 45), match.index)
+          const negated = ['prohibited_mlm', 'applicant_payment', 'illegal_activity', 'explicit_content'].includes(code) && /\b(?:no|never|without|do not require|does not require|not a|not an|walang|bawal ang)\s*$/.test(before)
+          if (!negated) return true
+        }
+        return false
       })) findings.push({ code, category, message, field })
     }
   }

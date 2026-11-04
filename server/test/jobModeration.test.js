@@ -19,6 +19,11 @@ describe('job policy screening', () => {
     ['Produce nude videos.', 'explicit_content'],
     ['Adult entertainment performers wanted.', 'explicit_content'],
     ['Age: 18-30 only.', 'age_restriction'],
+    ['Applicants must be at least 25 years old.', 'age_restriction'],
+    ['Applicants must be at most 40 years old.', 'age_restriction'],
+    ['Maximum age: 45.', 'age_restriction'],
+    ['No older than 35 years old.', 'age_restriction'],
+    ['Applicants aged 18–30 only.', 'age_restriction'],
     ['Applicants must be 21 to 35 years old.', 'age_restriction'],
     ['Female only.', 'gender_restriction'],
     ['Must be male.', 'gender_restriction'],
@@ -42,6 +47,13 @@ describe('job policy screening', () => {
   })
   it('does not let negation hide a separate payment requirement', () => {
     expect(screenJobContent({ ...job, description: 'No placement fee but pay a registration fee.' }).some(f => f.code === 'applicant_payment')).toBe(true)
+  })
+  it.each([
+    ['No placement fee, pay a registration fee to apply.', 'applicant_payment'],
+    ['No MLM, recruit members to earn.', 'prohibited_mlm'],
+    ['No fake IDs, money laundering opportunities available.', 'illegal_activity'],
+  ])('checks later matches after a negated first occurrence: %s', (description, code) => {
+    expect(decide({ job: { ...job, description } })).toMatchObject({ decision: 'manual_review', findings: expect.arrayContaining([expect.objectContaining({ code })]) })
   })
   it.each([
     [{ employer: { ...employer, emailVerified: false } }, 'unverified_account'],

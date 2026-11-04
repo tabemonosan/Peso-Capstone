@@ -55,6 +55,76 @@ beforeEach(async () => {
 })
 
 describe('applications, interviews and admin-confirmed events', () => {
+  it('persists exactly one locked employer report and notification under concurrent submissions', async () => {
+    await apply().expect(200)
+    const referral = await Referral.findOne({ applicantId: applicant._id })
+    const body = { applicantId: String(applicant._id), jobId: String(job._id), referralId: String(referral._id), status: 'not_hired' }
+    const responses = await Promise.all(Array.from({ length: 8 }, () => request(app).post('/api/hire-reports').set(auth('Employer', employer)).send(body)))
+    expect(responses.filter(response => response.status === 200)).toHaveLength(1)
+    expect(responses.filter(response => response.status === 409 && response.body.code === 'EMPLOYER_REPORT_LOCKED')).toHaveLength(7)
+    expect(await HireReport.countDocuments({ referralId: referral._id, reportedByRole: 'Employer' })).toBe(1)
+    const reportId = responses.find(response => response.status === 200).body._id
+    for (const response of responses) {
+      expect(response.body.report?._id || response.body._id).toBe(reportId)
+      expect(JSON.stringify(response.body)).not.toContain('submissionKey')
+    }
+    expect(await Notification.countDocuments({ type: 'hire_report_submitted' })).toBe(1)
+  })
+
+  it('releases a losing concurrent hire reservation when a not-hired report wins', async () => {
+    await apply().expect(200)
+    const referral = await Referral.findOne({ applicantId: applicant._id })
+    const body = { applicantId: String(applicant._id), jobId: String(job._id), referralId: String(referral._id) }
+    let release, reserved
+    const reservation = new Promise(resolve => { reserved = resolve })
+    const proceed = new Promise(resolve => { release = resolve })
+    const original = referralWorkflow.reserveHireSlot
+    const spy = vi.spyOn(referralWorkflow, 'reserveHireSlot').mockImplementation(async (...args) => {
+      await original(...args); reserved(); await proceed
+    })
+    try {
+      const hiring = request(app).post('/api/hire-reports').set(auth('Employer', employer)).send({ ...body, status: 'hired' }).then(response => response)
+      await reservation
+      const winner = await request(app).post('/api/hire-reports').set(auth('Employer', employer)).send({ ...body, status: 'not_hired' }).expect(200)
+      release()
+      const loser = await hiring
+      expect(loser.status).toBe(409)
+      expect(loser.body.report._id).toBe(winner.body._id)
+      expect((await JobPosting.findById(job._id)).hiredApplicantIds).toHaveLength(0)
+      expect(await HireReport.countDocuments({ referralId: referral._id })).toBe(1)
+    } finally { release(); spy.mockRestore() }
+  })
+
+  it('keeps legacy employer reports locked without rewriting historical duplicates', async () => {
+    await apply().expect(200)
+    const referral = await Referral.findOne({ applicantId: applicant._id })
+    const fields = { applicantId: applicant._id, employerId: employer._id, jobId: job._id, referralId: referral._id, status: 'hired' }
+    await HireReport.collection.insertMany([fields, { ...fields }])
+    const response = await request(app).post('/api/hire-reports').set(auth('Employer', employer)).send({ ...fields, status: 'not_hired' }).expect(409)
+    expect(response.body.code).toBe('EMPLOYER_REPORT_LOCKED')
+    expect(await HireReport.countDocuments({ referralId: referral._id })).toBe(2)
+  })
+
+  it('restores invitation actions and interview progress after a no-show report is dismissed', async () => {
+    const { referral, meeting } = await meetingFor()
+    await api('post', `/interviews/${meeting.id}/respond`, 'Applicant', applicant, { action: 'confirm' }).expect(200)
+    const report = await request(app).post('/api/applications/reports').set(auth('Employer', employer)).send({ referralId: String(referral._id), type: 'no_show', reason: 'Mistaken early report.', confirmEarly: true }).expect(200)
+    await api('post', `/admin/reports/${encodeURIComponent(report.body.id)}/review`, 'Admin', admin, { decision: 'dismissed', reason: 'Evidence does not support this report.' }).expect(200)
+    await api('post', `/referrals/${referral._id}/interview`, 'Employer', employer, { scheduledAt: new Date(Date.now() + 2 * DAY).toISOString(), mode: 'In person', city: 'Manito', barangay: 'Nagotgot', province: 'Albay', message: 'Updated schedule.' }).expect(200)
+    for (const path of ['/api/workflow/mine', '/api/applications/mine']) {
+      const response = await request(app).get(path).set(auth('Applicant', applicant)).expect(200)
+      const item = Array.isArray(response.body) ? response.body[0] : response.body.items[0]
+      expect(item.status).toBe('interview_invited')
+      expect(item.actions).toEqual(expect.arrayContaining(['confirm', 'reschedule', 'decline', 'withdraw']))
+      expect(item.noShowReport.status).toBe('dismissed')
+    }
+    await api('post', `/interviews/${meeting.id}/respond`, 'Applicant', applicant, { action: 'confirm' }).expect(200)
+    await api('post', `/interviews/${meeting.id}/held`, 'Employer', employer, { confirmEarly: true, reason: 'Completed early by agreement.' }).expect(200)
+    const mine = await api('get', '/mine', 'Applicant', applicant).expect(200)
+    expect(mine.body.items[0].status).toBe('interview_held')
+    expect((await score()).trustValue).toBe(100)
+  })
+
   it('shows applicants only their own reputation, defaults old missing values to 100, and protects admin notes', async () => {
     await Applicant.collection.updateOne({ _id: applicant._id }, { $unset: { trustValue: 1 } })
     const result = await api('get', '/reputation', 'Applicant', applicant).expect(200)
@@ -391,7 +461,8 @@ describe('applications, interviews and admin-confirmed events', () => {
     expect(account.trustValue).toBe(decision === 'confirmed' ? 80 : 100)
     expect(account.trustEvents).toHaveLength(decision === 'confirmed' ? 1 : 0)
     mine = await api('get', '/mine', 'Applicant', applicant).expect(200)
-    expect(mine.body.items[0].actions).toContain('view_outcome')
+    if (decision === 'confirmed') expect(mine.body.items[0].actions).toContain('view_outcome')
+    else expect(mine.body.items[0].status).toBe('interview_confirmed')
     expect(JSON.stringify(mine.body)).not.toMatch(/PRIVATE|trustValue|trustEvents|reviewReason|reviewedBy/)
   })
 

@@ -16,7 +16,7 @@ export function applicationActions({ status, interview, report, referralId, susp
     actions.push('reschedule', 'decline')
   }
   const withdrawalDeadline = applicationWithdrawalDeadline(interview)
-  if ((!withdrawalDeadline || +new Date(withdrawalDeadline) > +now) && !terminal && !report && (!interview || +new Date(interview.scheduledAt) > +now) && !['held', 'attended', 'missed'].includes(interview?.status)) actions.push('withdraw')
+  if ((!withdrawalDeadline || +new Date(withdrawalDeadline) > +now) && !terminal && (!report || report.status === 'dismissed') && (!interview || +new Date(interview.scheduledAt) > +now) && !['held', 'attended', 'missed'].includes(interview?.status)) actions.push('withdraw')
   if (report?.status === 'pending' && report.responseDeadline && +new Date(report.responseDeadline) >= +now) actions.push('respond_no_show')
   if (referralId) actions.push('report_problem')
   if (['hired', 'deployed', 'not_hired', 'no_show_confirmed', 'no_show_dismissed', 'declined', 'declined_by_admin'].includes(status)) actions.push('view_outcome')

@@ -397,24 +397,44 @@ describe('wizard tab navigation', () => {
     await waitFor(() => expect(screen.getByLabelText(/^TIN/i)).toHaveValue('123456789'))
   })
 
-  it('forward past an invalid step is blocked and shows an error badge', async () => {
+  it('jumps to later sections without validating or marking skipped sections completed', async () => {
     await goToAddressStep()
-    validateImpl = () => ({ ok: false, status: 422, body: { error: 'Check the highlighted fields.', fieldErrors: { tin: 'Enter 9 or 12 digits.' } } })
-    // maxStep is 2 (Address & contact). Clicking tab 4 (one beyond) must validate first and fail.
-    fireEvent.click(screen.getByRole('button', { name: /5\. Education & training/i }))
-    await screen.findByText('Enter 9 or 12 digits.')
-    expect(screen.getByLabelText(/^TIN/i)).toBeInTheDocument() // still on Address & contact
-    expect(screen.getByLabelText('has errors', { selector: 'span' })).toBeInTheDocument()
-    // Once valid, the same click advances
-    validateImpl = () => ({ ok: true, status: 200, body: { ok: true, fieldErrors: {} } })
-    fireEvent.click(screen.getByRole('button', { name: /5\. Education & training/i }))
-    await screen.findByRole('heading', { name: 'Education & training' })
+    fireEvent.change(screen.getByLabelText(/^TIN/i), { target: { value: '123' } })
+    const calls = mockFetch.mock.calls.length
+    fireEvent.click(screen.getByRole('button', { name: /9\. Documents/i }))
+    await screen.findByText('Verification documents')
+    expect(mockFetch.mock.calls).toHaveLength(calls)
+    expect(within(screen.getByRole('button', { name: /5\. Education & training/i })).queryByLabelText('completed')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /4\. Address & contact/i }))
+    expect(screen.getByLabelText(/^TIN/i)).toHaveValue('123')
   })
 
-  it('clicking a much later tab cannot skip ahead of the furthest reached step', async () => {
+  it('validates skipped sections before preview and focuses the invalid section', async () => {
     await goToAddressStep()
+    fireEvent.click(screen.getByRole('button', { name: /9\. Documents/i }))
+    validateImpl = ({ step }) => step === 1
+      ? ({ ok: false, status: 422, body: { fieldErrors: { tin: 'Enter 9 or 12 digits.' } } })
+      : ({ ok: true, status: 200, body: { ok: true, fieldErrors: {} } })
     fireEvent.click(screen.getByRole('button', { name: /10\. Preview & submit/i }))
-    // Still on Address & contact
+    await screen.findByText('Enter 9 or 12 digits.')
     expect(screen.getByLabelText(/^TIN/i)).toBeInTheDocument()
+    expect(mockFetch.mock.calls.some(([url]) => url.endsWith('/api/nsrp/preview-signup'))).toBe(false)
+    validateImpl = () => ({ ok: true, status: 200, body: { ok: true, fieldErrors: {} } })
+    fireEvent.click(screen.getByRole('button', { name: /10\. Preview & submit/i }))
+    expect((await screen.findAllByText('Add a birth certificate and complete Valid ID #1.')).length).toBeGreaterThan(0)
+    expect(screen.getByText('Verification documents')).toBeInTheDocument()
+    expect(mockFetch.mock.calls.some(([url]) => url.endsWith('/api/nsrp/preview-signup'))).toBe(false)
+  })
+
+  it('permits section browsing before account verification but blocks preview', async () => {
+    renderWizard()
+    fireEvent.click(screen.getByRole('button', { name: /2\. Your NSRP/i }))
+    fireEvent.click(screen.getByRole('radio', { name: /Fill out my NSRP online/i }))
+    fireEvent.click(screen.getByRole('button', { name: /9\. Documents/i }))
+    expect(screen.getByText('Verification documents')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /10\. Preview & submit/i }))
+    await screen.findByText('Verify your email with the 6-digit code before continuing.')
+    expect(screen.getByLabelText(/^Password$/i)).toBeInTheDocument()
+    expect(mockFetch.mock.calls.some(([url]) => url.endsWith('/api/nsrp/preview-signup'))).toBe(false)
   })
 })

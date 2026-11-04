@@ -271,6 +271,7 @@ referralSchema.index({ createdAt: -1, _id: 1 })
 referralSchema.index({ applicantId: 1, jobId: 1 }, { unique: true })
 
 const hireReportSchema = new Schema({
+  submissionKey: { type: String, select: false },
   referralId: { type: Schema.Types.ObjectId, ref: 'Referral' },
   applicantId: { type: Schema.Types.ObjectId, ref: 'Applicant', required: true },
   employerId: { type: Schema.Types.ObjectId, ref: 'Employer', required: true },
@@ -284,6 +285,8 @@ const hireReportSchema = new Schema({
 }, { collection: 'hire_reports', timestamps: true })
 hireReportSchema.index({ reportedAt: -1, _id: 1 })
 hireReportSchema.index({ employerId: 1, reportedAt: -1 })
+// Legacy statements without a key remain untouched, including historical duplicates.
+hireReportSchema.index({ submissionKey: 1 }, { unique: true, sparse: true })
 
 // Binary content of applicant verification documents lives here, NOT inside the
 // Applicant document: a full set of 5 MB files would exceed MongoDB's 16 MB

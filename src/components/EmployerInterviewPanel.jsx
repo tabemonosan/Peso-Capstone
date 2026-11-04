@@ -7,6 +7,7 @@ import Modal from './Modal'
 import ConfirmDialog from './ConfirmDialog'
 import ApplicationStages from './ApplicationStages'
 import PostInterviewTask from './PostInterviewTask'
+import { fetchWithTimeout } from '../utils/fetchWithTimeout'
 
 export default function EmployerInterviewPanel({ token, referralId, referralStatus = 'pending', outcome }) {
   const [loaded, setLoaded] = useState(false)
@@ -31,7 +32,10 @@ export default function EmployerInterviewPanel({ token, referralId, referralStat
     try {
       if (action === 'held') setMeeting(await workflowRequest(token, `/interviews/${meeting.id}/held`, { confirmed: true, confirmEarly: !due, reason }))
       else {
-        const response = await fetch(`${API_URL}/api/applications/reports`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ referralId, type: 'no_show', reason, confirmEarly: !due }) })
+        // A previous timed-out POST may have saved successfully. Check before retrying.
+        const current = await workflowRequest(token, `/referrals/${referralId}/interview`)
+        if (current?.noShowReport) { setMeeting(current); setAction(''); return }
+        const response = await fetchWithTimeout(`${API_URL}/api/applications/reports`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ referralId, type: 'no_show', reason, confirmEarly: !due }) })
         const result = await response.json(); if (!response.ok) throw new Error(result.error)
       }
       setAction(''); await load()
@@ -50,11 +54,11 @@ export default function EmployerInterviewPanel({ token, referralId, referralStat
   const canRecord = !finalOutcome && !reportPending && meeting?.status === 'confirmed'
   const due = canRecord && +new Date(meeting.scheduledAt) <= clock
   const resultRecordedAt = meeting?.noShowReport?.reportedAt || [...(meeting?.history || [])].reverse().find(entry => ['employer_recorded_interview_held', 'employer_reported_no_show'].includes(entry.action))?.at
-  const progressStatus = outcome || (meeting?.noShowReport ? `no_show_${meeting.noShowReport.status}` : ['declined', 'cancelled'].includes(meeting?.status) ? `interview_${meeting.status}` : referralStatus)
+  const progressStatus = outcome || (meeting?.noShowReport && meeting.noShowReport.status !== 'dismissed' ? `no_show_${meeting.noShowReport.status}` : ['declined', 'cancelled'].includes(meeting?.status) ? `interview_${meeting.status}` : referralStatus)
   return <>{loaded ? <ApplicationStages audience="employer" application={{ status: progressStatus, interview: meeting }} /> : <p role="status" className="text-sm text-slate-600">Loading interview progress…</p>}<div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/50 p-4 text-sm text-slate-900">
     <h4 className="font-semibold">Interview</h4>
     {meeting ? <><p className="mt-2">{workflowDate(meeting.scheduledAt)} · {meeting.mode}</p><p className="mt-1 text-slate-600">{meeting.location}</p><p className="mt-2 font-medium">Status: {['held', 'attended'].includes(meeting.status) ? 'Interview completed' : meeting.status.replaceAll('_', ' ')}</p>{meeting.responseMessage && <p className="mt-2">Applicant response: {meeting.responseMessage}</p>}</> : <p className="mt-2 text-slate-600">No interview invitation sent yet.</p>}
-    <div className="mt-3 flex flex-wrap gap-2">{editable && !meeting?.noShowReport && <button type="button" onClick={openInvitation} className="rounded-full border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-blue-800">{meeting ? 'Send updated invitation' : 'Invite to interview'}</button>}</div>
+    <div className="mt-3 flex flex-wrap gap-2">{editable && !reportPending && <button type="button" onClick={openInvitation} className="rounded-full border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-blue-800">{meeting ? 'Send updated invitation' : 'Invite to interview'}</button>}</div>
     {canRecord && <div className="mt-4 rounded-xl border border-blue-200 bg-white p-3">
       <h5 className="font-semibold">Record interview result</h5>
       <p id={`interview-result-help-${referralId}`} className="mt-1 text-xs text-slate-600">{due ? 'Choose Interview completed if the applicant attended and the interview took place. Report no-show if the applicant did not attend.' : 'You can record a result ahead of time. You will be asked to confirm the early decision and provide a reason. Your confirmation time will be recorded.'}</p>
