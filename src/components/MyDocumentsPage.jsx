@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { API_URL } from "../config"
 import MyDocumentsModal from "./MyDocumentsModal"
+import ConsistencyWaitlistCard from './ConsistencyWaitlistCard'
 
 // Document details open only after the applicant chooses to manage them.
 export default function MyDocumentsPage({ applicantId, token, onUpdated, open, onOpenChange }) {
@@ -20,6 +21,7 @@ export default function MyDocumentsPage({ applicantId, token, onUpdated, open, o
       const data = await response.json().catch(() => null)
       if (!response.ok || !data) throw new Error(data?.error || 'Unable to load your documents.')
       setInfo(data)
+      if (data.consistency?.status) window.dispatchEvent(new CustomEvent('applicant-consistency', { detail: { status: data.consistency.status } }))
       setError('')
     } catch (loadError) {
       setError(loadError.message || 'Unable to load your documents.')
@@ -29,6 +31,11 @@ export default function MyDocumentsPage({ applicantId, token, onUpdated, open, o
   useEffect(() => {
     load()
   }, [load])
+  useEffect(() => {
+    if (!info?.consistency?.checking && !info?.consistency?.waitlisted) return
+    const timer = setInterval(load, 5000)
+    return () => clearInterval(timer)
+  }, [load, info?.consistency?.checking, info?.consistency?.waitlisted])
 
   if (!info) return <p role={error ? 'alert' : 'status'} className="text-sm text-slate-600">{error || 'Loading your documents…'}</p>
 
@@ -50,6 +57,7 @@ export default function MyDocumentsPage({ applicantId, token, onUpdated, open, o
         These documents are submitted to PESO for registration and verification. Employers receive your contact details and job-related qualifications. Your NSRP form and verification documents are not shared with employers.
       </p>
       {error && <p role="alert" className="mt-3 text-sm text-rose-700">{error}</p>}
+      <ConsistencyWaitlistCard state={info.consistency} />
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
         {info.verificationStatus && (

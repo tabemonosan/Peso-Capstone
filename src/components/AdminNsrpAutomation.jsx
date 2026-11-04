@@ -81,7 +81,7 @@ export default function AdminNsrpAutomation({ token, bannerOnly = false }) {
   const save = async (event) => {
     event.preventDefault(); setBusy(true); setError(''); setNotice('')
     try {
-      const changes = Object.fromEntries(Object.keys(VERIFICATION_DEFAULTS).map(key => [key, ['auditPercent', 'rateLimit'].includes(key) ? Number(settings[key]) : settings[key]]))
+      const changes = Object.fromEntries(Object.keys(VERIFICATION_DEFAULTS).map(key => [key, ['auditPercent', 'rateLimit', 'waitlistAttempts'].includes(key) ? Number(settings[key]) : settings[key]]))
       const response = await fetch(`${API_URL}/api/admin/nsrp-automation/settings`, { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(changes) })
       const body = await response.json()
       if (!response.ok) throw new Error(body.error)
@@ -101,12 +101,16 @@ export default function AdminNsrpAutomation({ token, bannerOnly = false }) {
     finally { setBusy(false) }
   }
   return <section className="rounded-xl border border-slate-200 bg-white p-4 text-slate-900">
-    {settings && <p className="rounded-lg border border-cyan-200 bg-cyan-50 p-3 font-semibold">Auto-approval is {enabled ? 'ON' : 'OFF'} · Applicant: {settings.applicant ? 'ON' : 'OFF'} · Employer: {settings.employer ? 'ON' : 'OFF'}</p>}
+    {settings && <p className="rounded-lg border border-cyan-200 bg-cyan-50 p-3 font-semibold">Auto-approval is {enabled ? 'ON' : 'OFF'} · Applicant: {settings.applicant ? 'ON' : 'OFF'} · Employer: {settings.employer ? 'ON' : 'OFF'} · Waitlist on mismatch: {settings.waitlistOnMismatch ? 'ON' : 'OFF'}</p>}
     {error && <p role="alert" className="text-rose-700">{error}</p>}
     {counts && <p className="my-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">Auto-approved: {counts.automatic || 0} · Flagged: {counts.flagged || 0} · Audit samples: {counts.samples || 0} · Revoked: {counts.revoked || 0}</p>}
     {!bannerOnly && <>
       <h2 className="mt-4 text-xl font-semibold">Verification rules</h2>
       {settings && <form onSubmit={save} className="my-4 grid gap-4 sm:grid-cols-2">
+        <label><input type="checkbox" checked={settings.waitlistOnMismatch} onChange={event => setSettings({ ...settings, waitlistOnMismatch: event.target.checked })} /> Waitlist on mismatch</label>
+        <label>Correction chances per flagged document<input type="number" min="1" max="5" required className={`${control} block`} value={settings.waitlistAttempts} onChange={event => setSettings({ ...settings, waitlistAttempts: event.target.value })} /></label>
+        <label>PESO contact information<textarea required maxLength={300} className={`${control} block w-full`} value={settings.pesoContact} onChange={event => setSettings({ ...settings, pesoContact: event.target.value })} /></label>
+        <label>PESO office hours<input required maxLength={300} className={`${control} block w-full`} value={settings.pesoOfficeHours} onChange={event => setSettings({ ...settings, pesoOfficeHours: event.target.value })} /></label>
         <label><input type="checkbox" checked={settings.automaticApproval} onChange={event => setSettings({ ...settings, automaticApproval: event.target.checked })} /> Automatic approval</label>
         {['applicant', 'employer'].map((key) => <label key={key}><input type="checkbox" checked={settings[key]} onChange={(event) => setSettings({ ...settings, [key]: event.target.checked })} /> Auto-approve {key} NSRPs</label>)}
         {[['birthCertificate', 'Auto-approve birth certificates'], ['validId', 'Auto-approve valid IDs'], ['ocrTextReading', 'OCR text reading'], ['reviewToolsEnabled', 'Document review queues and actions']].map(([key, label]) => <label key={key}><input type="checkbox" checked={settings[key]} onChange={event => setSettings({ ...settings, [key]: event.target.checked })} /> {label}</label>)}

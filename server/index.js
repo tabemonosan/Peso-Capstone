@@ -28,11 +28,11 @@ import { createDocumentVerification } from './services/documentVerification.js'
 import { createDocumentVerificationRouter } from './routes/documentVerification.js'
 import { openFlags } from '../shared/verification.js'
 import { prepareDocument, parseDocumentDetails, saveAuthorization } from './services/documentUpload.js'
-import { processApplicantImages } from './services/imageChecks.js'
 import { EXPLANATION_CATEGORIES } from '../shared/crossChecks.js'
 import { inspectDocument } from './services/imageQuality.js'
+import { validateDeclaredDetails, BIRTH_COPY_TYPES } from '../shared/documentImage.js'
 import { createVerificationEngine } from './services/verificationEngine.js'
-import { enqueueVerification } from './services/verificationJobs.js'
+import { createConsistencyWaitlist } from './services/consistencyWaitlist.js'
 import { applicantSkillQuery } from './utils/jobSkillMatching.js'
 import { jobSkillMatchCount } from '../shared/jobSkills.js'
 import { rankEmployerReferrals } from './services/applicantRanking.js'
@@ -86,7 +86,7 @@ import { resolveSort } from './utils/sort.js'
 
 // --- Sort whitelists (never trust raw ?sortBy values) ---
 const STATUS_PRIORITY = ['pending', 'under_review', 'approved', 'declined']
-const APPLICANT_STATUS_PRIORITY = ['under_review', 'approved', 'restricted', 'declined']
+const APPLICANT_STATUS_PRIORITY = ['waitlisted', 'under_review', 'approved', 'restricted', 'declined']
 
 const APPLICANT_SORTS = {
   name: { fields: (d) => ({ 'profile.lastName': d, 'profile.firstName': d }), collation: true, defaultOrder: 1 },
@@ -379,9 +379,21 @@ async function refreshApplicantVerification(id) {
 export const nsrpAutomation = createNsrpAutomation({ Applicant, Employer, EmployerRequest, notify, notifyAdmins, recomputeApplicant: refreshApplicantVerification })
 export const verificationEngine = createVerificationEngine({ Applicant, Employer, EmployerRequest, automation: nsrpAutomation, notify, notifyAdmins, recomputeApplicant: refreshApplicantVerification })
 nsrpAutomation.attachEngine(verificationEngine)
-app.use('/api/admin/nsrp-automation', createNsrpAutomationRouter({ automation: nsrpAutomation, authenticate: authenticateRequest, Admin, review: (...args) => documentVerification.act(...args) }))
+export const consistencyWaitlist = createConsistencyWaitlist({ Applicant, automation: nsrpAutomation, notify, notifyAdmins, verifyDocument: params => verificationEngine.process(params) })
+const scheduleConsistency = (id, docKey, reservation) => consistencyWaitlist.begin(id, docKey, reservation).catch(() => console.error('[verification] consistency check unavailable; manual review required'))
+app.use('/api/admin/nsrp-automation', createNsrpAutomationRouter({ automation: nsrpAutomation, authenticate: authenticateRequest, Admin, waitlist: consistencyWaitlist, review: (...args) => documentVerification.act(...args) }))
 export const documentVerification = createDocumentVerification({ Applicant, Employer, EmployerRequest, automation: nsrpAutomation, notify, recomputeApplicant: refreshApplicantVerification })
-app.use('/api/admin/document-verification', createDocumentVerificationRouter({ service: documentVerification, authenticate: authenticateRequest, automation: nsrpAutomation, Admin }))
+app.use('/api/admin/document-verification', createDocumentVerificationRouter({ service: documentVerification, authenticate: authenticateRequest, automation: nsrpAutomation, Admin, Applicant, waitlist: consistencyWaitlist }))
+app.get('/api/profile/consistency', async (req, res) => {
+  try {
+    const actor = authenticateRequest(req)
+    if (actor?.role !== 'Applicant') return res.status(403).json({ error: 'Applicants only.' })
+    const account = await Applicant.findOne({ email: actor.email }).select('_id').lean()
+    if (!account) return res.status(403).json({ error: 'Account unavailable.' })
+    res.set('Cache-Control', 'private, no-store')
+    res.json(await consistencyWaitlist.publicState(account._id))
+  } catch { res.status(503).json({ error: 'Document review status is unavailable. Please try again.' }) }
+})
 
 const requirementsDirectory = path.join(process.cwd(), 'server', 'uploads', 'employer-requirements')
 fs.mkdirSync(requirementsDirectory, { recursive: true })
@@ -653,7 +665,7 @@ function attentionCount(applicant) {
 // Recompute the account-level status from the latest version of each required document
 function recomputeVerificationStatus(applicant) {
   // Document/profile reads must not silently lift an admin restriction.
-  if (applicant.verificationStatus === 'restricted' || applicant.deletedAt) return
+  if (['restricted', 'waitlisted'].includes(applicant.verificationStatus) || applicant.consistencyDeclined || applicant.deletedAt) return
   const docs = applicant.verificationDocuments || {}
   const rejected = REQUIRED_DOC_KEYS.filter((key) => currentDocStatus(docs[key]) === 'rejected')
   if (rejected.length > 0) {
@@ -904,6 +916,34 @@ app.post('/api/signup/email-code/verify', async (req, res) => {
   }
 })
 
+app.post('/api/signup/check-documents', rateLimit({ windowMs: 60000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false }), applicantSignupUpload.fields([
+  { name: 'birthCertificate', maxCount: 1 }, { name: 'validId1Front', maxCount: 1 }, { name: 'validId1Back', maxCount: 1 }, { name: 'validId2Front', maxCount: 1 }, { name: 'validId2Back', maxCount: 1 },
+]), async (req, res) => {
+  // Advisory only: quality and declared values, never OCR or account decisions.
+  try {
+    const details = parseDocumentDetails(req.body?.verificationDetails)
+    let nsrp = {}
+    try { nsrp = JSON.parse(req.body?.nsrpAnswers || '{}') } catch { /* Missing typed details are advisory. */ }
+    const issues = []
+    for (const [docKey, fileKey, idType] of [['birthCertificate', 'birthCertificate', ''], ['validId1', 'validId1Front', req.body?.id1Type], ['validId2', 'validId2Front', req.body?.id2Type]]) {
+      const file = req.files?.[fileKey]?.[0]
+      if (!file && docKey === 'validId2' && !idType) continue
+      if (!file) { issues.push({ docKey, message: 'Choose a document file.' }); continue }
+      const checked = validateDeclaredDetails(details[docKey], { docKey, idType })
+      for (const message of Object.values(checked.errors)) issues.push({ docKey, message })
+      if (checked.warnings.includes('id_expired')) issues.push({ docKey, message: 'This ID may have expired. Choose a current ID or explain the difference.' })
+      const nsrpKey = { SSS: 'gsisSss', Passport: 'passportNo', 'Pag-IBIG': 'pagibig', 'PhilHealth ID': 'philhealth', 'TIN ID': 'tin' }[idType]
+      if (nsrpKey && nsrp[nsrpKey] && checked.details.number && String(nsrp[nsrpKey]).replace(/[\s-]/g, '').toUpperCase() !== checked.details.number) issues.push({ docKey, message: 'The ID number you entered may not match your NSRP. Please check your typed details.' })
+      if (idType && !req.files?.[`${docKey}Back`]?.length) issues.push({ docKey, message: 'If your ID has information on the back, add a photo of that side.' })
+      try {
+        const quality = await inspectDocument(file)
+        if (quality.warnings.some(w => ['blur', 'crop', 'dark', 'glare'].includes(w))) issues.push({ docKey, message: 'The photo may be blurry, cropped or difficult to read. Consider taking a clearer photo.' })
+      } catch { issues.push({ docKey, message: 'The file may be tiny, blank, or unreadable. Choose a clearer document.' }) }
+    }
+    res.set('Cache-Control', 'no-store'); res.json({ issues, advisory: true })
+  } catch { res.status(200).json({ advisory: true, issues: [{ docKey: 'document', message: 'The check is unavailable. You can still submit for PESO review.' }] }) }
+})
+
 app.post('/api/signup', applicantSignupUpload.fields([
   { name: 'nsrpAnswers', maxCount: 1 },
   { name: 'nsrpFile', maxCount: 1 },
@@ -972,6 +1012,7 @@ app.post('/api/signup', applicantSignupUpload.fields([
 
     const files = req.files || {}
     const fileFor = (key) => files[key]?.[0]
+    if (!BIRTH_COPY_TYPES.includes(parseDocumentDetails(req.body?.verificationDetails).birthCertificate?.copyType)) fieldErrors.birthCertificate = 'Select the birth certificate copy type.'
     if (!fileFor('birthCertificate')) fieldErrors.birthCertificate = 'Birth certificate is required.'
     if (!VALID_ID_TYPES.includes(id1Type) || !fileFor('validId1Front')) fieldErrors.validId1 = 'Choose a valid type and upload the front of Valid ID #1.'
     if (nsrpMode === 'upload') {
@@ -1188,14 +1229,7 @@ app.post('/api/signup', applicantSignupUpload.fields([
     await nsrpAutomation.process({ role: 'Applicant', accountId: user._id, ip: req.ip })
     // Refresh metadata after the atomic automation write; never save a stale user.
     user = await Applicant.findById(user._id)
-    {
-      const imageSettings = await nsrpAutomation.getSettings()
-      for (const slot of ['birthCertificate', 'validId1', 'validId2']) if (user.verificationDocuments?.[slot]?.versions?.length) enqueueVerification(async () => {
-        await processApplicantImages({ accountId: user._id, docKey: slot, version: 1, settings: imageSettings })
-        await verificationEngine.process({ role: 'Applicant', accountId: user._id, docKey: slot, ip: req.ip })
-        await verificationEngine.process({ role: 'Applicant', accountId: user._id, docKey: 'nsrpForm', ip: req.ip })
-      })
-    }
+    await scheduleConsistency(user._id, 'signup')
 
     // No link-verification email is sent: these accounts are verified by code.
     // The link-based flow (verify-email / resend) stays for older accounts.
@@ -1350,10 +1384,11 @@ app.get('/api/profile', async (req, res) => {
 // embedded. Returns a `cleanup` that removes the stored bytes if the caller's
 // save fails, so a failed write never leaves orphaned files behind.
 async function appendVerificationVersion(applicant, docKey, file, idType = '', sourceType) {
+  if (docKey !== 'supportingExplanation' && applicant._id) await consistencyWaitlist.assertSubmission(applicant._id, docKey)
   applicant.verificationDocuments = applicant.verificationDocuments || {}
   const slot = applicant.verificationDocuments[docKey] || { uploads: 0, versions: [] }
   const current = latestVersion(slot)
-  if (current?.status === 'approved' && docKey !== 'supportingExplanation') {
+  if (current?.status === 'approved' && docKey !== 'supportingExplanation' && !await consistencyWaitlist.canCorrect(applicant._id, docKey)) {
     const error = new Error(`${VERIFICATION_DOC_LABELS[docKey]} is already approved and locked.`)
     error.status = 409
     throw error
@@ -1364,8 +1399,14 @@ async function appendVerificationVersion(applicant, docKey, file, idType = '', s
     throw error
   }
   const versionNumber = (slot.versions?.length || 0) + 1
-  await storeDocumentFile(applicant._id, docKey, versionNumber, 'front', file)
-  const cleanup = () => DocumentFile.deleteOne({ applicant: applicant._id, slot: docKey, version: versionNumber, side: 'front' }).catch(() => {})
+  const reservation = docKey === 'supportingExplanation' ? null : await consistencyWaitlist.reserveSubmission(applicant._id, docKey)
+  applicant.$locals.consistencyReservation = reservation
+  try { await storeDocumentFile(applicant._id, docKey, versionNumber, 'front', file) }
+  catch (error) { await consistencyWaitlist.cancelReservation(applicant._id, reservation); throw error }
+  const cleanup = async () => {
+    await DocumentFile.deleteOne({ applicant: applicant._id, slot: docKey, version: versionNumber, side: 'front' }).catch(() => {})
+    await consistencyWaitlist.cancelReservation(applicant._id, reservation)
+  }
   if (current && (['pending', 'rejected', 'needs_resubmission'].includes(current.status) || docKey === 'supportingExplanation')) current.status = 'superseded'
   const version = {
     originalName: file.originalname,
@@ -1505,9 +1546,10 @@ app.post('/api/profile/verification-documents/:docKey', verificationUpload.singl
 
     // Ownership + account state checks: restricted accounts cannot upload
     if (applicant.verificationStatus === 'restricted') return res.status(403).json({ error: 'This account is restricted. Please contact PESO support.' })
-    if (currentDocStatus(applicant.verificationDocuments?.[docKey]) === 'approved') return res.status(409).json({ error: 'This document is approved and locked. Request a correction first.' })
+    if (currentDocStatus(applicant.verificationDocuments?.[docKey]) === 'approved' && !await consistencyWaitlist.canCorrect(applicant._id, docKey)) return res.status(409).json({ error: 'This document is approved and locked. Request a correction first.' })
 
     const declared = parseDocumentDetails(req.body?.verificationDetails)
+    if (docKey === 'birthCertificate' && !BIRTH_COPY_TYPES.includes(declared.copyType)) return res.status(422).json({ error: 'Select the birth certificate copy type.' })
     if (docKey !== 'nsrpForm' && (await nsrpAutomation.getSettings()).imageChecks) req.file.verificationReview = docKey === 'supportingExplanation' ? { quality: await inspectDocument(req.file) } : await prepareDocument(req.file, docKey, idType, declared, applicant.verificationDocuments?.[docKey === 'validId1' ? 'validId2' : 'validId1']?.versions?.at(-1)?.declaredDetails?.number, applicant.profile?.nsrp)
 
     const { slot, version, cleanup } = await appendVerificationVersion(applicant, docKey, req.file, idType, docKey === 'nsrpForm' ? 'uploaded' : undefined)
@@ -1520,11 +1562,7 @@ app.post('/api/profile/verification-documents/:docKey', verificationUpload.singl
 
     if (docKey === 'nsrpForm') await nsrpAutomation.process({ role: 'Applicant', accountId: applicant._id, ip: req.ip })
     await saveAuthorization(applicant._id, docKey, version.version, declared)
-    if (docKey !== 'nsrpForm') { const imageSettings = await nsrpAutomation.getSettings(); enqueueVerification(async () => {
-      await processApplicantImages({ accountId: applicant._id, docKey, version: version.version, settings: imageSettings })
-      await verificationEngine.process({ role: 'Applicant', accountId: applicant._id, docKey, ip: req.ip })
-      await verificationEngine.process({ role: 'Applicant', accountId: applicant._id, docKey: 'nsrpForm', ip: req.ip })
-    }) }
+    await scheduleConsistency(applicant._id, docKey, applicant.$locals.consistencyReservation)
 
     await notifyAdmins({
       type: 'document_resubmitted',
@@ -1551,7 +1589,7 @@ app.post('/api/profile/verification-documents/:docKey', verificationUpload.singl
           }
         } catch { console.error('[verification] upload exception recording unavailable') }
       }
-      return res.status(err.status).json({ error: err.message, fieldErrors: { [req.params.docKey]: err.message } })
+      return res.status(err.status).json({ code: err.code, error: err.message, fieldErrors: { [req.params.docKey]: err.message } })
     }
     console.error(err)
     res.status(500).json({ error: 'Server error' })
@@ -1586,6 +1624,7 @@ app.post('/api/profile/document-explanations/:docKey', verificationUpload.single
       $push: { [`${base}.verificationAudit`]: { action: 'explanation-submitted', reason: 'Applicant explanation submitted', by: String(applicant._id), at: new Date() } },
     })
     if (!updated.modifiedCount) return res.status(409).json({ error: 'The document changed. Please submit the explanation again.' })
+    await consistencyWaitlist.explanation(applicant._id)
     await notifyAdmins({ type: 'document_explanation', title: 'Document explanation submitted', message: 'An applicant submitted an explanation for PESO review.', link: '/verification-flagged', metadata: { applicantId: String(applicant._id) } })
     res.json({ ok: true, message: 'Your explanation was sent to PESO. You may continue using your account.' })
   } catch (error) { res.status(error.status || 503).json({ error: error.status ? error.message : 'Could not save your explanation. Please try again.' }) }
@@ -1635,7 +1674,7 @@ app.put('/api/profile/nsrp', async (req, res) => {
     const applicant = await Applicant.findOne({ email: decoded.email })
     if (!applicant) return res.status(404).json({ error: 'Applicant not found' })
     const currentNsrp = latestVersion(applicant.verificationDocuments?.nsrpForm)
-    if (currentNsrp?.status === 'approved') {
+    if (currentNsrp?.status === 'approved' && !await consistencyWaitlist.canCorrect(applicant._id, 'nsrpForm')) {
       return res.status(409).json({ code: 'NSRP_LOCKED', error: 'Your approved NSRP form is locked.' })
     }
 
@@ -1704,6 +1743,7 @@ app.put('/api/profile/nsrp', async (req, res) => {
       throw err
     }
     await nsrpAutomation.process({ role: 'Applicant', accountId: applicant._id, ip: req.ip })
+    await scheduleConsistency(applicant._id, 'nsrpForm', applicant.$locals.consistencyReservation)
     await notifyAdmins({
       type: 'applicant_registration_pending',
       title: 'Applicant NSRP updated',
@@ -1713,7 +1753,7 @@ app.put('/api/profile/nsrp', async (req, res) => {
     })
     return res.json({ ok: true, version: version.version, status: version.status })
   } catch (err) {
-    if (err.status) return res.status(err.status).json({ error: err.message })
+    if (err.status) return res.status(err.status).json({ code: err.code, error: err.message })
     console.error(err)
     return res.status(500).json({ error: 'The NSRP form could not be updated.' })
   }
@@ -1743,6 +1783,7 @@ app.get('/api/applicants/:id/verification-documents', async (req, res) => {
     }
     res.json({
       documents: summarizeVerificationDocuments(applicant, { withUrls: true, includeHistory: decoded.role === 'Admin' }),
+      consistency: applicant.deletedAt ? null : await consistencyWaitlist.publicState(applicant._id),
       verificationStatus: applicant.verificationStatus,
       verificationReason: applicant.verificationReason,
       attentionCount: attentionCount(applicant),
@@ -1926,6 +1967,14 @@ app.put('/api/profile', async (req, res) => {
     const decoded = jwt.verify(token, jwtSecret)
     const { profile, companyName, contactName, phone, website } = req.body
     if (!profile) return res.status(400).json({ error: 'Missing profile' })
+    let changedIdentity = false, identityAccount
+    if (decoded.role === 'Applicant') {
+      identityAccount = await Applicant.findOne({ email: decoded.email }).lean()
+      changedIdentity = ['firstName', 'lastName', 'middleName', 'suffix', 'dob', 'nsrp'].some(key => profile[key] !== undefined && JSON.stringify(profile[key]) !== JSON.stringify(identityAccount?.profile?.[key]))
+      // A profile-only edit must not retroactively screen an approved account.
+      if (identityAccount?.verificationStatus === 'approved') changedIdentity = false
+      if (changedIdentity) await consistencyWaitlist.assertSubmission(identityAccount._id, 'nsrpForm')
+    }
     if (decoded.role === 'Applicant' && profile.skills !== undefined) {
       if (!Array.isArray(profile.skills) || profile.skills.some(skill => typeof skill !== 'string')) return res.status(422).json({ error: 'Choose skills from the list.', fieldErrors: { skills: 'Skills must be a list of labels.' } })
       for (const skill of profile.skills) {
@@ -1954,8 +2003,12 @@ app.put('/api/profile', async (req, res) => {
         return res.status(413).json({ error: 'Image is too large. Please use an image under 2 MB.' })
       }
     }
-    const updated = await updateUserProfileByEmail(decoded.email, profile)
+    const profileReservation = changedIdentity ? await consistencyWaitlist.reserveSubmission(identityAccount._id, 'nsrpForm') : null
+    let updated
+    try { updated = await updateUserProfileByEmail(decoded.email, profile) }
+    catch (error) { if (profileReservation) await consistencyWaitlist.cancelReservation(identityAccount._id, profileReservation); throw error }
     if (!updated) return res.status(404).json({ error: 'Not found' })
+    if (changedIdentity) await scheduleConsistency(identityAccount._id, 'basic', profileReservation)
 
     // Persist editable top-level employer fields as well
     if (updated.type === 'Employer') {
@@ -1970,6 +2023,7 @@ app.put('/api/profile', async (req, res) => {
     }
     res.json({ profile: updated.user.profile })
   } catch (err) {
+    if (err.status) return res.status(err.status).json({ code: err.code, error: err.message })
     console.error(err)
     res.status(500).json({ error: 'Server error' })
   }
@@ -4132,6 +4186,7 @@ app.put('/api/applicants/:id/verification', async (req, res) => {
     const applicant = await Applicant.findById(req.params.id)
     if (!applicant) return res.status(404).json({ error: 'Applicant not found' })
     if (applicant.deletedAt) return res.status(409).json({ error: 'This account is closed. A new registration is required.' })
+    if (applicant.verificationStatus === 'waitlisted' && status !== 'restricted') return res.status(409).json({ code: 'WAITLIST_REVIEW_REQUIRED', error: 'Use the waitlist review actions with a reason and document comparison confirmation.' })
 
     const reviewReason = typeof reason === 'string' ? reason.trim() : ''
     if (unrestrict) {
@@ -4441,6 +4496,7 @@ export async function purgeExpiredVerificationDocuments() {
   }
 }
 if (!isTestEnv) {
+  setInterval(() => consistencyWaitlist.daily().catch(() => console.error('[verification] waitlist reminder unavailable')), 60 * 60 * 1000).unref()
   setInterval(() => verificationEngine.digest(), 24 * 60 * 60 * 1000).unref()
   verificationEngine.digest()
   setInterval(purgeExpiredVerificationDocuments, 24 * 60 * 60 * 1000).unref()

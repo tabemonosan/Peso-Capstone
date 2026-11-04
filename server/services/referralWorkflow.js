@@ -39,6 +39,7 @@ export function createReferralWorkflow({ Applicant, Employer, JobPosting, JobApp
   async function checkEligibility({ email, jobId, manual = false, sharingConsent }) {
     if (!mongoose.isValidObjectId(jobId)) fail('JOB_UNAVAILABLE', 'This job is no longer accepting applications.')
     const applicant = await loadApplicant(email)
+    if (applicant?.verificationStatus === 'waitlisted') fail('APPLICANT_WAITLISTED', 'Your account needs a review by PESO staff. Open My Documents to correct or explain a difference.', 403)
     if (!applicant || applicant.deletedAt || applicant.verificationStatus === 'restricted' || applicant.suspendedAt || applicant.applyingSuspendedAt) fail('APPLICANT_SUSPENDED', 'This account cannot apply right now. Please contact PESO.', 403)
     if (!applicant.emailVerified) fail('EMAIL_NOT_VERIFIED', 'Please verify your email before applying.', 403)
     if (applicant.verificationStatus !== 'approved') fail('APPLICANT_NOT_VERIFIED', 'PESO must approve your registration and documents before you apply.', 403)

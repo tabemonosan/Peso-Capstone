@@ -1,12 +1,13 @@
 import { Router } from 'express'
 import mongoose from 'mongoose'
 
-export function createNsrpAutomationRouter({ automation, authenticate, review, Admin }) {
+export function createNsrpAutomationRouter({ automation, authenticate, review, Admin, waitlist }) {
   const router = Router()
-  router.use((req, res, next) => {
+  router.use(async (req, res, next) => {
     try {
       const user = authenticate(req)
       if (user?.role !== 'Admin') return res.status(403).json({ error: 'Admins only' })
+      if (Admin && !await Admin.exists({ email: user.email })) return res.status(403).json({ error: 'Admins only' })
       req.nsrpAdmin = user
       next()
     } catch { res.status(403).json({ error: 'Admins only' }) }
@@ -15,7 +16,11 @@ export function createNsrpAutomationRouter({ automation, authenticate, review, A
     try { res.json(await automation.getSettings()) } catch { res.status(503).json({ error: 'Settings unavailable' }) }
   })
   router.put('/settings', async (req, res) => {
-    try { res.json(await automation.updateSettings(req.body || {}, req.nsrpAdmin.email)) }
+    try {
+      const result = await automation.updateSettings(req.body || {}, req.nsrpAdmin.email)
+      if (req.body?.waitlistOnMismatch === false && waitlist) await waitlist.disable(req.nsrpAdmin)
+      res.json(result)
+    }
     catch (err) { res.status(400).json({ error: err.message }) }
   })
   router.get('/decisions', async (req, res) => {

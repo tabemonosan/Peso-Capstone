@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import AdminWaitlistActions from './AdminWaitlistActions'
 import { API_URL } from '../config'
 import { fetchWithTimeout } from '../utils/fetchWithTimeout'
 import { DOCUMENT_LABELS, openFlags } from '../../shared/verification.js'
@@ -14,23 +15,24 @@ const labels = { approve: 'Approve', resubmit: 'Request resubmission', decline: 
 
 export function VerificationQueueBadge({ token }) {
   const [count, setCount] = useState(0)
+  const [waitlisted, setWaitlisted] = useState(0)
   useEffect(() => {
     let active = true
     const load = async () => {
       try {
         const response = await fetch(`${API_URL}/api/admin/document-verification/counts`, { headers: { Authorization: `Bearer ${token}` } })
-        if (response.ok) { const body = await response.json(); if (active) setCount(body.flagged || 0) }
+        if (response.ok) { const body = await response.json(); if (active) { setCount(body.flagged || 0); setWaitlisted(body.waitlisted || 0) } }
       } catch { /* The queue displays its own availability error. */ }
     }
     load(); const timer = setInterval(load, 30000)
     window.addEventListener('verification-reviewed', load)
     return () => { active = false; clearInterval(timer); window.removeEventListener('verification-reviewed', load) }
   }, [token])
-  return count > 0 ? <span aria-label={`${count} documents flagged for review`} className="ml-auto rounded-full border border-amber-300 bg-amber-50 px-2 text-xs text-amber-900">{count}</span> : null
+  return <>{count > 0 && <span aria-label={`${count} documents flagged for review`} className="ml-auto rounded-full border border-amber-300 bg-amber-50 px-2 text-xs text-amber-900">{count}</span>}{waitlisted > 0 && <span aria-label={`${waitlisted} waitlisted accounts`} className="ml-1 rounded-full border border-amber-300 bg-white px-2 text-xs text-amber-900">{waitlisted} waitlisted</span>}</>
 }
 
 export default function AdminDocumentVerification({ token, queue = 'flagged' }) {
-  const [filters, setFilters] = useState({ docKey: '', from: '', to: '', checked: '', sort: 'at', order: 'asc' })
+  const [filters, setFilters] = useState({ docKey: '', from: '', to: '', checked: '', sort: 'at', order: 'asc', waitlisted: '' })
   const [page, setPage] = useState(1)
   const [data, setData] = useState({ items: [], total: 0, limit: 25 })
   const [error, setError] = useState('')
@@ -74,6 +76,7 @@ export default function AdminDocumentVerification({ token, queue = 'flagged' }) 
     <h1 className="text-xl font-semibold">{queue === 'auto' ? 'Auto-approved' : 'Flagged for review'}</h1>
     <p className="mt-1 text-sm text-slate-600">Checks assess consistency and evidence, not authenticity. Review reasons and notes stay with PESO.</p>
     <div className="my-4 flex flex-wrap gap-3">
+      {queue !== 'auto' && <label>Account status<select className={`${control} block`} value={filters.waitlisted} onChange={event => changeFilter('waitlisted', event.target.value)}><option value="">All accounts</option><option value="true">Waitlisted</option></select></label>}
       <label>Document type<select className={`${control} block`} value={filters.docKey} onChange={e => changeFilter('docKey', e.target.value)}><option value="">All types</option>{Object.entries(DOCUMENT_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
       {['from', 'to'].map(key => <label key={key}>{key === 'from' ? 'From date' : 'To date'}<input type="date" className={`${control} block`} value={filters[key]} onChange={e => changeFilter(key, e.target.value)} /></label>)}
       {queue === 'auto' && <label>Admin confirmation<select className={`${control} block`} value={filters.checked} onChange={e => changeFilter('checked', e.target.value)}><option value="">Checked and unchecked</option><option value="true">Checked</option><option value="false">Unchecked</option></select></label>}
@@ -93,6 +96,7 @@ export default function AdminDocumentVerification({ token, queue = 'flagged' }) 
       {queue !== 'auto' && item.overdue && <p className="text-sm font-semibold text-amber-900">Waiting at least 7 days</p>}
       <div className="my-2 flex flex-wrap gap-2">{item.reasons.map(reason => <span key={reason} className="rounded-full border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-900">{reason}</span>)}</div>
       {item.adminConfirmedAt && <p className="text-sm text-green-800">Checked by {item.adminConfirmedBy}</p>}
+      <AdminWaitlistActions item={item} token={token} onChanged={load} />
       <div className="flex flex-wrap gap-2">
         <button type="button" className={control} onClick={() => setSelected(item)}>Review details</button>
         {item.role === 'Applicant' && <button type="button" className={control} onClick={() => setViewer({ id: item.accountId, email: item.email })}>View documents</button>}
