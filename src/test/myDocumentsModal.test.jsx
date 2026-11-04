@@ -33,6 +33,17 @@ const docs = [
 ]
 
 describe('MyDocumentsModal file viewers', () => {
+  it('lets under-review applicants edit pending NSRP details and replace pending documents', () => {
+    render(<MyDocumentsModal token="token" onClose={() => {}} info={{ verificationStatus: 'under_review', nsrpData: { firstName: 'Sample', surname: 'Example' }, documents: docs.map(doc => ({ ...doc, uploadsRemaining: 4 })) }} />)
+    expect(screen.getByRole('button', { name: 'Update NSRP' })).toBeEnabled()
+    const birth = screen.getByText('Birth Certificate').closest('li')
+    expect(within(birth).getByRole('button', { name: 'Upload', exact: true })).toBeInTheDocument()
+    expect(within(birth).getByLabelText(/^Birth certificate copy type/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Update NSRP' }))
+    expect(screen.getByRole('heading', { name: 'Update NSRP' })).toBeInTheDocument()
+    expect(screen.getByLabelText(/^Surname/i)).toHaveValue('Example')
+  })
+
   it('keeps document cards closed until the applicant opens them', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => ({ verificationStatus: 'under_review', documents: docs }) })
     render(<MyDocumentsPage applicantId="applicant1" token="token" />)

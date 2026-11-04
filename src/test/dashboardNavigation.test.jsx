@@ -14,6 +14,8 @@ function mockRole(role, overrides = {}) {
     let data = []
     if (url.endsWith('/api/login')) data = { token: 'token', user }
     else if (url.endsWith('/api/profile')) data = user
+    else if (url.endsWith('/api/profile/review-status')) data = overrides.reviewDetails || { status: user.verificationStatus, checking: false, message: 'Your registration is awaiting PESO review.', documents: [] }
+    else if (url.includes('/verification-documents')) data = overrides.documentInfo || { verificationStatus: user.verificationStatus, documents: [] }
     else if (url.endsWith('/api/dashboard')) data = { ...dashboard(role), stats: { ...dashboard(role).stats, verificationStatus: user.verificationStatus } }
     else if (url.includes('/api/admin/employment-updates')) data = { items: [], total: 0 }
     else if (url.includes('/api/notifications')) data = { items: [], unreadCount: 0 }
@@ -23,6 +25,17 @@ function mockRole(role, overrides = {}) {
   }))
 }
 describe('one dashboard per role', () => {
+  it('shows why an applicant is under review on Home and opens pending NSRP corrections directly', async () => {
+    mockRole('Applicant', { verificationStatus: 'under_review', reviewDetails: { status: 'under_review', documents: [{ docKey: 'nsrpForm', label: 'NSRP Registration Form', reason: 'Your uploaded NSRP form needs a PESO staff review before it can be verified.', canUpdate: true, uploadsRemaining: 4 }] }, documentInfo: { verificationStatus: 'under_review', nsrpData: { firstName: 'Sample', surname: 'Example' }, documents: [{ docKey: 'nsrpForm', label: 'NSRP Registration Form', status: 'pending', sourceType: 'generated', uploadsRemaining: 4 }] } })
+    localStorage.setItem('peso-token', 'token')
+    localStorage.setItem('peso-active-view', 'home')
+    render(<App />)
+    expect(await screen.findByText(/uploaded NSRP form needs a PESO staff review/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Review and update documents' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByRole('button', { name: 'Update NSRP' })).toBeEnabled()
+  })
+
   it('opens the applicant reputation window without replacing the existing Reviews page', async () => {
     mockRole('Applicant')
     localStorage.setItem('peso-token', 'token')

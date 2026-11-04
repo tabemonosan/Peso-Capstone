@@ -33,6 +33,7 @@ import { inspectDocument } from './services/imageQuality.js'
 import { validateDeclaredDetails, BIRTH_COPY_TYPES } from '../shared/documentImage.js'
 import { createVerificationEngine } from './services/verificationEngine.js'
 import { createConsistencyWaitlist } from './services/consistencyWaitlist.js'
+import { applicantReviewSummary } from './services/applicantReview.js'
 import { applicantSkillQuery } from './utils/jobSkillMatching.js'
 import { jobSkillMatchCount } from '../shared/jobSkills.js'
 import { rankEmployerReferrals } from './services/applicantRanking.js'
@@ -393,6 +394,18 @@ app.get('/api/profile/consistency', async (req, res) => {
     res.set('Cache-Control', 'private, no-store')
     res.json(await consistencyWaitlist.publicState(account._id))
   } catch { res.status(503).json({ error: 'Document review status is unavailable. Please try again.' }) }
+})
+app.get('/api/profile/review-status', async (req, res) => {
+  try {
+    const actor = authenticateRequest(req)
+    if (actor?.role !== 'Applicant') return res.status(403).json({ error: 'Applicants only.' })
+    let account = await Applicant.findOne({ email: actor.email }).lean()
+    if (!account || account.deletedAt) return res.status(403).json({ error: 'Account unavailable.' })
+    const consistency = await consistencyWaitlist.publicState(account._id)
+    account = await Applicant.findById(account._id).lean()
+    res.set('Cache-Control', 'private, no-store')
+    res.json(await applicantReviewSummary(account, nsrpAutomation, consistency))
+  } catch { res.status(503).json({ error: 'Review details are temporarily unavailable. You can still open My Documents.' }) }
 })
 
 const requirementsDirectory = path.join(process.cwd(), 'server', 'uploads', 'employer-requirements')
@@ -1781,9 +1794,11 @@ app.get('/api/applicants/:id/verification-documents', async (req, res) => {
         if (decision?.report?.findings) current.findings = decision.report.findings.map(f => ({ ruleId: f.code, severity: f.severity, fieldGroup: 'registration', evidence: 'self-declared', status: decision.dismissals?.some(d => d.code === f.code) ? 'dismissed' : 'open' }))
       }
     }
+    const consistency = applicant.deletedAt ? null : await consistencyWaitlist.publicState(applicant._id)
     res.json({
       documents: summarizeVerificationDocuments(applicant, { withUrls: true, includeHistory: decoded.role === 'Admin' }),
-      consistency: applicant.deletedAt ? null : await consistencyWaitlist.publicState(applicant._id),
+      consistency,
+      review: applicant.deletedAt ? null : await applicantReviewSummary(applicant, nsrpAutomation, consistency),
       verificationStatus: applicant.verificationStatus,
       verificationReason: applicant.verificationReason,
       attentionCount: attentionCount(applicant),

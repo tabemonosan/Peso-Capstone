@@ -137,7 +137,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
           <h2 id="my-documents-title" className="text-xl font-bold">Verification documents</h2>
           <p className="mt-1 text-sm font-semibold text-cyan-800">Submitted to PESO</p>
           <p id="my-documents-description" className="mt-1 text-sm text-slate-600">
-            PESO reviews these documents for registration and verification. Your NSRP form and verification documents are not shared with employers. Wait for feedback on pending submissions; resubmit documents that need correction.
+            PESO reviews these documents for registration and verification. Your NSRP form and verification documents are not shared with employers. {info.verificationStatus === 'under_review' ? 'You can correct pending documents and NSRP details while waiting. Updates are sent to PESO for review.' : 'Wait for feedback on pending submissions; resubmit documents that need correction.'}
           </p>
           {info.verificationStatus && (
             <p className="mt-1 text-sm text-slate-600">
@@ -162,7 +162,8 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
           const relevant = (info.consistency?.issues || []).filter(issue => issue.chancesLeft !== null && (issue.document === doc.docKey || doc.docKey === 'nsrpForm'))
           const flagged = info.consistency?.waitlisted && relevant.length > 0
           const hasChances = !flagged || relevant.every(issue => issue.chancesLeft > 0)
-          const canReplace = (["rejected", "needs_resubmission", "missing"].includes(doc.status) || flagged) && doc.uploadsRemaining !== 0 && hasChances
+          const pendingEditable = info.verificationStatus === 'under_review' && doc.status === 'pending'
+          const canReplace = (["rejected", "needs_resubmission", "missing"].includes(doc.status) || flagged || pendingEditable) && doc.uploadsRemaining !== 0 && hasChances
           const locked = doc.status === "approved" && !flagged
           return (
             <li key={doc.docKey} className="rounded-xl bg-slate-50 p-3 text-sm">
@@ -213,7 +214,8 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
                   PESO feedback: {doc.latest.reviewReason}
                 </p>
               )}
-              {doc.status === 'pending' && <p className="mt-2 text-xs text-amber-800">Submitted for PESO review. Please wait for feedback before resubmitting.</p>}
+              {doc.status === 'pending' && <p className="mt-2 text-xs text-amber-800">{pendingEditable ? 'Waiting for PESO review. You can correct your NSRP or submit an updated copy while this document is pending.' : 'Submitted for PESO review. Please wait for feedback before resubmitting.'}</p>}
+              {info.review?.documents?.find(item => item.docKey === doc.docKey)?.reason && <p className="mt-2 text-xs text-slate-700">{info.review.documents.find(item => item.docKey === doc.docKey).reason}</p>}
               {['nsrpForm', 'birthCertificate', 'validId1', 'validId2'].includes(doc.docKey) && doc.latest && <button type="button" onClick={() => setExplanationDoc(doc.docKey)} className="mt-2 rounded border border-slate-300 bg-white px-3 py-1 text-xs text-cyan-800">Explain a difference</button>}
               {locked && <p className="mt-2 text-xs text-green-700">Approved by PESO. You can view this document or request a correction if information changes.</p>}
               {doc.correctionRequest && <p className="mt-2 rounded-lg border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">Correction requested: {doc.correctionRequest.reason}. Waiting for PESO review.</p>}

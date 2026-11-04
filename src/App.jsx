@@ -49,6 +49,7 @@ import { usePagination, useDebouncedValue } from "./hooks/usePagination"
 import { useSort } from "./hooks/useSort"
 import { sortItems } from "./utils/sortItems"
 import RoleDashboard from "./components/AllDashboard"
+import ApplicantReviewStatus from './components/ApplicantReviewStatus'
 import AdminReferralsPage, { AutomaticReferralBanner } from './components/AdminReferralsPage'
 
 const focusJobError = (form) => requestAnimationFrame(() => {
@@ -2233,10 +2234,11 @@ const toggleSkill = (selected, skill) => {
                   </div>
                 </section>
               )}
-              <RoleDashboard token={getToken()} applicantOverview={activeRole === 'Applicant' ? { openJobs: availableJobs.length, notifications: notifTotal } : undefined} onNavigate={(target) => {
+              <RoleDashboard key={activeRole === 'Applicant' ? currentUser?.verificationStatus : activeRole} token={getToken()} applicantOverview={activeRole === 'Applicant' ? { openJobs: availableJobs.length, notifications: notifTotal } : undefined} onNavigate={(target) => {
                 if (activeRole === 'Admin' && target === 'employment-updates') setHiringUpdates({})
                 setActiveView(target)
               }} />
+              {activeRole === 'Applicant' && ['under_review', 'waitlisted'].includes(currentUser?.verificationStatus) && <ApplicantReviewStatus token={getToken()} onManageDocuments={() => { setActiveView('profile'); setShowProfileDocuments(true) }} />}
               {activeRole === 'Applicant' && applicantApproved && (
                 <section className="applicant-home-guide" aria-labelledby="applicant-home-guide-title">
                   <div className="applicant-home-guide-icon"><PortalNavIcon name="verification" /></div>
