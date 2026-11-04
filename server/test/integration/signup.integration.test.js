@@ -416,12 +416,12 @@ describe('PUT /api/profile/nsrp (Update NSRP)', () => {
     expect(applicant.profile.skills).toEqual(['Auto Mechanic', 'Plumbing'])
   }, 60000)
 
-  it('rejects updating an approved NSRP (409)', async () => {
+  it('rejects changing the NSRP reference of a verified account (409)', async () => {
     const res = await signup('locked@example.com')
     expect(res.status).toBe(200)
     await Applicant.updateOne(
       { email: 'locked@example.com' },
-      { $set: { 'verificationDocuments.nsrpForm.versions.0.status': 'approved' } },
+      { $set: { 'verificationDocuments.nsrpForm.versions.0.status': 'approved', 'verificationDocuments.birthCertificate.versions.0.status': 'approved', 'verificationDocuments.validId1.versions.0.status': 'approved', verificationStatus: 'approved' } },
     )
     const update = await request(app)
       .put('/api/profile/nsrp')

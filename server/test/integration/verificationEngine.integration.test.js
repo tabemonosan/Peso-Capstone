@@ -62,11 +62,26 @@ it('rechecks the kill switch immediately before writing an approval', async () =
  await run(user, 'birthCertificate', instance)
  expect((await saved(user)).status).toBe('pending'); expect(notify).not.toHaveBeenCalled()
 })
+it('does not approve identity evidence against an NSRP reference replaced during the check', async () => {
+ const user = await account({}, 'birthCertificate', { verificationDocuments: { birthCertificate: { versions: [version()] }, nsrpForm: { versions: [version({ sourceType: 'generated' })] } } })
+ const instance = createVerificationEngine({ Applicant, Employer, EmployerRequest, automation, notify, notifyAdmins, recomputeApplicant: async () => {}, beforeApproval: async () => {
+  await Applicant.updateOne({ _id: user._id }, { $push: { 'verificationDocuments.nsrpForm.versions': version({ version: 2, sourceType: 'generated' }) } })
+ } })
+ await run(user, 'birthCertificate', instance)
+ expect(await saved(user)).toMatchObject({ status: 'pending', reviewReasons: ['Registration reference changed'] })
+ expect(notify).not.toHaveBeenCalled()
+})
 it('never approves resubmissions, uploaded NSRP forms, or accounts with pending explanations', async () => {
- for (const [extra, docKey, expected] of [[{ version: 2 }, 'birthCertificate', 'Resubmission'], [{ sourceType: 'uploaded' }, 'nsrpForm', 'Uploaded file'], [{ explanation: { status: 'submitted' } }, 'birthCertificate', 'Explanation']]) {
+ for (const [extra, docKey, expected] of [[{ version: 2 }, 'birthCertificate', 'Resubmission'], [{ explanation: { status: 'submitted' } }, 'birthCertificate', 'Explanation']]) {
   const user = await account(extra, docKey); await run(user, docKey)
   expect((await saved(user, docKey)).reviewReasons).toContain(expected)
  }
+})
+it.each(['uploaded', 'generated'])('does not independently approve or sample the %s NSRP reference', async sourceType => {
+ const user = await account({ sourceType }, 'nsrpForm'); await run(user, 'nsrpForm')
+ expect((await saved(user, 'nsrpForm')).status).toBe('pending')
+ expect(await automation.decisions().countDocuments({ accountId: user._id })).toBe(0)
+ expect(notify).not.toHaveBeenCalled()
 })
 it('provider errors leave status pending and emit only a fixed redacted message', async () => {
  const log = vi.spyOn(console, 'error').mockImplementation(() => {})

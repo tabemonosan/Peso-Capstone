@@ -7,7 +7,7 @@
 import 'dotenv/config'
 import mongoose from 'mongoose'
 import { Applicant } from '../models/collections.js'
-import { REQUIRED_DOC_KEYS } from '../../shared/verificationDocs.js'
+import { IDENTITY_DOC_KEYS } from '../../shared/verificationDocs.js'
 
 const dryRun = process.argv.includes('--dry-run')
 
@@ -23,11 +23,12 @@ let underReview = 0
 let unchanged = 0
 
 for (const applicant of applicants) {
+  if (['restricted', 'waitlisted'].includes(applicant.verificationStatus) || applicant.consistencyDeclined || applicant.deletedAt) { unchanged += 1; continue }
   const docs = applicant.verificationDocuments || {}
-  const rejected = REQUIRED_DOC_KEYS.filter((key) => statusOf(docs[key]) === 'rejected')
+  const rejected = IDENTITY_DOC_KEYS.filter((key) => statusOf(docs[key]) === 'rejected')
   let next
   if (rejected.length > 0) next = 'declined'
-  else if (REQUIRED_DOC_KEYS.every((key) => statusOf(docs[key]) === 'approved')) next = 'approved'
+  else if (latestVersion(docs.nsrpForm) && IDENTITY_DOC_KEYS.every((key) => statusOf(docs[key]) === 'approved')) next = 'approved'
   else next = 'under_review'
 
   if (next === applicant.verificationStatus) {

@@ -13,6 +13,8 @@ const safeFinding = f => ({ ruleId: String(f.ruleId || f.code || 'provider_incon
 export function createVerificationEngine({ Applicant, Employer, EmployerRequest, automation, notify, notifyAdmins, recomputeApplicant, random = () => crypto.randomInt(1000000) / 1000000, providers, beforeApproval } = {}) {
   const decisions = () => automation.decisions()
   async function process({ role, accountId, docKey, ip, checkToken }) {
+    // Form 1 supplies the comparison baseline; it cannot verify itself.
+    if (role === 'Applicant' && docKey === 'nsrpForm') return
     const key = ['nsrpForm', 'employerNsrpForm'].includes(docKey) ? `${role}:${accountId}:` : `${role}:${accountId}:${docKey}:`
     let decisionKey, approved = false, locked = false
     try {
@@ -90,10 +92,12 @@ export function createVerificationEngine({ Applicant, Employer, EmployerRequest,
           const freshSettings = await automation.getSettings(), freshAccount = await accountModel.findById(accountId).select('+holdAutoApproval').lean()
           const freshVersions = role === 'Applicant' ? Object.values(freshAccount.verificationDocuments || {}).map(slot => slot.versions?.at(-1)).filter(Boolean) : allVersions
           reason = decisionReason({ ...context, settings: freshSettings, account: { ...freshAccount, employerType: record.registrationDetails?.employerType }, findings: [...findings, ...freshVersions.flatMap(v => v.findings || []).map(safeFinding)], pendingExplanation: freshVersions.some(v => ['requested', 'submitted'].includes(v.explanation?.status)) })
+          if (role === 'Applicant' && (account.verificationDocuments?.nsrpForm?.versions?.length || 0) !== (freshAccount.verificationDocuments?.nsrpForm?.versions?.length || 0)) reason = 'Registration reference changed'
         }
         if (!reason) {
           const revision = document.reviewRevision || 0
           const match = { _id: record._id, [path]: { $size: 1 }, [`${base}.version`]: 1, [`${base}.status`]: 'pending', $or: [{ [`${base}.reviewRevision`]: revision }, ...(revision === 0 ? [{ [`${base}.reviewRevision`]: { $exists: false } }] : [])] }
+          if (role === 'Applicant' && account.verificationDocuments?.nsrpForm?.versions?.length) match['verificationDocuments.nsrpForm.versions'] = { $size: account.verificationDocuments.nsrpForm.versions.length }
           if (checkToken) Object.assign(match, { 'consistencyState.token': checkToken, 'consistencyState.status': 'checking' })
           const set = { [`${base}.status`]: 'approved', [`${base}.autoApproved`]: true, [`${base}.approvedBy`]: 'system', [`${base}.reviewedBy`]: REVIEWER_LABELS.system, [`${base}.reviewedAt`]: at, [`${base}.provider`]: providerResult.provider, [`${base}.assurance`]: providerResult.assurance, [`${base}.rulesVersion`]: DECISION_RULES_VERSION, [`${base}.autoApprovalSummary`]: [{ ruleId: settings.minimumEvidence === 'none' ? 'typed-only-override' : verifiedQr ? 'verified-qr' : 'eligible-evidence', level: 'clear' }], [`${base}.reviewReasons`]: [] }
           if (role === 'Employer') set['requirementsFile.status'] = 'approved'

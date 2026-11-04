@@ -1,7 +1,7 @@
 // Shared vocabulary. Findings contain rule identifiers, never extracted values.
 import { VERIFICATION_DOC_KEYS, VERIFICATION_DOC_LABELS } from './verificationDocs.js'
 import { WAITLIST_DEFAULTS } from './consistencyWaitlist.js'
-export const VERIFICATION_RULES_VERSION = '2026-11-03.5'
+export const VERIFICATION_RULES_VERSION = '2026-11-04.2'
 export const DOCUMENT_KEYS = [...VERIFICATION_DOC_KEYS, 'employerNsrpForm']
 export const DOCUMENT_STATUSES = ['pending', 'approved', 'rejected', 'needs_resubmission', 'superseded']
 export const FINDING_SEVERITIES = ['info', 'warning', 'critical']

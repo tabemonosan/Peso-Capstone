@@ -21,7 +21,7 @@ import path from 'path'
 import { createReport } from 'docx-templates'
 import { Applicant, Employer, Admin, JobTitle, Notification, Referral, HireReport, Rating, DocumentFile, EmailCode, EmailCodeSend, UsedEmailProof, findUserByEmail, emailTakenAcrossRoles, createUserInRole, updateUserProfileByEmail, applicantFullName, applicantDisplayName } from './models/collections.js'
 import { sendEmail, sendVerificationEmail, initMailer } from './mailer.js'
-import { createNsrpAutomation, SYSTEM_REVIEWER } from './services/nsrpAutomation.js'
+import { createNsrpAutomation } from './services/nsrpAutomation.js'
 import { createNsrpAutomationRouter } from './routes/nsrpAutomation.js'
 import { verificationVersionFields } from './models/verification.js'
 import { createDocumentVerification } from './services/documentVerification.js'
@@ -76,7 +76,8 @@ import { storeDocumentFile, loadDocumentFile, deleteApplicantDocumentFiles } fro
 import { redactPath, redactString } from './utils/redact.js'
 // Document slot keys/labels are shared with the frontend; the resume is
 // optional and not part of REQUIRED_DOC_KEYS.
-import { VERIFICATION_DOC_KEYS, REQUIRED_DOC_KEYS, VERIFICATION_DOC_LABELS } from '../shared/verificationDocs.js'
+import { VERIFICATION_DOC_KEYS, REQUIRED_DOC_KEYS, IDENTITY_DOC_KEYS, VERIFICATION_DOC_LABELS, nsrpReferenceLocked } from '../shared/verificationDocs.js'
+import { reopenIdentityDocuments } from './services/nsrpReference.js'
 import { baseApprovedJobFilter, buildJobFilter, countJobFacets } from './utils/jobFilters.js'
 import { EMPLOYER_OUTCOMES, APPLICANT_OUTCOMES, outcomeLabel, publicApplicationHistory } from '../shared/employmentReporting.js'
 
@@ -381,7 +382,7 @@ export const nsrpAutomation = createNsrpAutomation({ Applicant, Employer, Employ
 export const verificationEngine = createVerificationEngine({ Applicant, Employer, EmployerRequest, automation: nsrpAutomation, notify, notifyAdmins, recomputeApplicant: refreshApplicantVerification })
 nsrpAutomation.attachEngine(verificationEngine)
 export const consistencyWaitlist = createConsistencyWaitlist({ Applicant, automation: nsrpAutomation, notify, notifyAdmins, verifyDocument: params => verificationEngine.process(params) })
-const scheduleConsistency = (id, docKey, reservation) => consistencyWaitlist.begin(id, docKey, reservation).catch(() => console.error('[verification] consistency check unavailable; manual review required'))
+const scheduleConsistency = (id, docKey, reservation, ip) => consistencyWaitlist.begin(id, docKey, reservation, ip).catch(() => console.error('[verification] consistency check unavailable; manual review required'))
 app.use('/api/admin/nsrp-automation', createNsrpAutomationRouter({ automation: nsrpAutomation, authenticate: authenticateRequest, Admin, waitlist: consistencyWaitlist, review: (...args) => documentVerification.act(...args) }))
 export const documentVerification = createDocumentVerification({ Applicant, Employer, EmployerRequest, automation: nsrpAutomation, notify, recomputeApplicant: refreshApplicantVerification })
 app.use('/api/admin/document-verification', createDocumentVerificationRouter({ service: documentVerification, authenticate: authenticateRequest, automation: nsrpAutomation, Admin, Applicant, waitlist: consistencyWaitlist }))
@@ -401,6 +402,7 @@ app.get('/api/profile/review-status', async (req, res) => {
     if (actor?.role !== 'Applicant') return res.status(403).json({ error: 'Applicants only.' })
     let account = await Applicant.findOne({ email: actor.email }).lean()
     if (!account || account.deletedAt) return res.status(403).json({ error: 'Account unavailable.' })
+    await refreshApplicantVerification(account._id)
     const consistency = await consistencyWaitlist.publicState(account._id)
     account = await Applicant.findById(account._id).lean()
     res.set('Cache-Control', 'private, no-store')
@@ -635,6 +637,8 @@ function summarizeVerificationDocuments(applicant, { withUrls = false, includeHi
       sourceType: key === 'nsrpForm' ? latest?.sourceType || undefined : undefined,
       idType: slot?.idType || undefined,
       status: currentDocStatus(slot), // missing | pending | approved | rejected
+      referenceOnly: key === 'nsrpForm',
+      locked: key === 'nsrpForm' ? nsrpReferenceLocked(applicant) : currentDocStatus(slot) === 'approved',
       correctionRequest: slot?.correctionRequest?.requestedAt ? slot.correctionRequest : undefined,
       uploadsUsed: slot?.uploads || 0,
       uploadsRemaining: Math.max(0, MAX_UPLOADS_PER_DOC - (slot?.uploads || 0)),
@@ -672,7 +676,7 @@ function summarizeVerificationDocuments(applicant, { withUrls = false, includeHi
 // Count of documents that need the user's attention (rejected or missing required)
 function attentionCount(applicant) {
   const docs = applicant?.verificationDocuments || {}
-  return REQUIRED_DOC_KEYS.filter((key) => ['rejected', 'needs_resubmission', 'missing'].includes(currentDocStatus(docs[key]))).length
+  return REQUIRED_DOC_KEYS.filter((key) => key === 'nsrpForm' ? !latestVersion(docs[key]) : ['rejected', 'needs_resubmission', 'missing'].includes(currentDocStatus(docs[key]))).length
 }
 
 // Recompute the account-level status from the latest version of each required document
@@ -680,13 +684,13 @@ function recomputeVerificationStatus(applicant) {
   // Document/profile reads must not silently lift an admin restriction.
   if (['restricted', 'waitlisted'].includes(applicant.verificationStatus) || applicant.consistencyDeclined || applicant.deletedAt) return
   const docs = applicant.verificationDocuments || {}
-  const rejected = REQUIRED_DOC_KEYS.filter((key) => currentDocStatus(docs[key]) === 'rejected')
+  const rejected = IDENTITY_DOC_KEYS.filter((key) => currentDocStatus(docs[key]) === 'rejected')
   if (rejected.length > 0) {
     applicant.verificationStatus = 'declined'
     applicant.verificationReason = rejected
       .map((key) => `${VERIFICATION_DOC_LABELS[key]}: ${latestVersion(docs[key])?.reviewReason || 'rejected'}`)
       .join(' | ')
-  } else if (REQUIRED_DOC_KEYS.every((key) => currentDocStatus(docs[key]) === 'approved')) {
+  } else if (latestVersion(docs.nsrpForm) && IDENTITY_DOC_KEYS.every((key) => currentDocStatus(docs[key]) === 'approved')) {
     applicant.verificationStatus = 'approved'
     applicant.verificationReason = undefined
   } else {
@@ -1242,7 +1246,7 @@ app.post('/api/signup', applicantSignupUpload.fields([
     await nsrpAutomation.process({ role: 'Applicant', accountId: user._id, ip: req.ip })
     // Refresh metadata after the atomic automation write; never save a stale user.
     user = await Applicant.findById(user._id)
-    await scheduleConsistency(user._id, 'signup')
+    await scheduleConsistency(user._id, 'signup', undefined, req.ip)
 
     // No link-verification email is sent: these accounts are verified by code.
     // The link-based flow (verify-email / resend) stays for older accounts.
@@ -1401,7 +1405,7 @@ async function appendVerificationVersion(applicant, docKey, file, idType = '', s
   applicant.verificationDocuments = applicant.verificationDocuments || {}
   const slot = applicant.verificationDocuments[docKey] || { uploads: 0, versions: [] }
   const current = latestVersion(slot)
-  if (current?.status === 'approved' && docKey !== 'supportingExplanation' && !await consistencyWaitlist.canCorrect(applicant._id, docKey)) {
+  if ((docKey === 'nsrpForm' ? nsrpReferenceLocked(applicant) : current?.status === 'approved') && docKey !== 'supportingExplanation' && !await consistencyWaitlist.canCorrect(applicant._id, docKey)) {
     const error = new Error(`${VERIFICATION_DOC_LABELS[docKey]} is already approved and locked.`)
     error.status = 409
     throw error
@@ -1420,7 +1424,8 @@ async function appendVerificationVersion(applicant, docKey, file, idType = '', s
     await DocumentFile.deleteOne({ applicant: applicant._id, slot: docKey, version: versionNumber, side: 'front' }).catch(() => {})
     await consistencyWaitlist.cancelReservation(applicant._id, reservation)
   }
-  if (current && (['pending', 'rejected', 'needs_resubmission'].includes(current.status) || docKey === 'supportingExplanation')) current.status = 'superseded'
+  if (docKey === 'nsrpForm') reopenIdentityDocuments(applicant, 'Applicant')
+  if (current && (['pending', 'rejected', 'needs_resubmission'].includes(current.status) || ['supportingExplanation', 'nsrpForm'].includes(docKey))) current.status = 'superseded'
   const version = {
     originalName: file.originalname,
     storedName: crypto.randomBytes(16).toString('hex'),
@@ -1575,7 +1580,7 @@ app.post('/api/profile/verification-documents/:docKey', verificationUpload.singl
 
     if (docKey === 'nsrpForm') await nsrpAutomation.process({ role: 'Applicant', accountId: applicant._id, ip: req.ip })
     await saveAuthorization(applicant._id, docKey, version.version, declared)
-    await scheduleConsistency(applicant._id, docKey, applicant.$locals.consistencyReservation)
+    await scheduleConsistency(applicant._id, docKey, applicant.$locals.consistencyReservation, req.ip)
 
     await notifyAdmins({
       type: 'document_resubmitted',
@@ -1657,12 +1662,13 @@ app.post('/api/profile/verification-documents/:docKey/correction-request', async
     if (!applicant) return res.status(404).json({ error: 'Applicant not found' })
     const slot = applicant.verificationDocuments?.[docKey]
     const version = latestVersion(slot)
-    if (version?.status !== 'approved') return res.status(409).json({ error: 'Only approved documents need a correction request. Use the upload options for missing or rejected documents.' })
+    if (docKey === 'nsrpForm' ? !nsrpReferenceLocked(applicant) : version?.status !== 'approved') return res.status(409).json({ error: 'Only approved documents need a correction request. Use the upload options for missing or rejected documents.' })
     const requestedAt = new Date()
     const result = await Applicant.updateOne({
       _id: applicant._id,
       [`verificationDocuments.${docKey}.correctionRequest.requestedAt`]: { $exists: false },
-      [`verificationDocuments.${docKey}.versions.${slot.versions.length - 1}.status`]: 'approved',
+      [`verificationDocuments.${docKey}.versions.${slot.versions.length - 1}.status`]: version.status,
+      ...(docKey === 'nsrpForm' ? { verificationStatus: 'approved' } : {}),
     }, { $set: { [`verificationDocuments.${docKey}.correctionRequest`]: { reason, requestedAt } } })
     if (!result.modifiedCount) return res.status(409).json({ error: 'A correction is already pending or the document status changed. Refresh your documents.' })
     await notifyAdmins({
@@ -1686,9 +1692,8 @@ app.put('/api/profile/nsrp', async (req, res) => {
     if (Object.keys(fieldErrors).length) return res.status(422).json({ error: 'Check the highlighted NSRP fields.', fieldErrors })
     const applicant = await Applicant.findOne({ email: decoded.email })
     if (!applicant) return res.status(404).json({ error: 'Applicant not found' })
-    const currentNsrp = latestVersion(applicant.verificationDocuments?.nsrpForm)
-    if (currentNsrp?.status === 'approved' && !await consistencyWaitlist.canCorrect(applicant._id, 'nsrpForm')) {
-      return res.status(409).json({ code: 'NSRP_LOCKED', error: 'Your approved NSRP form is locked.' })
+    if (nsrpReferenceLocked(applicant) && !await consistencyWaitlist.canCorrect(applicant._id, 'nsrpForm')) {
+      return res.status(409).json({ code: 'NSRP_LOCKED', error: 'Your verified account’s NSRP reference is locked. Request a correction through My Documents.' })
     }
 
     let signatureImage = null
@@ -1756,11 +1761,11 @@ app.put('/api/profile/nsrp', async (req, res) => {
       throw err
     }
     await nsrpAutomation.process({ role: 'Applicant', accountId: applicant._id, ip: req.ip })
-    await scheduleConsistency(applicant._id, 'nsrpForm', applicant.$locals.consistencyReservation)
+    await scheduleConsistency(applicant._id, 'nsrpForm', applicant.$locals.consistencyReservation, req.ip)
     await notifyAdmins({
       type: 'applicant_registration_pending',
       title: 'Applicant NSRP updated',
-      message: `${applicantFullName(applicant)} updated their NSRP form for review.`,
+      message: `${applicantFullName(applicant)} updated their NSRP registration reference. Identity documents will be checked against the updated details.`,
       link: '/applicants',
       metadata: { applicantId: String(applicant._id), nsrpVersion: version.version },
     })
@@ -1782,10 +1787,9 @@ app.get('/api/applicants/:id/verification-documents', async (req, res) => {
     if (!applicant) return res.status(404).json({ error: 'Applicant not found' })
     if (decoded.role === 'Applicant' && applicant.email !== decoded.email) return res.status(403).json({ error: 'Forbidden' })
     const migratedNsrp = await migrateLegacyNsrp(applicant)
-    if (migratedNsrp) {
-      recomputeVerificationStatus(applicant)
-      await applicant.save()
-    }
+    const previousStatus = applicant.verificationStatus
+    recomputeVerificationStatus(applicant)
+    if (migratedNsrp || applicant.verificationStatus !== previousStatus) await applicant.save()
     const nsrp = applicant.profile?.nsrp || {}
     if (decoded.role === 'Admin') {
       const current = latestVersion(applicant.verificationDocuments?.nsrpForm)
@@ -1886,7 +1890,7 @@ app.put('/api/applicants/:id/verification-documents/:docKey', async (req, res) =
     // Guards: approve/reject only from pending; revert only from approved with a reason
     const guard = validateReviewTransition({
       action: isRevert ? 'revert' : status,
-      currentStatus: current.status,
+      currentStatus: isRevert && docKey === 'nsrpForm' && nsrpReferenceLocked(applicant) ? 'approved' : current.status,
       reason,
     })
     if (guard) return res.status(guard.status).json({ code: guard.code, error: guard.message })
@@ -1901,14 +1905,8 @@ app.put('/api/applicants/:id/verification-documents/:docKey', async (req, res) =
       return res.json({ id: String(fresh._id), verificationStatus: fresh.verificationStatus, verificationReason: fresh.verificationReason, documents: summarizeVerificationDocuments(fresh) })
     }
 
-    if (isRevert && docKey === 'nsrpForm' && current.reviewedBy === SYSTEM_REVIEWER) {
-      const revoked = await nsrpAutomation.revoke(`Applicant:${applicant._id}:${current.version}`, decoded.email, String(reason || ''))
-      if (!revoked) return res.status(409).json({ error: 'The approval changed. Refresh the document.' })
-      const fresh = await Applicant.findById(applicant._id)
-      return res.json({ id: String(fresh._id), verificationStatus: fresh.verificationStatus, documents: summarizeVerificationDocuments(fresh) })
-    }
-
     if (isRevert) {
+      if (docKey === 'nsrpForm') reopenIdentityDocuments(applicant, decoded.email)
       slot.correctionRequest = undefined
       current.status = 'pending'
       current.reviewedAt = undefined
@@ -1985,6 +1983,7 @@ app.put('/api/profile', async (req, res) => {
     let changedIdentity = false, identityAccount
     if (decoded.role === 'Applicant') {
       identityAccount = await Applicant.findOne({ email: decoded.email }).lean()
+      if (profile.nsrp !== undefined && JSON.stringify(profile.nsrp) !== JSON.stringify(identityAccount?.profile?.nsrp)) return res.status(422).json({ code: 'NSRP_REFERENCE_UPDATE_REQUIRED', error: 'Use Update NSRP in My Documents to change your registration reference.' })
       changedIdentity = ['firstName', 'lastName', 'middleName', 'suffix', 'dob', 'nsrp'].some(key => profile[key] !== undefined && JSON.stringify(profile[key]) !== JSON.stringify(identityAccount?.profile?.[key]))
       // A profile-only edit must not retroactively screen an approved account.
       if (identityAccount?.verificationStatus === 'approved') changedIdentity = false
@@ -2023,7 +2022,7 @@ app.put('/api/profile', async (req, res) => {
     try { updated = await updateUserProfileByEmail(decoded.email, profile) }
     catch (error) { if (profileReservation) await consistencyWaitlist.cancelReservation(identityAccount._id, profileReservation); throw error }
     if (!updated) return res.status(404).json({ error: 'Not found' })
-    if (changedIdentity) await scheduleConsistency(identityAccount._id, 'basic', profileReservation)
+    if (changedIdentity) await scheduleConsistency(identityAccount._id, 'basic', profileReservation, req.ip)
 
     // Persist editable top-level employer fields as well
     if (updated.type === 'Employer') {

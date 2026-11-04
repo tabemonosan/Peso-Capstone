@@ -101,7 +101,7 @@ export default function AdminNsrpAutomation({ token, bannerOnly = false }) {
     finally { setBusy(false) }
   }
   return <section className="rounded-xl border border-slate-200 bg-white p-4 text-slate-900">
-    {settings && <p className="rounded-lg border border-cyan-200 bg-cyan-50 p-3 font-semibold">Auto-approval is {enabled ? 'ON' : 'OFF'} · Applicant: {settings.applicant ? 'ON' : 'OFF'} · Employer: {settings.employer ? 'ON' : 'OFF'} · Waitlist on mismatch: {settings.waitlistOnMismatch ? 'ON' : 'OFF'}</p>}
+    {settings && <p className="rounded-lg border border-cyan-200 bg-cyan-50 p-3 font-semibold">Auto-approval is {enabled ? 'ON' : 'OFF'} · Employer: {settings.employer ? 'ON' : 'OFF'} · Waitlist on mismatch: {settings.waitlistOnMismatch ? 'ON' : 'OFF'}. Applicant NSRP is registration reference data and needs no separate approval.</p>}
     {error && <p role="alert" className="text-rose-700">{error}</p>}
     {counts && <p className="my-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">Auto-approved: {counts.automatic || 0} · Flagged: {counts.flagged || 0} · Audit samples: {counts.samples || 0} · Revoked: {counts.revoked || 0}</p>}
     {!bannerOnly && <>
@@ -112,7 +112,7 @@ export default function AdminNsrpAutomation({ token, bannerOnly = false }) {
         <label>PESO contact information<textarea required maxLength={300} className={`${control} block w-full`} value={settings.pesoContact} onChange={event => setSettings({ ...settings, pesoContact: event.target.value })} /></label>
         <label>PESO office hours<input required maxLength={300} className={`${control} block w-full`} value={settings.pesoOfficeHours} onChange={event => setSettings({ ...settings, pesoOfficeHours: event.target.value })} /></label>
         <label><input type="checkbox" checked={settings.automaticApproval} onChange={event => setSettings({ ...settings, automaticApproval: event.target.checked })} /> Automatic approval</label>
-        {['applicant', 'employer'].map((key) => <label key={key}><input type="checkbox" checked={settings[key]} onChange={(event) => setSettings({ ...settings, [key]: event.target.checked })} /> Auto-approve {key} NSRPs</label>)}
+        <label><input type="checkbox" checked={settings.employer} onChange={(event) => setSettings({ ...settings, employer: event.target.checked })} /> Auto-approve employer NSRPs</label>
         {[['birthCertificate', 'Auto-approve birth certificates'], ['validId', 'Auto-approve valid IDs'], ['ocrTextReading', 'OCR text reading'], ['reviewToolsEnabled', 'Document review queues and actions']].map(([key, label]) => <label key={key}><input type="checkbox" checked={settings[key]} onChange={event => setSettings({ ...settings, [key]: event.target.checked })} /> {label}</label>)}
         <label>Minimum evidence<select className={`${control} block`} value={settings.minimumEvidence} onChange={event => setSettings({ ...settings, minimumEvidence: event.target.value })}><option value="independent">Independent evidence (recommended)</option><option value="none">None: typed data only, not recommended</option></select></label>
         <label><input type="checkbox" checked={settings.dataChecks} onChange={event => setSettings({ ...settings, dataChecks: event.target.checked })} /> Additional NSRP consistency and duplicate checks</label>

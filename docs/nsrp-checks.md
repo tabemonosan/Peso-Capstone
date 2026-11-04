@@ -8,9 +8,11 @@ The shared applicant/employer checks remain `shared/nsrpChecks.js` and
 settings, HMAC duplicate claims and quotas, and delegates automatic decisions to
 the generalized engine. It no longer provides a parallel production approval path.
 
-Generated NSRP forms, birth certificates, IDs and employer Form 2 are eligible
-only under the versioned decision gates. Uploaded NSRPs and all resubmissions
-remain manual. Employer document approval preserves the separate account review.
+Applicant NSRP Form 1 is the registration reference for birth-certificate and ID
+comparisons and needs no separate approval, whether generated or uploaded.
+Birth certificates, IDs and employer Form 2 remain subject to the versioned
+decision gates; identity-document resubmissions remain manual. Employer document
+approval preserves the separate account review.
 Age/civil-status/address reminders are advisory; they never decide approval.
 Default evidence is independent, default sampling is 20% for new settings, and
 the shared rate guard is five approvals per IP/mobile HMAC per rolling 24 hours.

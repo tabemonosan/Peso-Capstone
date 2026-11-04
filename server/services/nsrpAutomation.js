@@ -139,6 +139,16 @@ export function createNsrpAutomation({ Applicant, Employer, EmployerRequest, not
       // Store the report before deciding; subsequent approval is conditional on
       // exactly this pending version and unchanged account eligibility.
       await decisions().updateOne({ _id: key }, { $set: { report } })
+      if (role === 'Applicant' && documentEngine) {
+        // Retain validation/duplicate findings for the identity checks, without
+        // sampling, reserving an approval quota or reviewing the reference itself.
+        const base = `verificationDocuments.nsrpForm.versions.${versions.length - 1}`
+        await Applicant.collection.updateOne({ _id: account._id, 'verificationDocuments.nsrpForm.versions': { $size: versions.length }, [`${base}.version`]: version.version, [`${base}.status`]: 'pending' }, { $set: {
+          [`${base}.reviewReasons`]: [], [`${base}.findings`]: report.findings.map(f => ({ ruleId: f.code, severity: f.severity, fieldGroup: f.fieldGroup || 'registration', evidence: 'self-declared', status: 'open', approvalBlocking: f.approvalBlocking !== false })),
+        } })
+        await decisions().updateOne({ _id: key }, { $set: { result: 'Reference', reason: 'Registration reference', finishedAt: new Date() } })
+        return
+      }
       const config = await getSettings()
       const dismissedCritical = await decisions().findOne({ role, accountId: account._id, dismissedCritical: true })
       let reason = manualReason({ sourceType: version.sourceType, version: version.version, emailVerified: account.emailVerified,
@@ -229,6 +239,6 @@ export function createNsrpAutomation({ Applicant, Employer, EmployerRequest, not
 
   return { getSettings, updateSettings, creationEnabled, process: async payload => {
     await processSubmission(payload)
-    if (documentEngine) await documentEngine.process({ ...payload, docKey: payload.role === 'Applicant' ? 'nsrpForm' : 'employerNsrpForm' })
+    if (documentEngine && payload.role === 'Employer') await documentEngine.process({ ...payload, docKey: 'employerNsrpForm' })
   }, attachEngine: engine => { documentEngine = engine }, revoke, decisions, reserveRate, hash }
 }

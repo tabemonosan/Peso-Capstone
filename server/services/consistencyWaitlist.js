@@ -58,7 +58,7 @@ export function createConsistencyWaitlist({ Applicant, automation, notify, notif
     if (!reservation) return
     await Applicant.collection.updateOne({ _id: new mongoose.Types.ObjectId(id), [`consistencyState.reservations.${reservation.key}`]: { $exists: true } }, { $unset: { [`consistencyState.reservations.${reservation.key}`]: '' }, $inc: Object.fromEntries(reservation.docKeys.map(key => [`consistencyState.used.${key}`, -1])) })
   }
-  async function begin(id, changedDoc = 'nsrpForm', reservation, retry = 0) {
+  async function begin(id, changedDoc = 'nsrpForm', reservation, ip, retry = 0) {
     // Capture successful submission versions, never OCR text or typed identifiers.
     const [account, config] = await Promise.all([get(id), settings()])
     if (!account || account.deletedAt || ['restricted', 'declined'].includes(account.verificationStatus)) return
@@ -73,11 +73,11 @@ export function createConsistencyWaitlist({ Applicant, automation, notify, notif
     if (reservation) delete state.reservations[reservation.key]
     const match = { _id: account._id, ...(previous.token ? { 'consistencyState.token': previous.token } : { 'consistencyState.token': { $exists: false } }) }
     const result = await Applicant.collection.updateOne(match, { $set: { consistencyState: state } })
-    if (!result.modifiedCount) { if (retry < 4) return begin(id, changedDoc, reservation, retry + 1); return }
-    enqueueVerification(() => run(id, token, config))
+    if (!result.modifiedCount) { if (retry < 4) return begin(id, changedDoc, reservation, ip, retry + 1); return }
+    enqueueVerification(() => run(id, token, config, ip))
     return token
   }
-  async function run(id, token, config) {
+  async function run(id, token, config, ip) {
     let timer
     try {
       const account = await get(id)
@@ -88,10 +88,9 @@ export function createConsistencyWaitlist({ Applicant, automation, notify, notif
           if (version) {
             const result = await readImages({ accountId: id, docKey, version, settings: config, recheck: true, checkToken: token })
             if (!result?.completed) return 'unavailable'
-            await verifyDocument({ role: 'Applicant', accountId: id, docKey, checkToken: token })
+            await verifyDocument({ role: 'Applicant', accountId: id, docKey, checkToken: token, ip })
           }
         }
-        await verifyDocument({ role: 'Applicant', accountId: id, docKey: 'nsrpForm', checkToken: token })
         return 'complete'
       })()
       const result = await Promise.race([work, new Promise(resolve => { timer = setTimeout(() => resolve('timeout'), timeoutMs) })])

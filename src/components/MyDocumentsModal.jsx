@@ -137,7 +137,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
           <h2 id="my-documents-title" className="text-xl font-bold">Verification documents</h2>
           <p className="mt-1 text-sm font-semibold text-cyan-800">Submitted to PESO</p>
           <p id="my-documents-description" className="mt-1 text-sm text-slate-600">
-            PESO reviews these documents for registration and verification. Your NSRP form and verification documents are not shared with employers. {info.verificationStatus === 'under_review' ? 'You can correct pending documents and NSRP details while waiting. Updates are sent to PESO for review.' : 'Wait for feedback on pending submissions; resubmit documents that need correction.'}
+            Your NSRP supplies the registration reference for birth certificate and ID checks and needs no separate approval. These documents are not shared with employers. {info.verificationStatus === 'under_review' ? 'You can correct NSRP details and pending documents while waiting. Identity documents are checked against your updated reference.' : 'Wait for feedback on pending identity documents; resubmit documents that need correction.'}
           </p>
           {info.verificationStatus && (
             <p className="mt-1 text-sm text-slate-600">
@@ -162,19 +162,19 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
           const relevant = (info.consistency?.issues || []).filter(issue => issue.chancesLeft !== null && (issue.document === doc.docKey || doc.docKey === 'nsrpForm'))
           const flagged = info.consistency?.waitlisted && relevant.length > 0
           const hasChances = !flagged || relevant.every(issue => issue.chancesLeft > 0)
-          const pendingEditable = info.verificationStatus === 'under_review' && doc.status === 'pending'
-          const canReplace = (["rejected", "needs_resubmission", "missing"].includes(doc.status) || flagged || pendingEditable) && doc.uploadsRemaining !== 0 && hasChances
-          const locked = doc.status === "approved" && !flagged
+          const pendingEditable = info.verificationStatus === 'under_review' && (doc.status === 'pending' || doc.referenceOnly)
+          const locked = (doc.referenceOnly ? doc.locked : doc.status === "approved") && !flagged
+          const canReplace = !locked && (["rejected", "needs_resubmission", "missing"].includes(doc.status) || flagged || pendingEditable) && doc.uploadsRemaining !== 0 && hasChances
           return (
             <li key={doc.docKey} className="rounded-xl bg-slate-50 p-3 text-sm">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-semibold text-slate-900">
                   {doc.label}{doc.idType ? ` — ${doc.idType}` : ""}
                 </span>
-                {chip(doc.status)}
+                {chip(doc.referenceOnly && doc.latest ? 'Registration reference' : doc.status)}
                 {doc.required && <span className="text-xs text-slate-500">required</span>}
                 {!doc.required && <span className="text-xs text-slate-500">optional</span>}
-                <p className="w-full text-xs text-slate-600">{{ nsrpForm: 'Registration record retained by PESO.', birthCertificate: 'Used by PESO to verify your identity.', validId1: 'Primary identification for PESO verification.', validId2: 'Optional supporting identification.' }[doc.docKey]}</p>
+                <p className="w-full text-xs text-slate-600">{{ nsrpForm: 'Your NSRP is the reference used to check your birth certificate and IDs. No separate NSRP approval is needed.', birthCertificate: 'Compared with your NSRP to verify your identity.', validId1: 'Compared with your NSRP to verify your identity.', validId2: 'Optional supporting identification.' }[doc.docKey]}</p>
                 {doc.docKey === "nsrpForm" && doc.sourceType && <span className="text-xs text-slate-500">{NSRP_SOURCE_LABELS[doc.sourceType]}</span>}
                 {doc.docKey.startsWith("validId") ? (
                   (doc.latest?.url || doc.latest?.back?.url) && (
@@ -209,15 +209,15 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
                 <p className="mt-1 text-xs text-slate-400">Not uploaded yet.</p>
               )}
 
-              {["rejected", "needs_resubmission"].includes(doc.status) && doc.latest?.reviewReason && (
+              {!doc.referenceOnly && ["rejected", "needs_resubmission"].includes(doc.status) && doc.latest?.reviewReason && (
                 <p className="mt-2 rounded-lg border border-rose-300 bg-rose-50 p-2 text-xs text-rose-700">
                   PESO feedback: {doc.latest.reviewReason}
                 </p>
               )}
-              {doc.status === 'pending' && <p className="mt-2 text-xs text-amber-800">{pendingEditable ? 'Waiting for PESO review. You can correct your NSRP or submit an updated copy while this document is pending.' : 'Submitted for PESO review. Please wait for feedback before resubmitting.'}</p>}
+              {!doc.referenceOnly && doc.status === 'pending' && <p className="mt-2 text-xs text-amber-800">{pendingEditable ? 'Waiting for PESO review. You can correct your NSRP or submit an updated copy while this document is pending.' : 'Submitted for PESO review. Please wait for feedback before resubmitting.'}</p>}
               {info.review?.documents?.find(item => item.docKey === doc.docKey)?.reason && <p className="mt-2 text-xs text-slate-700">{info.review.documents.find(item => item.docKey === doc.docKey).reason}</p>}
               {['nsrpForm', 'birthCertificate', 'validId1', 'validId2'].includes(doc.docKey) && doc.latest && <button type="button" onClick={() => setExplanationDoc(doc.docKey)} className="mt-2 rounded border border-slate-300 bg-white px-3 py-1 text-xs text-cyan-800">Explain a difference</button>}
-              {locked && <p className="mt-2 text-xs text-green-700">Approved by PESO. You can view this document or request a correction if information changes.</p>}
+              {locked && <p className="mt-2 text-xs text-green-700">{doc.referenceOnly ? 'Your account is verified. Request a correction before changing the NSRP reference; identity documents will need to be checked again.' : 'Approved by PESO. You can view this document or request a correction if information changes.'}</p>}
               {doc.correctionRequest && <p className="mt-2 rounded-lg border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">Correction requested: {doc.correctionRequest.reason}. Waiting for PESO review.</p>}
               {locked && !doc.correctionRequest && <button type="button" onClick={() => { setCorrectionDoc(doc.docKey); setCorrectionReason(''); setError(''); setSuccess('') }} className="mt-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold">Request correction</button>}
               {correctionDoc === doc.docKey && <form onSubmit={requestCorrection} className="mt-3 rounded-xl border border-slate-200 bg-white p-3">

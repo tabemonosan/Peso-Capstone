@@ -26,13 +26,15 @@ function mockRole(role, overrides = {}) {
 }
 describe('one dashboard per role', () => {
   it('shows why an applicant is under review on Home and opens pending NSRP corrections directly', async () => {
-    mockRole('Applicant', { verificationStatus: 'under_review', reviewDetails: { status: 'under_review', documents: [{ docKey: 'nsrpForm', label: 'NSRP Registration Form', reason: 'Your uploaded NSRP form needs a PESO staff review before it can be verified.', canUpdate: true, uploadsRemaining: 4 }] }, documentInfo: { verificationStatus: 'under_review', nsrpData: { firstName: 'Sample', surname: 'Example' }, documents: [{ docKey: 'nsrpForm', label: 'NSRP Registration Form', status: 'pending', sourceType: 'generated', uploadsRemaining: 4 }] } })
+    mockRole('Applicant', { verificationStatus: 'under_review', reviewDetails: { status: 'under_review', documents: [{ docKey: 'validId1', label: 'Valid ID #1', reason: 'Your ID is waiting for comparison with your NSRP details.', canUpdate: true, uploadsRemaining: 4 }] }, documentInfo: { verificationStatus: 'under_review', nsrpData: { firstName: 'Sample', surname: 'Example' }, documents: [{ docKey: 'nsrpForm', label: 'NSRP Registration Form', status: 'pending', referenceOnly: true, locked: false, sourceType: 'generated', uploadsRemaining: 4, latest: { version: 1 } }] } })
     localStorage.setItem('peso-token', 'token')
     localStorage.setItem('peso-active-view', 'home')
     render(<App />)
-    expect(await screen.findByText(/uploaded NSRP form needs a PESO staff review/)).toBeInTheDocument()
+    expect(await screen.findByText(/ID is waiting for comparison with your NSRP/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Review and update documents' }))
     const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('Registration reference')).toBeInTheDocument()
+    expect(within(dialog).getByText(/No separate NSRP approval is needed/)).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: 'Update NSRP' })).toBeEnabled()
   })
 

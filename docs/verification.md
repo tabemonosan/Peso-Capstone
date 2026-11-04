@@ -11,6 +11,40 @@ settings and restricted employment access for waitlisted applicants.
 
 ## Settings and defaults
 
+### Applicant NSRP reference (2026-11-04.2)
+
+NSRP Form 1 supplies the registration baseline for comparing the name, birth
+date and other available fields on birth certificates and IDs. It is required
+for registration but **does not need separate review or approval**. The account
+gate requires a submitted NSRP, an approved birth certificate and approved
+Valid ID #1. Legacy NSRP review statuses no longer hold up the account. Existing
+accounts adopt this rule when their review/profile/document status is refreshed.
+Restrictions, waitlist decisions and deletion safeguards take precedence.
+
+My Documents and the admin viewer label submitted NSRP as **Registration
+reference**. Routine pending NSRP entries are excluded from approval queues;
+the dashboard's documents-awaiting-review count excludes the reference too.
+Actual duplicate/registration findings and explanations remain available for
+staff investigation. The background pipeline retains NSRP data/duplicate checks
+and passes those findings to identity checks, without sampling or consuming an
+approval quota for NSRP itself. The historical standalone NSRP automation
+fallback is retained for compatibility; production attaches the document engine
+and uses reference reports instead of Form 1 approval decisions.
+
+Applicants may correct the reference while under review, within existing upload
+and waitlist limits. Updating it reopens earlier birth certificate/ID approvals.
+For verified accounts it remains locked until PESO reopens it for correction;
+reopening also resets dependent identity approvals and retains their history.
+The generic profile endpoint cannot replace NSRP answers. Approval writes guard
+the NSRP version so a concurrent replacement cannot reuse an outdated comparison.
+Background identity checks receive the originating request IP transiently for
+the existing HMAC rate guard; raw IPs are not stored in consistency state.
+
+For uploaded NSRP PDFs, the entered registration details supply the comparison
+fields. The PDF is retained, but no new PDF extraction is introduced. Applicants
+can use **Update NSRP** to enter/correct structured answers. NSRP is self-declared
+reference data, not independent identity evidence. Employer Form 2 is unchanged.
+
 ### Consistency waitlist (2026-11-04.1)
 
 This screening step reuses `shared/crossChecks.js`, local OCR, verified PhilSys
@@ -98,7 +132,7 @@ preserved; these are defaults for new/missing settings, not a migration.
 | Key | Meaning | Default |
 | --- | --- | --- |
 | automaticApproval | Master switch | ON |
-| applicant | Generated applicant NSRP Form 1 | ON |
+| applicant | Legacy standalone Form 1 approval switch; unused by the production reference workflow | ON |
 | employer | Generated employer NSRP Form 2 | ON |
 | birthCertificate | Birth certificates | ON |
 | validId | Both valid ID slots | ON |
@@ -137,13 +171,13 @@ until an admin changes it.
    once. A held sample cannot be repeatedly submitted to reroll its selection.
 8. Shared atomic IP/mobile quota reservation succeeds.
 
-Uploaded NSRP files never auto-approve. Resubmissions always require human
+Applicant NSRP needs no separate approval. Identity-document resubmissions require human
 approval. Government, Recruitment & Placement Agency (Local), Licensed
 Recruitment Agency (Overseas), and DO 174-17 Subcontractor Form 2s stay manual.
-Generated NSRP may use independent cross-document comparisons. Employer Form 2
+Identity documents are compared against the NSRP reference. Employer Form 2
 alone preserves the existing separate admin account decision; it does not grant
-posting access. Applicant account status continues to require NSRP, birth
-certificate and ID #1; ID #2 and supporting explanations are optional.
+posting access. Applicant account status requires NSRP submission plus approval
+of the birth certificate and ID #1; ID #2 and supporting explanations are optional.
 
 Ineligibility tags include Flagged, Could not be read, Not independent, Quality
 warning, Audit sample, Resubmission, Uploaded file, Rate guard, Always manual,

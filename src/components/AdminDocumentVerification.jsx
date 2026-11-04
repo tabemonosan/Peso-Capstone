@@ -107,8 +107,8 @@ export default function AdminDocumentVerification({ token, queue = 'flagged' }) 
             const url = URL.createObjectURL(await response.blob()); window.open(url, '_blank', 'noopener'); setTimeout(() => URL.revokeObjectURL(url), 60000)
           } catch (err) { setError(err.message) }
         }}>View Form 2</button>}
-        {['pending', 'needs_resubmission'].includes(item.status) && <>{actionButton(item, 'approve')}{actionButton(item, 'resubmit')}{actionButton(item, 'decline')}</>}
-        {item.status === 'approved' && <>{!item.adminConfirmedAt && (item.autoApproved || item.reviewedBy?.startsWith('System (')) && actionButton(item, 'checked')}{actionButton(item, 'revoke')}</>}
+        {item.docKey !== 'nsrpForm' && ['pending', 'needs_resubmission'].includes(item.status) && <>{actionButton(item, 'approve')}{actionButton(item, 'resubmit')}{actionButton(item, 'decline')}</>}
+        {item.docKey !== 'nsrpForm' && item.status === 'approved' && <>{!item.adminConfirmedAt && (item.autoApproved || item.reviewedBy?.startsWith('System (')) && actionButton(item, 'checked')}{actionButton(item, 'revoke')}</>}
         {actionButton(item, 'explain')}{actionButton(item, item.holdAutoApproval ? 'release-hold' : 'hold')}
       </div>
     </article>)}

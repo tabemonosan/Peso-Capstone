@@ -238,7 +238,7 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
                   <span className="text-xs text-slate-500">Loading…</span>
                 ) : hasNsrpDocument ? (
                   <>
-                    {badge(nsrpDocument.status)}
+                    {badge(nsrpDocument.referenceOnly ? 'Registration reference' : nsrpDocument.status)}
                     <span className="text-xs text-slate-600">{nsrpSource}</span>
                     {nsrpDocument.latest.url && (
                       <button type="button" onClick={() => viewVersion(nsrpDocument.latest.url)} className="rounded-lg bg-cyan-500 px-2 py-1 text-xs font-semibold text-white">View</button>
@@ -274,7 +274,8 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
                     {doc.label}{doc.idType ? ` — ${doc.idType}` : ""}
                     {doc.latest ? ` (v${doc.latest.version})` : ""}
                   </span>
-                  {badge(doc.status)}
+                  {badge(doc.referenceOnly && doc.latest ? 'Registration reference' : doc.status)}
+                  {doc.referenceOnly && <p className="w-full text-xs text-slate-600">NSRP supplies the registration details for birth certificate and ID comparisons. No separate approval is needed.</p>}
                   {doc.docKey === "nsrpForm" && doc.sourceType && (
                     <span className="rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
                       {doc.sourceType === "uploaded" ? "Uploaded file" : "Generated online"}
@@ -283,7 +284,7 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
                   {doc.resubmitted && (
                     <span className="rounded-full border border-cyan-300 bg-cyan-100 px-2 py-0.5 text-xs font-semibold text-cyan-800">resubmitted</span>
                   )}
-                  {doc.correctionRequest && <p className="w-full rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">Applicant correction request: {doc.correctionRequest.reason}. Use Revert to pending to reopen this document for review.</p>}
+                  {doc.correctionRequest && <p className="w-full rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">Applicant correction request: {doc.correctionRequest.reason}. {doc.referenceOnly ? 'Reopen the reference to allow a correction and new identity checks.' : 'Use Revert to pending to reopen this document for review.'}</p>}
                   {doc.docKey.startsWith("validId") ? (
                     (doc.latest?.url || doc.latest?.back?.url) && (
                       <div role="group" aria-label={`${doc.label} file views`} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1">
@@ -306,7 +307,7 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
                       </button>
                     )
                   )}
-                  {!readOnly && doc.status === "pending" && (
+                  {!readOnly && !doc.referenceOnly && doc.status === "pending" && (
                     <>
                       <button
                         type="button"
@@ -324,13 +325,13 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
                       </button>
                     </>
                   )}
-                  {!readOnly && doc.status === "approved" && (
+                  {!readOnly && (doc.referenceOnly ? doc.locked : doc.status === "approved") && (
                     <button
                       type="button"
                       onClick={() => { setActionError(""); setConfirmAction({ docKey: doc.docKey, action: "revert" }) }}
                       className="rounded-xl border border-amber-400 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700"
                     >
-                      Revert to pending
+                      {doc.referenceOnly ? 'Reopen reference for correction' : 'Revert to pending'}
                     </button>
                   )}
                   {doc.history?.length > 1 && (
