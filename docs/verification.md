@@ -5,10 +5,91 @@ approval only approves a pending first-version document. It never declines an
 account or decides that fraud occurred. Warning/critical findings, unavailable
 evidence, exceptions, samples and resubmissions are routed to PESO for review.
 Admins can inspect every automatic approval, mark it checked, revoke it or hold
-further automatic approval for the account. Phase 6 was intentionally skipped:
-there is no in-person tier, office-hours setting or referral/posting gate.
+further automatic approval for the account. Phase 6's in-person tier remains
+skipped. The consistency waitlist described below separately adds contact-hours
+settings and restricted employment access for waitlisted applicants.
 
 ## Settings and defaults
+
+### Consistency waitlist (2026-11-04.1)
+
+This screening step reuses `shared/crossChecks.js`, local OCR, verified PhilSys
+QR comparisons, existing findings, the Flagged for review queue, document
+versioning, explanations, notifications and registration gating. It adds no
+external verification service. The implementation and complete file manifest
+are in [consistency-waitlist.md](consistency-waitlist.md).
+
+After signup, a replacement document, or an NSRP update, a background job checks
+the latest document versions. Unapproved accounts also recheck after a changed
+basic identity field. Approved accounts are not scanned on reads or profile-only
+edits. The owner sees **Your documents are being checked**. A 90-second timeout
+or reader failure falls back to normal PESO review, never a new waitlist decision.
+Version and job tokens prevent late results from waitlisting a newer submission.
+
+Only a significant independent surname/first-name, birth-date, or ID-number
+difference beyond the existing tolerances triggers mismatch screening. Local
+OCR must be sufficiently confident; verified QR comparisons are independent.
+Minor differences, unreadable documents, low-confidence OCR, quality warnings
+alone and typed-only differences stay in normal review. Address, religion,
+disability, sex and civil status never determine waitlisting; the existing
+married-name exception prevents false name flags. Identifier/QR reuse findings
+go to staff review with a generic owner message and no correction charge.
+
+New audited settings in **Verification rules**:
+
+| Setting | Default |
+| --- | --- |
+| Waitlist on mismatch (`waitlistOnMismatch`) | ON |
+| Correction chances per flagged document (`waitlistAttempts`) | 3; configurable 1–5 |
+| PESO contact (`pesoContact`) | Contact your local PESO office. |
+| Office hours (`pesoOfficeHours`) | Contact PESO to confirm office hours. |
+
+Switching mismatch waitlisting off returns existing waitlisted accounts to
+`under_review`, records the change and notifies owners. It does not approve them.
+
+The new status is `waitlisted`, distinct from `under_review`. Normal transitions
+are under_review → waitlisted → under_review after a passing correction or admin
+release. Only an admin can decline. Waitlisted users may log in/out, view their
+profile and notifications, manage documents, send explanations and read PESO
+contact information. Server gates return **403 APPLICANT_WAITLISTED** for
+employment features, including job applications, referrals and interview
+acceptance. The UI presents restricted navigation and the reason card in My Documents.
+
+The owner sees document/field-group labels and neutral messages, never extracted
+values, comparison identifiers, confidence thresholds, other-account information
+or sampling details. The approximate-reading tip always accompanies the reasons.
+Duplicate findings say only **Your account needs a review by PESO staff.**
+
+Each affected document has a correction counter separate from its five-upload
+cap; both limits are enforced. A successful replacement or corrected NSRP/basic
+submission reserves a chance before its recheck. Parallel submissions cannot
+share the final chance. Failed saves and technical check failures refund the
+reservation. Granting chances does not extend the upload cap. Exhausted users
+see **Please contact the PESO office. Staff will review your case.** Explanations
+remain available and free, with the existing categories, a 300-character note
+and an optional supporting document. Pending explanations pause inactivity
+reminders/stale tagging until staff resolve them.
+
+Seven inactive days produce one neutral reminder. Thirty inactive days produce
+a **stale waitlist** tag for staff; accounts are never automatically deleted or
+declined. A daily digest lists newly waitlisted counts. Explanations and last
+correction attempts notify admins. Release, request, resolve, grant and decline
+actions require reasons and retain an audit entry. Release also requires
+**I compared the documents** and the current unresolved count. Release returns
+the account to normal review; ordinary document approval remains a separate action.
+
+Birth-certificate copy type is required. Existing ID-number/expiry controls and
+National ID exceptions are reused. **Check my documents** is optional: it uses
+typed details and image quality only, gives friendly suggestions, never invokes
+OCR and never determines account eligibility.
+
+Known limitations: these checks measure **consistency, not authenticity**. A
+consistent forgery can pass. OCR on phone photos is approximate, so false flags
+are expected and a human makes the final review decision. Unsupported PDFs and
+unreadable/unlabelled fields remain manual; no extracted PDF text is inferred.
+Uploaded NSRP registrations use their existing typed basic information as the
+comparison baseline. Office contact details/hours must be filled in by PESO;
+the defaults deliberately do not invent a phone number or opening schedule.
 
 Admin-only `/api/admin/nsrp-automation/settings` uses `nsrp_auto_settings`.
 Updates record administrator, values and time. Existing stored choices are
