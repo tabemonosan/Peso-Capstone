@@ -23,6 +23,14 @@ afterAll(stopTestDb)
 beforeEach(async () => { await clearDb(); admin = await Admin.create({ email: 'review-admin@example.invalid', passwordHash: 'test' }) })
 
 describe('Document verification foundations', () => {
+  it('excludes checking and verified documents from the admin review queue', async () => {
+    await applicant({}, {}, 'birthCertificate')
+    await applicant({ status: 'approved', autoApproved: true }, {}, 'validId1')
+    const flagged = await applicant({ reviewReasons: ['Could not be read'] }, {}, 'birthCertificate')
+    const response = await api('get', '/queue').expect(200)
+    expect(response.body.total).toBe(1)
+    expect(response.body.items[0].accountId).toBe(String(flagged._id))
+  })
   it('provides all defaults, validates settings, and audits administrative changes', async () => {
     const headers = { Authorization: `Bearer ${sign()}` }
     const before = await request(app).get('/api/admin/nsrp-automation/settings').set(headers).expect(200)

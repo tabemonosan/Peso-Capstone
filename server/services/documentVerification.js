@@ -66,7 +66,8 @@ export function createDocumentVerification({ Applicant, Employer, EmployerReques
     const limit = Math.max(1, Math.min(100, Number.parseInt(query.limit, 10) || 25))
     const match = query.queue === 'auto' ? { status: 'approved', docKey: { $ne: 'nsrpForm' }, $or: [{ autoApproved: true }, { reviewedBy: { $in: ['System (auto-approval)', 'System (verification engine)'] } }] }
       : { $or: [
-        { status: { $in: ['pending', 'needs_resubmission'] }, $or: [{ role: 'Employer' }, { docKey: { $ne: 'nsrpForm' } }] },
+        { role: 'Employer', status: { $in: ['pending', 'needs_resubmission'] } },
+        { role: 'Applicant', docKey: { $ne: 'nsrpForm' }, $or: [{ status: 'needs_resubmission' }, { status: 'pending', 'reasons.0': { $exists: true } }, { status: 'pending', holdAutoApproval: true }] },
         { findings: { $elemMatch: { severity: { $in: ['warning', 'critical'] }, status: { $ne: 'dismissed' } } } },
         { 'explanation.status': 'submitted' },
       ] }
@@ -95,7 +96,7 @@ export function createDocumentVerification({ Applicant, Employer, EmployerReques
       { $set: { entry: DOCUMENT_KEYS.filter(key => key !== 'employerNsrpForm').map(key => ({ docKey: key, document: { $arrayElemAt: [`$verificationDocuments.${key}.versions`, -1] } })) } },
       { $unwind: '$entry' }, projection('Applicant'),
       { $unionWith: { coll: EmployerRequest.collection.name, pipeline: employerPipeline } },
-      { $set: { decisionKey: { $cond: [{ $in: ['$docKey', ['nsrpForm', 'employerNsrpForm']] }, { $concat: ['$role', ':', { $toString: '$accountId' }, ':', { $toString: '$version' }] }, ''] } } },
+      { $set: { decisionKey: { $cond: [{ $in: ['$docKey', ['nsrpForm', 'employerNsrpForm']] }, { $concat: ['$role', ':', { $toString: '$accountId' }, ':', { $toString: '$version' }] }, { $concat: ['$role', ':', { $toString: '$accountId' }, ':', '$docKey', ':', { $toString: '$version' }] }] } } },
       { $lookup: { from: 'nsrp_auto_decisions', localField: 'decisionKey', foreignField: '_id', as: 'legacyDecision' } },
       { $set: { legacyDecision: { $arrayElemAt: ['$legacyDecision', 0] } } },
       { $set: {

@@ -1,4 +1,4 @@
-export const DECISION_RULES_VERSION = '2026-11-04.2'
+export const DECISION_RULES_VERSION = '2026-11-04.3'
 export const ALWAYS_MANUAL_TYPES = /government|recruitment|placement agency|DO 174/i
 export const evidenceComparisons = rows => (rows || []).filter(row => row.evidence === 'independent' && row.result === 'match' && !['sex', 'address', 'personal details'].includes(row.fieldGroup))
 export function decisionReason({ settings, docKey, document, account, findings = [], comparisons = [], verifiedQr = false, pendingExplanation = false }) {
@@ -6,7 +6,7 @@ export function decisionReason({ settings, docKey, document, account, findings =
   if (!typeSwitch) return 'Always manual'
   if (!settings.automaticApproval || !settings.verificationEngineEnabled || !settings[typeSwitch]) return 'Auto-approval off'
   if (document.status !== 'pending') return 'Already reviewed'
-  if (document.version !== 1) return 'Resubmission'
+  if (document.version !== 1 && !['birthCertificate', 'validId1', 'validId2'].includes(docKey)) return 'Resubmission'
   if (['nsrpForm', 'employerNsrpForm'].includes(docKey) && document.sourceType !== 'generated') return 'Uploaded file'
   if (!account.emailVerified) return 'Email unverified'
   if (account.holdAutoApproval || account.deletedAt || account.verificationStatus === 'restricted' || account.applyingSuspendedAt || account.receivingApplicantsSuspendedAt) return 'Hold'

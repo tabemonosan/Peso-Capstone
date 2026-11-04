@@ -4,13 +4,13 @@ import { REQUIRED_DOC_KEYS, VERIFICATION_DOC_LABELS } from '../../shared/verific
 // extracted values, provider errors, private notes or comparison rule identifiers.
 export function documentReviewMessage(docKey, document, reason = '') {
   if (!document) return 'This required document has not been submitted yet.'
-  if (document.status === 'approved') return 'PESO has verified this document.'
+  if (document.status === 'approved') return 'This document is verified. No admin review is needed.'
   if (['rejected', 'needs_resubmission'].includes(document.status)) return 'PESO needs a corrected copy of this document. Open My Documents to review the feedback and make changes.'
   if (docKey === 'nsrpForm') return 'Your NSRP is the registration reference used to check your birth certificate and IDs. It does not need separate approval.'
   const reasons = [...(document.reviewReasons || []), reason]
   if (reasons.some(r => ['Could not be read', 'Not independent', 'Retake requested', 'Quality warning', 'Technical attempts: admin review'].includes(r))) return 'The system could not read enough clear information to verify this document automatically. You can submit a clearer copy for review.'
   if (reasons.includes('Explanation') || document.explanation?.status === 'submitted') return 'Your explanation is waiting for PESO staff review. You can still correct this document if needed.'
-  if (reasons.includes('Resubmission') || document.version > 1) return 'Your updated document is waiting for PESO staff review.'
+  if (reasons.includes('Resubmission')) return 'Your updated document is waiting for PESO staff review.'
   if (reasons.includes('Auto-approval off')) return 'Automatic verification is unavailable for this document. PESO staff will review it; you only need to update it if something is incorrect.'
   if (reasons.some(r => ['Flagged', 'Needs attention'].includes(r))) return 'PESO staff need to compare this document with your registration details. You can correct your information or explain a difference.'
   return 'This document has not been verified automatically and is waiting for PESO staff review. You can update it if something needs correction.'
@@ -28,7 +28,8 @@ export async function applicantReviewSummary(account, automation, consistency) {
     const correction = consistency?.issues?.filter(i => i.document === docKey || docKey === 'nsrpForm' && i.chancesLeft !== null) || []
     const remaining = Math.max(0, 5 - (slot?.uploads || 0))
     const canUpdate = remaining > 0 && (status === 'under_review' && latest?.status !== 'approved' || status === 'waitlisted' && correction.length > 0 && correction.every(i => i.chancesLeft !== null && i.chancesLeft > 0))
-    return { docKey, label: VERIFICATION_DOC_LABELS[docKey], status: latest?.status || 'missing', reason: documentReviewMessage(docKey, latest, decision?.reason), canUpdate, uploadsRemaining: remaining }
+    const needsReview = Boolean(latest && docKey !== 'nsrpForm' && (['rejected', 'needs_resubmission'].includes(latest.status) || latest.status === 'pending' && ((latest.reviewReasons || []).length || decision?.reason || latest.findings?.some(f => f.status !== 'dismissed' && f.approvalBlocking !== false && ['warning', 'critical'].includes(f.severity)) || ['requested', 'submitted'].includes(latest.explanation?.status))))
+    return { docKey, label: VERIFICATION_DOC_LABELS[docKey], status: latest?.status || 'missing', needsReview, reason: latest?.status === 'pending' && !needsReview ? 'Automatic verification is in progress.' : documentReviewMessage(docKey, latest, decision?.reason), canUpdate, uploadsRemaining: remaining }
   }).filter(doc => doc.status !== 'approved')
   return { status, checking: Boolean(consistency?.checking), message: status === 'approved' ? 'Your account is verified.' : status === 'waitlisted' ? 'Your account needs a review by PESO staff. Open My Documents to correct or explain a difference.' : consistency?.checking ? 'Your documents are being checked. You can open My Documents to review your details.' : documents.length ? 'Your account is under review because the required documents below still need verification.' : 'Your documents have been reviewed. PESO staff need to complete the account review.', documents }
 }

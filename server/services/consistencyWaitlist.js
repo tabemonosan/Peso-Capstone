@@ -7,7 +7,7 @@ import { VERIFICATION_DOC_LABELS } from '../../shared/verificationDocs.js'
 
 const DAY = 86400000
 const fail = (code, message, status = 409) => { throw Object.assign(new Error(message), { code, status }) }
-export function createConsistencyWaitlist({ Applicant, automation, notify, notifyAdmins, readImages = processApplicantImages, verifyDocument = async () => {}, now = () => new Date(), timeoutMs = WAITLIST_LIMITS.timeoutMs }) {
+export function createConsistencyWaitlist({ Applicant, automation, notify, notifyAdmins, readImages = processApplicantImages, verifyDocument = async () => {}, recomputeApplicant = async () => {}, now = () => new Date(), timeoutMs = WAITLIST_LIMITS.timeoutMs }) {
   const get = id => Applicant.findById(id).select('+consistencyState').lean()
   const settings = async () => ({ ...WAITLIST_DEFAULTS, ...await automation.getSettings() })
   const latest = (account, key) => account.verificationDocuments?.[key]?.versions?.at(-1)
@@ -88,8 +88,12 @@ export function createConsistencyWaitlist({ Applicant, automation, notify, notif
           if (version) {
             const result = await readImages({ accountId: id, docKey, version, settings: config, recheck: true, checkToken: token })
             if (!result?.completed) return 'unavailable'
-            await verifyDocument({ role: 'Applicant', accountId: id, docKey, checkToken: token, ip })
           }
+        }
+        // Refresh all comparisons before deciding, so an old mismatch on another
+        // document cannot block a clean correction against the current reference.
+        for (const docKey of ['birthCertificate', 'validId1', 'validId2']) {
+          if (latest(account, docKey)?.version) await verifyDocument({ role: 'Applicant', accountId: id, docKey, checkToken: token, ip })
         }
         return 'complete'
       })()
@@ -109,10 +113,12 @@ export function createConsistencyWaitlist({ Applicant, automation, notify, notif
     if (outcome !== 'complete') for (const charge of state.charged || []) { const key = charge.split(':')[0]; next.used[key] = Math.max(0, (next.used[key] || 0) - 1) }
     const result = await Applicant.collection.updateOne({ _id: account._id, 'consistencyState.token': token, 'consistencyState.status': 'checking', verificationStatus: account.verificationStatus }, { $set: { consistencyState: next, verificationStatus: nextStatus, ...(active ? { verificationReason: WAITLIST_MESSAGE } : wasWaitlisted ? { verificationReason: '' } : {}) } })
     if (!result.modifiedCount) return
+    const transition = !active && outcome === 'complete' ? await recomputeApplicant(id) : null
+    if (transition?.becameVerified) await notify({ recipient: { id: account._id, role: 'Applicant' }, type: 'account_verified', title: 'Account verified', message: 'All your required documents passed verification. Your account is now verified.', link: '/jobs', email: true })
     if (active && !wasWaitlisted) {
       await notify({ recipient: { id: account._id, role: 'Applicant' }, type: 'consistency_waitlisted', title: 'PESO review needed', message: `${WAITLIST_MESSAGE} Open My Documents to see what you can correct or explain.`, link: '/profile?documents=1' })
       await notifyAdmins({ type: 'consistency_waitlisted', title: 'Cross-check mismatch', message: 'An applicant requires consistency review. Open Flagged for review.', link: '/verification-flagged' })
-    } else if (!active && wasWaitlisted) await notify({ recipient: { id: account._id, role: 'Applicant' }, type: 'consistency_review_update', title: 'Document check completed', message: 'Your account has returned to normal PESO review. Open My Documents for the next steps.', link: '/profile?documents=1' })
+    } else if (!active && wasWaitlisted) await notify({ recipient: { id: account._id, role: 'Applicant' }, type: 'consistency_review_update', title: 'Document check completed', message: transition?.becameVerified ? 'Your corrected documents passed verification. Your account is verified and no admin review is needed.' : 'The cross-check flags are cleared. Open My Documents to see any remaining verification steps.', link: '/profile?documents=1' })
     if (active && state.charged?.length && issues.some(i => i.reasonCode !== 'staff_review' && remaining(next, i.docKey, config) === 0)) await notifyAdmins({ type: 'consistency_last_attempt', title: 'Correction chances used', message: 'An applicant needs staff review after using the available correction chances.', link: '/verification-flagged' })
   }
   async function explanation(id) {

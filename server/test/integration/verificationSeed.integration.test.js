@@ -14,7 +14,8 @@ it('seeds all eight fictional scenarios without changing the global approval swi
  expect(counts.scenarios).toBe(8)
  const load = async key => Applicant.findById(cases[key]._id).lean()
  expect((await load('autoApproved')).verificationStatus).toBe('approved')
- expect((await load('auditSample')).verificationDocuments.birthCertificate.versions[0].reviewReasons).toContain('Audit sample')
+ // A clean applicant remains verified even when the demo requests 100% sampling.
+ expect((await load('auditSample')).verificationDocuments.birthCertificate.versions[0]).toMatchObject({ status: 'approved', reviewReasons: [] })
  expect((await load('explained')).verificationDocuments.birthCertificate.versions[0].explanation.status).toBe('submitted')
  expect((await load('duplicateTin')).verificationDocuments.nsrpForm.versions[0].findings.some(f => f.ruleId === 'duplicate_tin')).toBe(true)
  expect((await load('uploadedNsrp')).verificationDocuments.nsrpForm.versions[0]).toMatchObject({ status: 'pending', sourceType: 'uploaded' })

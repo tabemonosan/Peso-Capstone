@@ -47,6 +47,8 @@ export async function seedVerificationScenarios({ tag = crypto.randomBytes(5).to
     if (all) for (const docKey of ['birthCertificate', 'validId1']) await instance.process({ role: 'Applicant', accountId: account._id, docKey, ip })
   }
   const autoApproved = await makeApplicant('unflagged', 'Amelia', 'Rivera'); await runApplicant(autoApproved, engine, true)
+  // Keep the scenario key for existing demo callers; clean applicant documents
+  // now pass even when the employer audit-sampling percentage is 100%.
   const auditSample = await makeApplicant('sample', 'Benito', 'Santos'); await runApplicant(auditSample, sampleEngine, true)
   const explained = await makeApplicant('explained', 'Camila', 'Garcia')
   await Applicant.updateOne({ _id: explained._id }, { $set: { 'verificationDocuments.birthCertificate.versions.0.findings': [{ ruleId: 'cross_birth_nsrp_dob', severity: 'critical', fieldGroup: 'birth date', evidence: 'independent', status: 'open' }], 'verificationDocuments.birthCertificate.versions.0.explanation': { status: 'submitted', category: 'Corrected record', note: 'Fictional demonstration: a corrected record is pending.' } } })

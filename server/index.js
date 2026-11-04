@@ -381,7 +381,7 @@ async function refreshApplicantVerification(id) {
 export const nsrpAutomation = createNsrpAutomation({ Applicant, Employer, EmployerRequest, notify, notifyAdmins, recomputeApplicant: refreshApplicantVerification })
 export const verificationEngine = createVerificationEngine({ Applicant, Employer, EmployerRequest, automation: nsrpAutomation, notify, notifyAdmins, recomputeApplicant: refreshApplicantVerification })
 nsrpAutomation.attachEngine(verificationEngine)
-export const consistencyWaitlist = createConsistencyWaitlist({ Applicant, automation: nsrpAutomation, notify, notifyAdmins, verifyDocument: params => verificationEngine.process(params) })
+export const consistencyWaitlist = createConsistencyWaitlist({ Applicant, automation: nsrpAutomation, notify, notifyAdmins, verifyDocument: params => verificationEngine.process(params), recomputeApplicant: refreshApplicantVerification })
 const scheduleConsistency = (id, docKey, reservation, ip) => consistencyWaitlist.begin(id, docKey, reservation, ip).catch(() => console.error('[verification] consistency check unavailable; manual review required'))
 app.use('/api/admin/nsrp-automation', createNsrpAutomationRouter({ automation: nsrpAutomation, authenticate: authenticateRequest, Admin, waitlist: consistencyWaitlist, review: (...args) => documentVerification.act(...args) }))
 export const documentVerification = createDocumentVerification({ Applicant, Employer, EmployerRequest, automation: nsrpAutomation, notify, recomputeApplicant: refreshApplicantVerification })

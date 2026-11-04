@@ -24,6 +24,17 @@ it('keeps explanations available while upload chances are exhausted', () => {
   expect(screen.getByRole('button', { name: 'Explain a difference' })).toBeEnabled()
   expect(screen.queryByRole('button', { name: /Resubmit|Replace|Upload document/i })).not.toBeInTheDocument()
 })
+it('does not request an explanation or admin review for a verified document', () => {
+  render(<MyDocumentsModal token="sample" onClose={() => {}} info={{ verificationStatus: 'approved', documents: [{ docKey: 'birthCertificate', label: 'Birth Certificate', status: 'approved', latest: { version: 1 } }] }} />)
+  expect(screen.getByText('Verified')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Explain a difference' })).not.toBeInTheDocument()
+  expect(screen.queryByText(/Waiting for PESO review/)).not.toBeInTheDocument()
+})
+it('shows an unprocessed document as checking without requesting an explanation', () => {
+  render(<MyDocumentsModal token="sample" onClose={() => {}} info={{ verificationStatus: 'under_review', documents: [{ docKey: 'birthCertificate', label: 'Birth Certificate', status: 'pending', latest: { version: 1 } }] }} />)
+  expect(screen.getByText('Checking')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Explain a difference' })).not.toBeInTheDocument()
+})
 it('requires a comparison checkbox and reason for admin release', async () => {
   const fetcher = vi.fn(async () => ({ ok: true, json: async () => ({ ok: true }) }))
   vi.stubGlobal('fetch', fetcher)

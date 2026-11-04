@@ -121,6 +121,17 @@ describe('consistency waitlist', () => {
     expect((await consistencyWaitlist.publicState(applicant._id)).status).toBe('under_review')
     expect(await Notification.countDocuments({ type: 'consistency_review_update' })).toBe(1)
   })
+  it('verifies a previously waitlisted account after all corrected documents pass', async () => {
+    await check()
+    reading.text = sampleText('1990-01-01').replace('1234567890', '4982761053')
+    await Applicant.updateOne({ _id: applicant._id }, { $set: { 'profile.nsrp.gsisSss': '4982761053', 'verificationDocuments.validId1.versions.0.declaredDetails.number': '4982761053' } })
+    await nsrpAutomation.updateSettings({ automaticApproval: true, auditPercent: 100, dataChecks: false }, admin.email)
+    await consistencyWaitlist.begin(applicant._id, 'nsrpForm', undefined, '192.0.2.8'); await drainVerificationJobs()
+    const saved = await Applicant.findById(applicant._id)
+    expect(saved.verificationDocuments.birthCertificate.versions[0].status, JSON.stringify(saved.verificationDocuments)).toBe('approved')
+    expect(saved.verificationDocuments.validId1.versions[0].status).toBe('approved')
+    expect(saved.verificationStatus).toBe('approved')
+  })
   it('enforces attempts independently of upload caps, keeps explanations available, and permits reasoned grants', async () => {
     await check()
     await nsrpAutomation.updateSettings({ waitlistAttempts: 1 }, admin.email)
