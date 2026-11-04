@@ -4,6 +4,22 @@ import JobsView from '../components/JobsView'
 const job = { _id: 'job-1', status: 'pending', title: 'Clerk', company: 'Example Works', description: 'Assist clients', requirements: 'Bring certificates', skills: ['Excel'], locationType: 'Hybrid', city: 'Legazpi City', province: 'Albay', employmentType: 'Probationary', education: 'College Level', experience: '1–3 years', salaryMin: 15000, salaryMax: 20000, payFrequency: 'Monthly', negotiable: false, slots: 3, notesToAdmin: 'Private review note', deadline: '2026-12-01T15:59:59Z' }
 afterEach(() => vi.unstubAllGlobals())
 describe('admin job review', () => {
+  it('recovers from a thrown approval error, permits retry, and releases page scrolling on success', async () => {
+    const review = vi.fn().mockRejectedValueOnce(new Error('Connection lost')).mockResolvedValueOnce({ ok: true })
+    vi.stubGlobal('fetch', vi.fn(async url => ({ ok: true, json: async () => ({ items: String(url).includes('status=pending') ? [job] : [], total: String(url).includes('status=pending') ? 1 : 0, totalPages: 1 }) })))
+    render(<JobsView activeRole="Admin" jobLoading={false} availableSkills={[]} appliedJobs={[]} appliedJobIds={new Set()} currentUser={{ email: 'admin@example.com' }} adminJobSearchTerm="" adminJobStatusFilter="all" filteredPendingJobs={[]} filteredApprovedJobs={[]} filteredDeclinedJobs={[]} showPendingAdminSection showApprovedAdminSection showDeclinedAdminSection handleReviewJob={review} token="token" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'View Clerk details' }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Clerk' })).getByRole('button', { name: 'Approve', exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, approve' }))
+    const confirmation = screen.getByRole('alertdialog')
+    await waitFor(() => expect(within(confirmation).getByRole('alert')).toHaveTextContent('Connection lost'))
+    expect(within(confirmation).getByRole('button', { name: 'Cancel' })).toBeEnabled()
+    fireEvent.click(within(confirmation).getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    expect(screen.queryByRole('dialog', { name: 'Clerk' })).not.toBeInTheDocument()
+    expect(document.body.style.overflow).toBe('')
+    expect(review).toHaveBeenCalledTimes(2)
+  })
   it.each([false, true])('shows request fields and retains approval confirmation (legacy location: %s)', async (legacy) => {
     const reviewItem = legacy ? { ...job, city: undefined, province: undefined, location: 'Street, Legazpi City, Albay, Landmark: nearby' } : job
     const review = vi.fn().mockResolvedValue({ ok: true })

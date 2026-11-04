@@ -4,6 +4,7 @@
 // an invalid value can never reach the database as a 500.
 import { SUFFIX_OPTIONS, validateNameFields } from './nameFields.js'
 import { NSRP_ROW_LIMITS } from './nsrpTableLimits.js'
+import { validateApplicantLocation } from './phLocations.js'
 
 export const CURRENT_YEAR = new Date().getFullYear()
 export const MIN_YEAR = 1950
@@ -59,13 +60,14 @@ export const NSRP_TEXT_LIMITS = {
 }
 
 export const NSRP_REQUIRED_FIELDS = [
-  'surname', 'firstName', 'dob', 'placeOfBirth', 'sex', 'civilStatus',
+  'surname', 'firstName', 'dob', 'placeOfBirth', 'sex', 'religion', 'height', 'civilStatus',
   'addressStreet', 'addressBarangay', 'addressCity', 'addressProvince',
-  'email', 'cellphone', 'employmentStatus', 'activelyLooking',
+  'email', 'cellphone', 'employmentStatus', 'employmentTypeDetail', 'activelyLooking',
   'willingImmediately', 'fourPs', 'occupation1',
 ]
 
 export const SEX_OPTIONS = ['Male', 'Female']
+export const RELIGION_OPTIONS = ['Roman Catholic', 'Islam', 'Iglesia ni Cristo', 'Iglesia Filipina Independiente (Aglipayan)', 'Protestant', 'Baptist', 'Born Again Christian', 'Evangelical Christian', 'Seventh-day Adventist', "Jehovah’s Witnesses", 'Church of Jesus Christ of Latter-day Saints', 'Buddhism', 'Hinduism', 'Judaism', 'Others', 'None', 'Prefer not to say']
 export const CIVIL_STATUS_OPTIONS = ['Single', 'Married', 'Widowed', 'Separated', 'Live-in']
 export const EMPLOYMENT_STATUS_OPTIONS = ['Employed', 'Unemployed']
 export const EMPLOYED_TYPES = ['Wage Employed', 'Self Employed']
@@ -74,6 +76,9 @@ export const YES_NO = ['Yes', 'No']
 export const DISABILITY_OPTIONS = ['Visual', 'Hearing', 'Speech', 'Physical', 'Others']
 export const EDUCATION_LEVELS = ['Elementary', 'Secondary', 'Tertiary', 'Graduate Studies']
 export const LANGUAGE_ROWS = ['English', 'Filipino', 'Others']
+export function requiresPassport(answers = {}) {
+  return ['overseasPref1', 'overseasPref2', 'overseasPref3'].some(key => typeof answers[key] === 'string' && answers[key].trim())
+}
 export function validateNsrpLanguages(languages) {
   const needsName = Array.isArray(languages) && languages.some((row) => row?.name === 'Others'
     && ['read', 'write', 'speak', 'understand'].some((key) => Boolean(row[key]))
@@ -249,6 +254,7 @@ export function validateNsrpBasicInfo(input = {}) {
     }
   }
 
+  Object.assign(fieldErrors, validateApplicantLocation(cleaned, { barangay: false }))
   return { values: cleaned, fieldErrors }
 }
 

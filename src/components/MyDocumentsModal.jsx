@@ -1,9 +1,12 @@
 import { useState } from "react"
 import { API_URL } from "../config"
+import { showNotice } from '../utils/portalNotice'
 import Modal from "./Modal"
 import { ID_TYPE_OPTIONS } from "./VerificationDocumentsForm"
 import ApplicantSignupWizard from "./ApplicantSignupWizard"
 import { NSRP_SOURCE_LABELS } from "../../shared/verificationDocs.js"
+import DeclaredDocumentFields from './DeclaredDocumentFields'
+import DocumentExplanationForm from './DocumentExplanationForm'
 
 // Applicant-facing documents modal: one card per requirement with a status
 // badge, file details, View (signed expiring URL), and Replace/Upload for
@@ -11,13 +14,15 @@ import { NSRP_SOURCE_LABELS } from "../../shared/verificationDocs.js"
 export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
   const [pendingFile, setPendingFile] = useState({})
   const [pendingIdType, setPendingIdType] = useState({})
+  const [declared, setDeclared] = useState({})
   const [uploading, setUploading] = useState(null)
   const [error, setError] = useState("")
   const [correctionDoc, setCorrectionDoc] = useState(null)
   const [correctionReason, setCorrectionReason] = useState('')
   const [success, setSuccess] = useState('')
+  const [explanationDoc, setExplanationDoc] = useState(null)
   const nsrpDocument = info.documents?.find((doc) => doc.docKey === 'nsrpForm')
-  const [editingNsrp, setEditingNsrp] = useState(() => new URLSearchParams(window.location.search).get("editNsrp") === "1" && ['missing', 'rejected'].includes(nsrpDocument?.status) && nsrpDocument.uploadsRemaining !== 0)
+  const [editingNsrp, setEditingNsrp] = useState(() => new URLSearchParams(window.location.search).get("editNsrp") === "1" && ['missing', 'rejected', 'needs_resubmission'].includes(nsrpDocument?.status) && nsrpDocument.uploadsRemaining !== 0)
   const documents = [...(info.documents || [])]
   if (!documents.some((doc) => doc.docKey === 'validId2')) documents.push({ docKey: 'validId2', label: 'Valid ID #2', required: false, status: 'missing', uploadsRemaining: 5 })
   const closeEditor = () => {
@@ -28,13 +33,14 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
   }
 
   const viewVersion = (url) => {
-    if (!url) return alert("Document link unavailable")
+    if (!url) return showNotice("Document link unavailable")
     window.open(`${API_URL}${url}`, "_blank")
   }
 
   const pickFile = (docKey, file) => {
     setError("")
     if (!file) return setPendingFile((current) => ({ ...current, [docKey]: null }))
+    if (docKey === 'nsrpForm' && (file.type !== 'application/pdf' || !/\.pdf$/i.test(file.name))) return setError('The NSRP form must be a PDF file.')
     const acceptedTypes = ["image/jpeg", "image/png", "application/pdf"]
     if (!acceptedTypes.includes(file.type)) return setError("Only JPG, PNG, or PDF files are accepted.")
     if (file.size > 5 * 1024 * 1024) return setError(`"${file.name}" is too large. Maximum is 5 MB.`)
@@ -49,6 +55,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
     try {
       const payload = new FormData()
       payload.append("document", file)
+      payload.append('verificationDetails', JSON.stringify(declared[docKey] || {}))
       if (docKey.startsWith("validId") && pendingIdType[docKey]) payload.append("idType", pendingIdType[docKey])
       const response = await fetch(`${API_URL}/api/profile/verification-documents/${docKey}`, {
         method: "POST",
@@ -97,7 +104,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
       pending: "border-amber-300 bg-amber-100 text-amber-800",
       missing: "border-slate-300 bg-slate-100 text-slate-600",
     }
-    const label = { approved: 'Approved', rejected: 'Needs correction', pending: 'Pending review', missing: 'Missing' }[status] || status || 'Missing'
+    const label = { approved: 'Approved', rejected: 'Needs correction', needs_resubmission: 'Please resubmit', pending: 'Pending review', missing: 'Missing' }[status] || status || 'Missing'
     return <span className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${styles[status] || styles.missing}`}>{label}</span>
   }
 
@@ -150,7 +157,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
 
       <ul className="mt-5 space-y-3">
         {documents.map((doc) => {
-          const canReplace = ["rejected", "missing"].includes(doc.status) && doc.uploadsRemaining !== 0
+          const canReplace = ["rejected", "needs_resubmission", "missing"].includes(doc.status) && doc.uploadsRemaining !== 0
           const locked = doc.status === "approved"
           return (
             <li key={doc.docKey} className="rounded-xl bg-slate-50 p-3 text-sm">
@@ -196,12 +203,13 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
                 <p className="mt-1 text-xs text-slate-400">Not uploaded yet.</p>
               )}
 
-              {doc.status === "rejected" && doc.latest?.reviewReason && (
+              {["rejected", "needs_resubmission"].includes(doc.status) && doc.latest?.reviewReason && (
                 <p className="mt-2 rounded-lg border border-rose-300 bg-rose-50 p-2 text-xs text-rose-700">
                   PESO feedback: {doc.latest.reviewReason}
                 </p>
               )}
               {doc.status === 'pending' && <p className="mt-2 text-xs text-amber-800">Submitted for PESO review. Please wait for feedback before resubmitting.</p>}
+              {['nsrpForm', 'birthCertificate', 'validId1', 'validId2'].includes(doc.docKey) && doc.latest && <button type="button" onClick={() => setExplanationDoc(doc.docKey)} className="mt-2 rounded border border-slate-300 bg-white px-3 py-1 text-xs text-cyan-800">Explain a difference</button>}
               {locked && <p className="mt-2 text-xs text-green-700">Approved by PESO. You can view this document or request a correction if information changes.</p>}
               {doc.correctionRequest && <p className="mt-2 rounded-lg border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">Correction requested: {doc.correctionRequest.reason}. Waiting for PESO review.</p>}
               {locked && !doc.correctionRequest && <button type="button" onClick={() => { setCorrectionDoc(doc.docKey); setCorrectionReason(''); setError(''); setSuccess('') }} className="mt-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold">Request correction</button>}
@@ -228,7 +236,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
                           <input
                             type="file"
                             aria-label="Replace NSRP file"
-                            accept="image/jpeg,image/png,application/pdf"
+                            accept="application/pdf,.pdf"
                             onChange={(e) => pickFile(doc.docKey, e.target.files?.[0] || null)}
                             className="text-xs text-slate-700 file:mr-2 file:rounded-lg file:border-0 file:bg-slate-200 file:px-2 file:py-1 file:text-xs file:font-semibold file:text-slate-900"
                           />
@@ -246,6 +254,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
                     </>
                   ) : (
                     <>
+                  {doc.docKey !== 'nsrpForm' && <DeclaredDocumentFields docKey={doc.docKey} idType={pendingIdType[doc.docKey] || doc.idType} value={declared[doc.docKey]} onChange={value => setDeclared(current => ({ ...current, [doc.docKey]: value }))} />}
                   {doc.docKey.startsWith("validId") && (
                     <select
                       value={pendingIdType[doc.docKey] || ""}
@@ -287,6 +296,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
       )}
       </>
       )}
+      {explanationDoc && <DocumentExplanationForm token={token} docKey={explanationDoc} onClose={() => setExplanationDoc(null)} onSent={() => { setSuccess('Your explanation was sent to PESO.'); onUpdated?.() }} />}
     </Modal>
   )
 }

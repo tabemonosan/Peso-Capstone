@@ -34,7 +34,7 @@ describe('AllDashboard', () => {
 
   it.each([
     ['Employer', { jobs: { pending: 2, approved: 3, declined: 1 }, applicants: 4, referrals: { total: 5 }, hires: 1 }, 'Jobs pending', 'employer'],
-    ['Applicant', { verificationStatus: 'approved', documentsAwaitingReview: 1, applications: 4, referrals: { total: 2 } }, 'Applications', 'jobs'],
+    ['Applicant', { verificationStatus: 'approved', documentsAwaitingReview: 1, applications: 4, referrals: { total: 2 } }, 'Applications', 'my-applications'],
   ])('shows only %s metrics and navigates to its own role pages', async (role, stats, label, destination) => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => ({ role, stats, charts: { applications: [] }, activity: [] }) })
     const navigate = vi.fn()

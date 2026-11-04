@@ -1,8 +1,10 @@
 import { useRef, useState } from 'react'
 import CityProvinceFields from './CityProvinceFields'
+import { PH_LOCATIONS } from '../../shared/phLocations.js'
 import JobTitlePicker from './JobTitlePicker'
 import { LOCATION_TYPES, EMPLOYMENT_TYPES, PAY_FREQUENCIES, EDUCATION_LEVELS, EXPERIENCE_LEVELS, JOB_LIMITS, deadlineBounds, validateJobPosting, formatSalary, formatLocation, parseAmount } from '../../shared/jobPosting.js'
 import { minimumWageWarning } from '../../shared/minimumWage.js'
+import { JOB_SKILL_OPTIONS, canonicalJobSkill, normalizeJobSkill, coveringJobSkill, addJobSkill } from '../../shared/jobSkills.js'
 
 const control = 'shared-form-control mt-2 w-full rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-black disabled:opacity-50'
 const digits = (value) => String(value ?? '').replace(/\D/g, '')
@@ -15,6 +17,7 @@ export default function JobPostingFields({ value, onChange, categories, suggesti
   const [activeSkill, setActiveSkill] = useState(0)
   const skillInputRef = useRef(null)
   const [preview, setPreview] = useState(false)
+  const [skillNotice, setSkillNotice] = useState('')
   const set = (key, next) => onChange({ ...value, [key]: next })
   const blur = (key) => {
     const result = validateJobPosting(value, { keepDeadline })
@@ -40,15 +43,16 @@ export default function JobPostingFields({ value, onChange, categories, suggesti
     {error(key)}
   </div>
   const addSkill = (candidate = skill) => {
-    const next = candidate.trim()
-    if (!next) return
-    if (next.length > JOB_LIMITS.skillMax || value.skills.length >= JOB_LIMITS.skillsMax) { setErrors?.((current) => ({ ...current, skills: 'Use up to 30 skills, each 60 characters or fewer.' })); return }
-    if (!value.skills.some((item) => item.toLowerCase() === next.toLowerCase())) set('skills', [...value.skills, next])
+    const result = addJobSkill(value.skills, candidate)
+    if (result.error) { setErrors?.((current) => ({ ...current, skills: result.error })); return }
+    if (result.skills.length > JOB_LIMITS.skillsMax) { setErrors?.((current) => ({ ...current, skills: 'Use up to 30 skills.' })); return }
+    set('skills', result.skills)
+    setSkillNotice(result.removed.length ? `${canonicalJobSkill(candidate)} replaces ${result.removed.join(', ')}.` : '')
     setSkill('')
     setErrors?.((current) => ({ ...current, skills: '' }))
   }
-  const skillOptions = [...new Map(suggestions.filter((item) => typeof item === 'string' && item.trim()).map((item) => [item.trim().toLowerCase(), item.trim()])).values()]
-    .filter((item) => item.toLowerCase().includes(skill.trim().toLowerCase()))
+  const skillOptions = [...new Set((suggestions.length ? suggestions : JOB_SKILL_OPTIONS).map(canonicalJobSkill).filter(Boolean))]
+    .filter((item) => normalizeJobSkill(item).includes(normalizeJobSkill(skill)))
   const selectSkill = (item) => {
     const selected = value.skills.some((entry) => entry.toLowerCase() === item.toLowerCase())
     if (selected) set('skills', value.skills.filter((entry) => entry.toLowerCase() !== item.toLowerCase()))
@@ -59,16 +63,17 @@ export default function JobPostingFields({ value, onChange, categories, suggesti
   const bounds = deadlineBounds()
   const warning = !value.negotiable ? minimumWageWarning(parseAmount(value.salaryMin), value.payFrequency, value.province) : ''
   return <div className="mt-4 space-y-6 text-black">
-    <p className="text-xs text-slate-600">* Required fields</p>
+    <p className="text-sm text-slate-600">Complete all fields marked with an asterisk (*). Other fields are optional.</p>
     <fieldset disabled={disabled} className="space-y-4"><legend className="mb-3 text-base font-semibold">Job Details</legend>
       <JobTitlePicker id={`${id}-title`} categories={categories} title={value.title} customTitle={value.customTitle} onChange={(next) => onChange({ ...value, ...next })} disabled={disabled} onBlur={() => blur('title')} error={errors.title} />
       {field('description', 'Description', { textarea: true, required: true, maxLength: JOB_LIMITS.descriptionMax })}
       <div className="grid gap-4 sm:grid-cols-2">{field('locationType', 'Location type', { options: LOCATION_TYPES, required: true })}{field('employmentType', 'Employment type', { options: EMPLOYMENT_TYPES, required: true })}
         {value.locationType !== 'Remote' && <>
-          <CityProvinceFields id={id} city={value.city} province={value.province} disabled={disabled} errors={errors} onChange={(place) => onChange({ ...value, ...place })} onBlur={(key) => { if (value[key]) blur(key) }} />
+          <CityProvinceFields id={id} city={value.city} province={value.province} disabled={disabled} errors={errors} onChange={(place) => { onChange({ ...value, ...place, barangay: '' }); setErrors?.((current) => ({ ...current, barangay: '' })) }} onBlur={(key) => { if (value[key]) blur(key) }} />
+          {field('barangay', 'Barangay', { options: PH_LOCATIONS[value.city] || [] })}
           {registeredAddress.city && registeredAddress.province && <div className="sm:col-span-2 text-xs text-slate-600">
             <p>Using your registered address. Change it if this job is in a different location.</p>
-            {(value.city !== registeredAddress.city || value.province !== registeredAddress.province) && <button type="button" disabled={disabled} className="mt-1 text-cyan-700 underline" onClick={() => { onChange({ ...value, ...registeredAddress }); setErrors?.((current) => ({ ...current, city: '', province: '' })) }}>Reset to my address</button>}
+            {(value.city !== registeredAddress.city || value.province !== registeredAddress.province || value.barangay !== (registeredAddress.barangay || '')) && <button type="button" disabled={disabled} className="mt-1 text-cyan-700 underline" onClick={() => { onChange({ ...value, barangay: '', ...registeredAddress }); setErrors?.((current) => ({ ...current, city: '', province: '', barangay: '' })) }}>Reset to my address</button>}
           </div>}
         </>}
       </div>
@@ -77,15 +82,16 @@ export default function JobPostingFields({ value, onChange, categories, suggesti
       <div className="grid gap-4 sm:grid-cols-2">{field('education', 'Educational attainment', { options: EDUCATION_LEVELS })}{field('experience', 'Years of experience', { options: EXPERIENCE_LEVELS })}</div>
       {field('requirements', 'Additional requirements', { textarea: true, maxLength: JOB_LIMITS.requirementsMax })}
       <div><label htmlFor={`${id}-skills`} className="text-sm font-medium">Required skills *</label>
-        <div className="mt-2 flex flex-wrap gap-2">{value.skills.map((item) => <span key={item} className="flex items-center gap-2 rounded-full bg-cyan-50 px-3 py-1 text-sm text-cyan-900">{item}<button type="button" disabled={disabled} aria-label={`Remove ${item}`} onClick={() => set('skills', value.skills.filter((entry) => entry !== item))}>×</button></span>)}</div>
+        <div className="job-selected-skills mt-2 flex flex-wrap gap-2" aria-label="Selected required skills">{value.skills.map((item) => <span key={item} className={`job-skill-chip ${canonicalJobSkill(item) ? '' : 'job-skill-chip-invalid'}`}><span aria-hidden="true">{canonicalJobSkill(item) ? '\u2713' : '!'}</span>{item}<button type="button" disabled={disabled} aria-label={`Remove ${item}`} onClick={() => { set('skills', value.skills.filter((entry) => entry !== item)); setErrors?.((current) => ({ ...current, skills: '' })); setSkillNotice('') }}>×</button></span>)}</div>
+        {value.skills.some((item) => !canonicalJobSkill(item)) && <p className="mt-2 text-xs text-amber-800">Remove unrecognized skills and choose replacements from the approved list before submitting.</p>}
         <div className="relative" onBlur={(event) => {
           if (!event.currentTarget.contains(event.relatedTarget)) { setSkillsOpen(false); blur('skills') }
         }}>
           <input ref={skillInputRef} id={`${id}-skills`} value={skill} role="combobox" aria-autocomplete="list"
             aria-expanded={skillsOpen} aria-controls={`${id}-skill-suggestions`}
             aria-activedescendant={skillsOpen && skillOptions[activeSkill] ? `${id}-skill-option-${activeSkill}` : undefined}
-            className={control} maxLength={JOB_LIMITS.skillMax} placeholder="Search and select skills, or type a skill and press Enter"
-            disabled={disabled} aria-invalid={Boolean(errors.skills)} aria-describedby={errors.skills ? `${id}-skills-error` : undefined}
+            className={control} maxLength={JOB_LIMITS.skillMax} placeholder="Search the approved skills list"
+            disabled={disabled} aria-invalid={Boolean(errors.skills)} aria-describedby={`${id}-skills-help${errors.skills ? ` ${id}-skills-error` : ''}`}
             onFocus={() => setSkillsOpen(true)} onChange={(e) => { setSkill(e.target.value); setActiveSkill(0); setSkillsOpen(true) }}
             onKeyDown={(e) => {
               if (e.key === 'Escape') setSkillsOpen(false)
@@ -107,17 +113,20 @@ export default function JobPostingFields({ value, onChange, categories, suggesti
             className="absolute z-20 mt-1 max-h-60 w-full overflow-y-auto rounded-xl border border-slate-300 bg-white p-1 shadow-lg">
             {skillOptions.map((item, index) => {
               const selected = value.skills.some((entry) => entry.toLowerCase() === item.toLowerCase())
+              const coveredBy = coveringJobSkill(item, value.skills)
               return <li key={item} role="option" id={`${id}-skill-option-${index}`} aria-selected={selected}
-                onMouseDown={(event) => event.preventDefault()} onClick={() => selectSkill(item)}
-                className={`flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-900 hover:bg-cyan-50 ${index === activeSkill ? 'bg-slate-50' : ''}`}>
-                <span aria-hidden="true" className={`flex h-4 w-4 items-center justify-center rounded border ${selected ? 'border-cyan-600 bg-cyan-100 text-cyan-900' : 'border-slate-300 bg-white'}`}>{selected ? '\u2713' : ''}</span>
-                {item}
+                aria-label={coveredBy ? `${item}. Included in ${coveredBy}` : item}
+                aria-disabled={Boolean(coveredBy)} onMouseDown={(event) => event.preventDefault()} onClick={() => { if (!coveredBy) selectSkill(item) }}
+                className={`job-skill-option flex items-center gap-2 rounded-lg px-3 py-2 text-sm ${coveredBy ? 'job-skill-option-covered cursor-not-allowed' : selected ? 'job-skill-option-selected cursor-pointer' : 'cursor-pointer text-slate-900 hover:bg-cyan-50'} ${index === activeSkill ? 'ring-1 ring-inset ring-cyan-300' : ''}`}>
+                <span aria-hidden="true" className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${selected ? 'border-cyan-600 bg-cyan-100 text-cyan-900' : 'border-slate-300 bg-white'}`}>{selected ? '\u2713' : ''}</span>
+                <span>{item}{coveredBy && <span className="block text-xs">{' '}Included in {coveredBy}</span>}</span>
               </li>
             })}
-            {!skillOptions.length && <li className="px-3 py-2 text-sm text-slate-600">{skill.trim() ? 'Press Enter to add this skill.' : 'Type a skill and press Enter.'}</li>}
+            {!skillOptions.length && <li className="px-3 py-2 text-sm text-slate-600">No approved skill matches. Try another search. Custom skills cannot be added.</li>}
           </ul>}
         </div>
-        <p className="mt-1 text-xs text-slate-600">Click skills to select multiple. Click a selected skill again or use its X to remove it.</p>
+        <p id={`${id}-skills-help`} className="mt-2 text-xs text-slate-600">Select approved skills. Broader skills replace the narrower skills they include. Use × to remove a selection. {value.skills.length}/{JOB_LIMITS.skillsMax} selected.</p>
+        {skillNotice && <p role="status" className="mt-2 rounded-lg border border-cyan-200 bg-cyan-50 p-2 text-xs text-cyan-900">{skillNotice}</p>}
         {error('skills')}
       </div>
     </fieldset>

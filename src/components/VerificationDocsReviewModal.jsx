@@ -1,5 +1,7 @@
-﻿import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { API_URL } from "../config"
+import { showNotice } from '../utils/portalNotice'
+import { fetchWithTimeout } from '../utils/fetchWithTimeout'
 import Modal from "./Modal"
 import ConfirmDialog from "./ConfirmDialog"
 import { formatFullName } from "../../shared/nameFields.js"
@@ -13,6 +15,10 @@ const QUICK_REJECT_REASONS = ["Blurry or unreadable", "Wrong document type", "Na
 // - Resubmitted documents (new pending version after a rejection) are flagged.
 // - Version history is expandable so admins can compare with previous versions.
 // - Reject requires a reason; the applicant only has to re-upload that document.
+import { AdminNsrpAccountDecision } from './AdminNsrpAutomation'
+import ManualDocumentChecklist from './ManualDocumentChecklist'
+import { needsManualChecklist, completeChecklist } from '../../shared/manualDocumentReview.js'
+
 export default function VerificationDocsReviewModal({ applicant, token, onClose, onReviewed, onRestrict, onUnrestrict, readOnly = false }) {
   const [documents, setDocuments] = useState(null)
   const [status, setStatus] = useState(null)
@@ -20,6 +26,8 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
   const [expanded, setExpanded] = useState({}) // docKey -> bool
   // confirmAction: { docKey, action: 'approved' | 'rejected' | 'revert' } | null
   const [confirmAction, setConfirmAction] = useState(null)
+  const [checklist, setChecklist] = useState({})
+  useEffect(() => { setChecklist({}) }, [confirmAction])
   const [accountAction, setAccountAction] = useState(null)
   const [actionBusy, setActionBusy] = useState(false)
   const [actionError, setActionError] = useState("")
@@ -50,7 +58,7 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
   }, [load])
 
   const viewVersion = (url) => {
-    if (!url) return alert("Document link unavailable")
+    if (!url) return showNotice("Document link unavailable")
     window.open(`${API_URL}${url}`, "_blank")
   }
 
@@ -68,10 +76,10 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
     setActionError("")
     try {
       const isRevert = decision === "revert"
-      const response = await fetch(`${API_URL}/api/applicants/${applicant.id}/verification-documents/${docKey}`, {
+      const response = await fetchWithTimeout(`${API_URL}/api/applicants/${applicant.id}/verification-documents/${docKey}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify(isRevert ? { action: "revert", reason: reason.trim() } : { status: decision, reason: reason.trim() }),
+        body: JSON.stringify(isRevert ? { action: "revert", reason: reason.trim() } : { status: decision, reason: reason.trim(), ...(decision === 'approved' ? { unresolved: documents?.find(doc => doc.docKey === docKey)?.unresolved || 0, checklist } : {}) }),
       })
       const data = await response.json().catch(() => null)
       if (!response.ok || data?.error) {
@@ -180,6 +188,7 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
         </div>
 
         <section aria-labelledby="applicant-details-heading" className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+          {!readOnly && <AdminNsrpAccountDecision token={token} accountId={applicant.id} role="Applicant" onChanged={() => { load(); onReviewed?.() }} />}
           <h3 id="applicant-details-heading" className="font-semibold text-slate-900">Applicant details</h3>
           <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
             <div>
@@ -397,7 +406,7 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
         )}
 
         {toast && (
-          <p role="status" className="fixed bottom-4 left-1/2 z-[90] -translate-x-1/2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-lg">
+          <p role="status" className="fixed bottom-4 left-1/2 z-[90] -translate-x-1/2 rounded-xl border border-green-300 bg-white px-4 py-2 text-sm font-semibold text-green-900 shadow-lg">
             {toast}
           </p>
         )}
@@ -420,14 +429,16 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
             return (
               <ConfirmDialog
                 title={`Approve ${docLabel} for ${applicantName}?`}
-                note="The applicant will be notified."
+                note={`${doc?.unresolved || 0} flags unresolved. Approve anyway? The applicant will be notified.`}
                 confirmLabel="Yes, approve"
                 busyLabel="Approving..."
                 busy={actionBusy}
+                requireReason reasonMinLength={1} reasonMaxLength={500}
                 error={actionError}
-                onConfirm={() => review(confirmAction.docKey, "approved")}
+                onConfirm={(reason) => review(confirmAction.docKey, "approved", reason)}
                 onCancel={() => setConfirmAction(null)}
-              />
+                confirmDisabled={needsManualChecklist(confirmAction.docKey) && !completeChecklist(checklist)}
+              >{needsManualChecklist(confirmAction.docKey) && <ManualDocumentChecklist value={checklist} onChange={setChecklist} />}</ConfirmDialog>
             )
           }
           if (confirmAction.action === "rejected") {

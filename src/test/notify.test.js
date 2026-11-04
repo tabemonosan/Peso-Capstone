@@ -27,6 +27,14 @@ const base = {
 }
 
 describe('notify()', () => {
+  it('returns the saved notification while optional SMTP delivery is still pending', async () => {
+    const mail = vi.fn(() => new Promise(() => {}))
+    const { notify, created } = makeNotifier({ mail })
+    const result = await notify({ ...base, email: true })
+    expect(result._id).toBe('n1')
+    expect(created).toHaveLength(1)
+    expect(mail).toHaveBeenCalledOnce()
+  }, 1000)
   it('saves a notification with recipient id and role', async () => {
     const { notify, created } = makeNotifier()
     await notify(base)

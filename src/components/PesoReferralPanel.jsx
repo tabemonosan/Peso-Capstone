@@ -4,6 +4,9 @@ import Pagination from "./Pagination"
 import { usePagination } from "../hooks/usePagination"
 import { formatFullName } from "../../shared/nameFields.js"
 import { outcomeLabel } from "../../shared/employmentReporting.js"
+import { rankJobApplicants } from '../../shared/applicantSuitability.js'
+import ApplicantSuitability from './ApplicantSuitability'
+import ConfirmDialog from './ConfirmDialog'
 
 function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, initialApplicantIds = [], onViewUpdates, onViewClientFeedback }) {
   const [jobs, setJobs] = useState([])
@@ -17,6 +20,7 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
+  const [manualRequest, setManualRequest] = useState(null)
   const jobGroupRefs = useRef({})
 
   const applicants = useMemo(
@@ -110,7 +114,8 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
     }
   }, [initialJobId, jobs])
 
-  const handleCreateReferrals = async (jobId, applicantIds) => {
+  const handleCreateReferrals = async (jobId, applicantIds, reason) => {
+    if (!reason) { setError(''); setManualRequest({ jobId, applicantIds }); return }
     if (!token) {
       setError("Not authenticated")
       return
@@ -137,6 +142,7 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
         body: JSON.stringify({
           jobId,
           applicantIds,
+          reason,
         }),
       })
 
@@ -146,6 +152,7 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
       }
 
       setSuccess(`Created ${data?.createdCount || 0} referral(s).`)
+      setManualRequest(null)
       setReferredApplicantIdsByJob((current) => ({
         ...current,
         [jobId]: [...new Set([...(current[jobId] || []), ...applicantIds])],
@@ -162,21 +169,22 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
   }
 
   return (
-    <section className="admin-referrals-card portal-card rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-      <h2 className="text-xl font-semibold text-white">PESO Referral Panel</h2>
-      <p className="mt-3 text-slate-400">Create referrals for applicants who applied to approved postings and monitor hire reports.</p>
+    <section className="admin-referrals-card portal-card rounded-2xl border border-slate-200 bg-white p-6">
+      {manualRequest && <ConfirmDialog title="Create manual referral" note="A reason is required and will be recorded in the audit history." requireReason reasonMinLength={1} busy={submitting} error={error} onConfirm={(reason) => handleCreateReferrals(manualRequest.jobId, manualRequest.applicantIds, reason)} onCancel={() => setManualRequest(null)} />}
+      <h2 className="text-xl font-semibold text-slate-900">Manual referral queue</h2>
+      <p className="mt-3 text-slate-600">Create referrals for applicants who applied to approved postings and monitor hire reports.</p>
       {onViewClientFeedback && <button type="button" onClick={onViewClientFeedback} className="mt-4 rounded-full border border-cyan-300 bg-white px-4 py-2 text-sm font-semibold text-cyan-900">View client feedback</button>}
 
-      {loading && <p className="mt-4 text-slate-300">Loading referral panel data...</p>}
-      {!loading && error && <p className="mt-4 text-sm text-rose-300">{error}</p>}
-      {!loading && success && <p className="mt-4 text-sm text-cyan-300">{success}</p>}
+      {loading && <p className="mt-4 text-slate-700">Loading referral panel data...</p>}
+      {!loading && error && <p className="mt-4 text-sm text-rose-700">{error}</p>}
+      {!loading && success && <p className="mt-4 text-sm text-cyan-800">{success}</p>}
 
-      <div className="admin-referrals-panel mt-6 rounded-2xl border border-slate-800 bg-slate-950/80 p-5">
-        <h3 className="text-lg font-semibold text-white">Create Referrals</h3>
+      <div className="admin-referrals-panel mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-5">
+        <h3 className="text-lg font-semibold text-slate-900">Create Referrals</h3>
 
         <div className="mt-4 space-y-4">
           {jobs.length === 0 ? (
-            <p className="text-sm text-slate-400">No approved job postings available.</p>
+            <p className="text-sm text-slate-600">No approved job postings available.</p>
           ) : (
             referralJobsPagination.paginate(orderedJobs).map((job) => {
               const jobId = String(job._id || job.id)
@@ -192,12 +200,12 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
               const statusByApplicant = referralStatusByJob[jobId] || {}
               // Keep declined applicants visible so admins see the employer declined them;
               // hide applicants who are actively referred (pending/accepted).
-              const visibleApplicants = appliedApplicants.filter((applicant) => {
+              const visibleApplicants = rankJobApplicants(job, appliedApplicants.filter((applicant) => {
                 const applicantId = String(applicant.id || applicant._id)
                 const status = statusByApplicant[applicantId]
                 if (status === 'declined') return true
                 return !referredApplicantIds.includes(applicantId)
-              })
+              }))
 
               return (
                 <div
@@ -205,14 +213,13 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
                   ref={(element) => {
                     jobGroupRefs.current[jobId] = element
                   }}
-                  className="admin-referral-job rounded-2xl border border-slate-800 bg-slate-900/70 p-4"
+                  className="admin-referral-job rounded-2xl border border-slate-200 bg-white p-4"
                 >
                   <div className="flex items-center justify-between gap-4">
-                    <h4 className="font-semibold text-white">{job.title}</h4>
+                    <h4 className="font-semibold text-slate-900">{job.title}</h4>
                     <button
                       type="button"
                       onClick={() => {
-                        if (!window.confirm(`Refer all ${visibleApplicants.length} applicants to this job?`)) return
                         handleCreateReferrals(
                           jobId,
                           visibleApplicants.map((applicant) => String(applicant.id || applicant._id)),
@@ -221,7 +228,7 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
                       disabled={submitting || visibleApplicants.length === 0}
                       className={`rounded-2xl px-3 py-2 text-sm font-semibold ${
                         submitting || visibleApplicants.length === 0
-                          ? "bg-slate-700 text-slate-400"
+                          ? "bg-slate-200 text-slate-600"
                           : "bg-cyan-500 text-slate-950"
                       }`}
                     >
@@ -229,7 +236,7 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
                     </button>
                   </div>
 
-                  <div className="mt-3 space-y-1 text-sm text-slate-400">
+                  <div className="mt-3 space-y-1 text-sm text-slate-600">
                     <p>Company: {job.company || 'N/A'}</p>
                     <p>Location: {job.location || 'Remote'}</p>
                     <p>Description: {job.description || 'N/A'}</p>
@@ -239,7 +246,7 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
                   </div>
 
                   {visibleApplicants.length === 0 ? (
-                    <p className="mt-3 text-sm text-slate-400">
+                    <p className="mt-3 text-sm text-slate-600">
                       {appliedApplicants.length === 0
                         ? "No applicants have applied to this job yet."
                         : "All applicants who applied have been referred for this job."}
@@ -254,13 +261,13 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
                         return (
                           <div
                             key={applicantId}
-                            className={`admin-referral-applicant flex items-center justify-between gap-4 rounded-2xl border bg-slate-900 px-3 py-3 text-sm ${
-                              highlighted ? "border-amber-400" : "border-slate-700"
+                            className={`admin-referral-applicant flex items-center justify-between gap-4 rounded-2xl border bg-white px-3 py-3 text-sm ${
+                              highlighted ? "border-amber-400" : "border-slate-300"
                             }`}
                           >
                             <div>
                               <div className="flex items-center gap-2">
-                                <p className="font-medium text-white">
+                                <p className="font-medium text-slate-900">
                                   {formatFullName(applicant.profile) || applicant.email}
                                 </p>
                                 {highlighted && (
@@ -269,23 +276,22 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
                                   </span>
                                 )}
                                 {referralStatusByJob[jobId]?.[applicantId] === 'declined' && (
-                                  <span className="rounded-full bg-red-500 px-2 py-0.5 text-xs font-semibold text-white">
+                                  <span className="rounded-full bg-red-500 px-2 py-0.5 text-xs font-semibold text-slate-900">
                                     Declined by employer
                                   </span>
                                 )}
                               </div>
-                              <p className="text-xs text-slate-400">{applicant.email}</p>
+                              <p className="text-xs text-slate-600">{applicant.email}</p>
+                              <ApplicantSuitability suitability={applicant.suitability} />
                             </div>
                             <button
                               type="button"
                               onClick={() => {
-                                const applicantName = formatFullName(applicant.profile) || applicant.email
-                                if (!window.confirm(`Refer ${applicantName} to ${job.title}?`)) return
                                 handleCreateReferrals(jobId, [applicantId])
                               }}
                               disabled={submitting}
                               className={`rounded-2xl px-3 py-2 text-sm font-semibold ${
-                                submitting ? "bg-slate-700 text-slate-400" : "bg-cyan-500 text-slate-950"
+                                submitting ? "bg-slate-200 text-slate-600" : "bg-cyan-500 text-slate-950"
                               }`}
                             >
                               Approve
@@ -324,16 +330,16 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
         )}
       </div>
 
-      <div className="admin-hire-reports mt-6 rounded-2xl border border-slate-800 bg-slate-950/80 p-5">
-        <h3 className="text-lg font-semibold text-white">Hire Reports Tracking</h3>
+      <div className="admin-hire-reports mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-5">
+        <h3 className="text-lg font-semibold text-slate-900">Hire Reports Tracking</h3>
         {onViewUpdates && <button type="button" onClick={onViewUpdates} className="mt-3 rounded-lg border border-cyan-300 bg-white px-3 py-2 text-sm font-semibold text-cyan-900">Compare applicant and employer updates</button>}
         {hireReports.length === 0 ? (
-          <p className="mt-3 text-sm text-slate-400">No hire reports yet.</p>
+          <p className="mt-3 text-sm text-slate-600">No hire reports yet.</p>
         ) : (
           <div className="mt-4 overflow-x-auto">
-            <table className="min-w-full border-collapse text-left text-sm text-slate-200">
+            <table className="min-w-full border-collapse text-left text-sm text-slate-800">
               <thead>
-                <tr className="border-b border-slate-700 text-xs uppercase tracking-[0.2em] text-slate-400">
+                <tr className="border-b border-slate-300 text-xs uppercase tracking-[0.2em] text-slate-600">
                   <th className="px-2 py-2">Status</th>
                   <th className="px-2 py-2">Reported by</th>
                   <th className="px-2 py-2">Hire / deployment date</th>
@@ -347,7 +353,7 @@ function PesoReferralPanel({ token, adminUsers, onLoadApplicants, initialJobId, 
               </thead>
               <tbody>
                 {hireReportsPagination.paginate(hireReports).map((report) => (
-                  <tr key={report._id} className="border-b border-slate-800">
+                  <tr key={report._id} className="border-b border-slate-200">
                     <td className="px-2 py-2">{outcomeLabel(report.status)}</td>
                     <td className="px-2 py-2">{report.reportedByRole || 'Employer'}</td>
                     <td className="px-2 py-2">{report.employmentDate || 'Not provided'}</td>

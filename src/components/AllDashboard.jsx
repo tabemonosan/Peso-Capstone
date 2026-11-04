@@ -33,7 +33,7 @@ const cardsFor = (role, stats, applicantOverview) => {
   if (stats.verificationStatus !== 'approved') return [accountStatus]
   return [
     ...(applicantOverview ? [{ label: 'Open jobs', value: applicantOverview.openJobs, to: 'jobs' }] : []),
-    { label: 'Applications', value: stats.applications, to: 'jobs' },
+    { label: 'Applications', value: stats.applications, to: 'my-applications' },
     { label: 'Referrals', value: stats.referrals.total, to: 'jobs' },
     ...(applicantOverview ? [{ label: 'Notifications', value: applicantOverview.notifications, to: 'notify' }] : []),
   ]
@@ -83,6 +83,12 @@ export default function AllDashboard({ token, onNavigate, applicantOverview }) {
   if (!data) return <Skeleton />
 
   const cards = cardsFor(data.role, data.stats, applicantOverview)
+  const workflow = data.stats.workflow
+  if (workflow && (data.role !== 'Applicant' || data.stats.verificationStatus === 'approved')) {
+    const to = data.role === 'Applicant' ? 'my-applications' : data.role === 'Employer' ? 'referrals' : 'peso-referrals'
+    cards.push({ label: 'Interviews scheduled', value: workflow.interviews.scheduled, to }, { label: 'No-show reports pending', value: workflow.reports.noShowPending, to }, { label: 'Problem reports', value: workflow.reports.problemPending, to })
+    if (data.role === 'Admin') cards.push({ label: 'Applications', value: workflow.applications, to }, { label: 'Applications being reviewed', value: workflow.applicationsByStatus.pending_admin || 0, to }, { label: 'Automatic referrals', value: workflow.referralsBySource.auto, to }, { label: 'Admin referrals', value: workflow.referralsBySource.admin, to }, { label: 'Applicants suspended', value: workflow.suspendedApplicants, to })
+  }
   const isAdmin = data.role === 'Admin'
   const showActivity = data.role !== 'Applicant' || data.stats.verificationStatus === 'approved'
   const chartData = isAdmin
@@ -99,7 +105,7 @@ export default function AllDashboard({ token, onNavigate, applicantOverview }) {
             onClick={() => onNavigate(card.to)}
             className="dashboard-metric rounded-2xl border border-slate-300 bg-white p-4 text-left transition hover:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500"
           >
-            <span className="dashboard-metric-icon"><PortalNavIcon name={metricIcons[card.label]} /></span>
+            <span className="dashboard-metric-icon"><PortalNavIcon name={metricIcons[card.label] || 'referrals'} /></span>
             <p className="dashboard-metric-label text-sm text-black">{card.label}</p>
             <p className="dashboard-metric-value mt-2 text-2xl font-semibold capitalize text-black">{card.value}</p>
           </button>

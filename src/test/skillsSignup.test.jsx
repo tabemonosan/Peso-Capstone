@@ -126,7 +126,7 @@ async function advanceToDocumentsStep() {
   const files = docsFieldset.querySelectorAll('input[type="file"]')
   fireEvent.change(files[0], { target: { files: [pdfFile('birth.pdf')] } })
   fireEvent.change(files[1], { target: { files: [pdfFile('id-front.pdf')] } })
-  fireEvent.change(within(docsFieldset).getAllByRole('combobox')[0], { target: { value: 'SSS' } })
+  fireEvent.change(within(docsFieldset).getByLabelText('Valid ID #1 type'), { target: { value: 'SSS' } })
   await screen.findByText('birth.pdf')
   await screen.findByText('id-front.pdf')
 }
@@ -201,7 +201,7 @@ describe('Applicant sign-up wizard', () => {
     const files = docsFieldset.querySelectorAll('input[type="file"]')
     fireEvent.change(files[0], { target: { files: [pdfFile('birth.pdf')] } })
     fireEvent.change(files[1], { target: { files: [pdfFile('id-front.pdf')] } })
-    fireEvent.change(within(docsFieldset).getAllByRole('combobox')[0], { target: { value: 'SSS' } })
+    fireEvent.change(within(docsFieldset).getByLabelText('Valid ID #1 type'), { target: { value: 'SSS' } })
     await screen.findByText('birth.pdf')
     await screen.findByText('id-front.pdf')
     const savedDraft = localStorage.getItem('peso-applicant-signup-draft')

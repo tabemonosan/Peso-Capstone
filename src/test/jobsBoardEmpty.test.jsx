@@ -17,7 +17,7 @@ function renderJobsView() {
       filteredPendingJobs={[]}
       filteredApprovedJobs={[]}
       filteredDeclinedJobs={[]}
-      currentUser={{ email: 'a@peso.gov', profile: { skills: [] } }}
+      currentUser={{ email: 'a@peso.gov', profile: { skills: ['Driver'] } }}
       token="token"
       applicantSkills={[]}
       onGoToProfile={() => {}}
@@ -43,19 +43,19 @@ afterEach(() => {
 })
 
 describe('Applicant job board empty states', () => {
-  it('shows "No approved jobs" when there are no jobs and no active filters', async () => {
+  it('explains that no jobs match the saved skills when no filters are active', async () => {
     renderJobsView()
-    expect(await screen.findByText(/No approved jobs are available yet/i)).toBeInTheDocument()
+    expect(await screen.findByText(/No available jobs match your saved skills/i)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Clear all filters/i })).not.toBeInTheDocument()
   })
 
   it('shows "No jobs match these filters" with a Clear all button when filters return nothing', async () => {
     window.history.replaceState({}, '', '/?locations=Legazpi%20City')
     renderJobsView()
-    expect(await screen.findByText(/No jobs match these filters/i)).toBeInTheDocument()
+    expect(await screen.findByText(/No jobs match your saved skills and these filters/i)).toBeInTheDocument()
     const clearButton = screen.getByRole('button', { name: /Clear all filters/i })
     fireEvent.click(clearButton)
     await waitFor(() => expect(window.location.search).not.toContain('locations='))
-    expect(await screen.findByText(/No approved jobs are available yet/i)).toBeInTheDocument()
+    expect(await screen.findByText(/No available jobs match your saved skills/i)).toBeInTheDocument()
   })
 })

@@ -6,10 +6,12 @@ import mongoose from 'mongoose'
 import jwt from 'jsonwebtoken'
 import { startTestDb, stopTestDb, clearDb } from './helpers.js'
 import { emptyJobPosting, deadlineBounds } from '../../../shared/jobPosting.js'
+import { createJobModeration } from '../../services/jobModeration.js'
 vi.mock('../../mailer.js', () => ({ sendEmail: vi.fn().mockResolvedValue({ ok: true }), sendVerificationEmail: vi.fn().mockResolvedValue({ ok: true }), initMailer: vi.fn().mockResolvedValue(undefined) }))
 const { app } = await import('../../index.js')
 const { Employer, Admin, Applicant, JobTitle, Notification } = await import('../../models/collections.js')
 const JobPosting = mongoose.model('JobPosting')
+const createViewer = () => Applicant.create({ email: 'applicant@example.com', passwordHash: 'unused', emailVerified: true, verificationStatus: 'approved', profile: { firstName: 'Demo', lastName: 'Applicant', skills: ['Excel'], location: 'Legazpi City, Albay' }, verificationDocuments: Object.fromEntries(['nsrpForm', 'birthCertificate', 'validId1'].map(key => [key, { versions: [{ version: 1, status: 'approved' }] }])) })
 const auth = (role, email = `${role.toLowerCase()}@example.com`) => ({ Authorization: `Bearer ${jwt.sign({ role, email }, process.env.JWT_SECRET || 'dev-secret')}` })
 const payload = (extra = {}) => ({ ...emptyJobPosting(), title: 'Other', customTitle: 'New Clerk', description: 'Assist clients', city: ' Legazpi   City ', province: ' Albay ', skills: ['Excel', 'excel'], salaryMin: '15000', salaryMax: '20000', slots: 3, deadline: deadlineBounds().min, education: 'College Level', experience: '1–3 years', employmentType: 'Project-based', notesToAdmin: 'Please verify our schedule.', ...extra })
 beforeAll(startTestDb)
@@ -20,6 +22,105 @@ beforeEach(async () => {
   await Admin.create({ email: 'admin@example.com', passwordHash: 'unused' })
 })
 describe('job request and review API', () => {
+  it.each([
+    ['No placement fee, pay a registration fee to apply.', 'applicant_payment'],
+    ['Applicants must be at least 25 years old.', 'age_restriction'],
+  ])('keeps the audited screening bypass pending: %s', async (description, code) => {
+    await Employer.updateOne({ email: 'employer@example.com' }, { createdAt: new Date(Date.now() - 8 * 86400000) }, { timestamps: false, overwriteImmutable: true })
+    const response = await request(app).post('/api/jobs').set(auth('Employer')).send(payload({ description })).expect(200)
+    expect(response.body.status).toBe('pending')
+    expect(response.body.moderation.findings).toContainEqual(expect.objectContaining({ code }))
+    await createViewer()
+    const visible = await request(app).get('/api/jobs?status=approved').set(auth('Applicant')).expect(200)
+    expect(visible.body).toHaveLength(0)
+  })
+
+  it('automatically publishes eligible posts, records the decision, notifies the owner, and hides screening from applicants', async () => {
+    await Employer.updateOne({ email: 'employer@example.com' }, { createdAt: new Date(Date.now() - 8 * 86400000) }, { timestamps: false, overwriteImmutable: true })
+    const result = await request(app).post('/api/jobs').set(auth('Employer')).send(payload()).expect(200)
+    expect(result.body).toMatchObject({ status: 'approved', approvedBy: 'System (job safety screening)', moderation: { decision: 'auto_approved', findings: [] } })
+    expect(result.body.reviewHistory).toHaveLength(1)
+    expect(result.body.moderationHistory).toHaveLength(1)
+    expect(await Notification.findOne({ recipientEmail: 'employer@example.com', type: 'job_approved' })).toBeTruthy()
+    await createViewer()
+    const jobs = await request(app).get('/api/jobs?status=approved').set(auth('Applicant')).expect(200)
+    expect(jobs.body[0]).not.toHaveProperty('moderation')
+    expect(jobs.body[0]).not.toHaveProperty('moderationHistory')
+  })
+  it('keeps prohibited and discriminatory posts private until PESO reviews them and rechecks edits', async () => {
+    await Employer.updateOne({ email: 'employer@example.com' }, { createdAt: new Date(Date.now() - 8 * 86400000) }, { timestamps: false, overwriteImmutable: true })
+    const result = await request(app).post('/api/jobs').set(auth('Employer')).send(payload({ description: 'Female only. Pay a registration fee to join our MLM.' })).expect(200)
+    expect(result.body.status).toBe('pending')
+    expect(result.body.moderation.findings.map(f => f.code)).toEqual(expect.arrayContaining(['gender_restriction', 'applicant_payment', 'prohibited_mlm']))
+    await createViewer()
+    const visible = await request(app).get('/api/jobs?status=approved').set(auth('Applicant')).expect(200)
+    expect(visible.body).toHaveLength(0)
+    const queue = await request(app).get('/api/jobs?status=pending').set(auth('Admin')).expect(200)
+    expect(queue.body[0].moderation.decision).toBe('manual_review')
+    const edited = await request(app).put(`/api/jobs/${result.body._id}`).set(auth('Employer')).send(payload({ company: 'Example Works' })).expect(200)
+    expect(edited.body.status).toBe('approved')
+    expect(edited.body.moderationHistory).toHaveLength(2)
+    expect(edited.body.moderationHistory[0].decision).toBe('manual_review')
+  })
+  it('protects and audits the automatic approval switch', async () => {
+    const url = '/api/admin/job-moderation/settings'
+    await request(app).get(url).set(auth('Employer')).expect(403)
+    await request(app).put(url).set(auth('Employer')).send({ enabled: false, reason: 'Unauthorized' }).expect(403)
+    await request(app).get(url).expect(401)
+    await request(app).put(url).set(auth('Admin')).send({ enabled: false }).expect(400)
+    const settings = await request(app).put(url).set(auth('Admin')).send({ enabled: false, reason: 'Manual review during rollout' }).expect(200)
+    expect(settings.body.history[0]).toMatchObject({ by: 'admin@example.com', enabled: false })
+    await Employer.updateOne({ email: 'employer@example.com' }, { createdAt: new Date(Date.now() - 8 * 86400000) }, { timestamps: false, overwriteImmutable: true })
+    const result = await request(app).post('/api/jobs').set(auth('Employer')).send(payload({ status: 'approved', moderation: { decision: 'auto_approved' } })).expect(200)
+    expect(result.body.status).toBe('pending')
+    expect(result.body.moderation.findings[0].code).toBe('automation_disabled')
+  })
+  it('counts simultaneous submissions atomically and keeps excess volume under review', async () => {
+    await Employer.updateOne({ email: 'employer@example.com' }, { createdAt: new Date(Date.now() - 8 * 86400000) }, { timestamps: false, overwriteImmutable: true })
+    const results = await Promise.all(Array.from({ length: 5 }, (_, index) => request(app).post('/api/jobs').set(auth('Employer')).send(payload({ description: `Assist clients and maintain office records for department ${index}.` }))))
+    expect(results.every(r => r.status === 200)).toBe(true)
+    expect(results.filter(r => r.body.status === 'approved')).toHaveLength(3)
+    expect(results.filter(r => r.body.moderation.findings.some(f => f.code === 'posting_volume'))).toHaveLength(2)
+  })
+  it('fails closed when screening dependencies fail', async () => {
+    const service = createJobModeration({ Employer, JobPosting: { exists: async () => { throw new Error('PRIVATE database failure') } } })
+    const result = await service.assess(payload(), 'employer@example.com')
+    expect(result).toMatchObject({ decision: 'manual_review', findings: [{ code: 'screening_unavailable' }] })
+    expect(JSON.stringify(result)).not.toContain('PRIVATE')
+  })
+  it('sends duplicate postings to review even for an established verified account', async () => {
+    await Employer.updateOne({ email: 'employer@example.com' }, { createdAt: new Date(Date.now() - 8 * 86400000) }, { timestamps: false, overwriteImmutable: true })
+    const first = await request(app).post('/api/jobs').set(auth('Employer')).send(payload()).expect(200)
+    expect(first.body.status).toBe('approved')
+    const second = await request(app).post('/api/jobs').set(auth('Employer')).send(payload({ status: 'approved', approvedBy: 'admin@example.com', moderation: { decision: 'auto_approved', findings: [] } })).expect(200)
+    expect(second.body.status).toBe('pending')
+    expect(second.body.moderation.findings).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'duplicate_posting' })]))
+    expect(second.body.approvedBy).toBeUndefined()
+  })
+  it('rejects fabricated skills and redundant combinations on create and update', async () => {
+    for (const skills of [['sadsa'], ['Full-Stack Developer', 'Frontend Developer'], ['Microsoft Office', 'Excel']]) {
+      const response = await request(app).post('/api/jobs').set(auth('Employer')).send(payload({ skills }))
+      expect(response.status).toBe(422)
+      expect(response.body.fieldErrors.skills).toBeTruthy()
+    }
+    expect(await JobPosting.countDocuments()).toBe(0)
+    const created = await request(app).post('/api/jobs').set(auth('Employer')).send(payload({ skills: ['Full-Stack Developer', 'React'] }))
+    expect(created.status).toBe(200)
+    const update = await request(app).put(`/api/jobs/${created.body._id}`).set(auth('Employer')).send(payload({ company: 'Example Works', skills: ['Full-Stack Developer', 'Backend Developer'] }))
+    expect(update.status).toBe(422)
+    expect((await JobPosting.findById(created.body._id)).skills).toEqual(['Full-Stack Developer', 'React'])
+  })
+  it('stores barangays, includes them in the job address, and rejects mismatched municipalities', async () => {
+    const created = await request(app).post('/api/jobs').set(auth('Employer')).send(payload({ city: 'Manito', province: 'Albay', barangay: 'Nagotgot' }))
+    expect(created.status).toBe(200)
+    expect(created.body).toMatchObject({ barangay: 'Nagotgot', location: 'Nagotgot, Manito, Albay' })
+    const stored = await JobPosting.findById(created.body._id)
+    expect(stored.barangay).toBe('Nagotgot')
+    const invalid = await request(app).put(`/api/jobs/${created.body._id}`).set(auth('Employer')).send(payload({ company: 'Example Works', city: 'Daraga', barangay: 'Nagotgot' }))
+    expect(invalid.status).toBe(422)
+    expect(invalid.body.fieldErrors.barangay).toBeTruthy()
+    expect((await JobPosting.findById(created.body._id)).barangay).toBe('Nagotgot')
+  })
   it('returns field errors without writing or notifying', async () => {
     const response = await request(app).post('/api/jobs').set(auth('Employer')).send(payload({ title: '', description: '', skills: [], city: '', province: '', salaryMin: -1, salaryMax: 'bad', slots: 1.5, deadline: '2000-01-01', notesToAdmin: 'x'.repeat(501) }))
     expect(response.status).toBe(422)
@@ -43,7 +144,7 @@ describe('job request and review API', () => {
     expect(response.body.status).toBe('approved')
     expect(response.body.reviewHistory[0].status).toBe('approved')
     expect(await Notification.findOne({ recipientEmail: 'employer@example.com', type: 'job_approved' })).toBeTruthy()
-    await Applicant.create({ email: 'applicant@example.com', passwordHash: 'unused', emailVerified: true, profile: { firstName: 'Juan', lastName: 'Cruz', location: 'Legazpi' }, verificationDocuments: { nsrpForm: { versions: [{ version: 1 }] }, birthCertificate: { versions: [{ version: 1 }] }, validId1: { versions: [{ version: 1 }] } } })
+    await Applicant.create({ email: 'applicant@example.com', passwordHash: 'unused', emailVerified: true, profile: { firstName: 'Juan', lastName: 'Cruz', location: 'Legazpi', skills: ['Excel'] }, verificationDocuments: { nsrpForm: { versions: [{ version: 1 }] }, birthCertificate: { versions: [{ version: 1 }] }, validId1: { versions: [{ version: 1 }] } } })
     for (const url of ['/api/jobs', '/api/jobs?status=approved&page=1']) {
       const publicJobs = await request(app).get(url).set(auth('Applicant'))
       expect(publicJobs.status).toBe(200)
@@ -152,7 +253,7 @@ describe('job request and review API', () => {
   it('recovers uploaded legacy registration addresses from the exact stored city/province suffix', async () => {
     await Employer.updateOne({ email: 'employer@example.com' }, { $set: { 'profile.location': 'Brgy. Nagotgot, Manito, Albay, Landmark: near Barangay Hall' } })
     const profile = await request(app).get('/api/profile').set(auth('Employer'))
-    expect(profile.body.establishmentAddress).toEqual({ city: 'Manito', province: 'Albay' })
+    expect(profile.body.establishmentAddress).toEqual({ city: 'Manito', province: 'Albay', barangay: 'Nagotgot' })
     expect((await Employer.findOne({ email: 'employer@example.com' })).establishmentAddress.city).toBe('Manito')
   })
   it.each([

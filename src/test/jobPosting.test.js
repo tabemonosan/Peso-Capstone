@@ -1,10 +1,32 @@
 ﻿import { describe, expect, it } from 'vitest'
 import { emptyJobPosting, validateJobPosting, normalizeJobPosting, formatSalary, formatLocation, deadlineBounds, manilaDate } from '../../shared/jobPosting.js'
 import { minimumWageWarning } from '../../shared/minimumWage.js'
+import { PH_LOCATIONS, matchBarangay } from '../../shared/phLocations.js'
 const now = new Date('2026-10-29T15:59:00Z')
 const valid = (extra = {}) => ({ ...emptyJobPosting(), title: 'Clerk', description: 'Help customers', skills: ['Excel'], city: 'Legazpi City', province: 'Albay', salaryMin: '15000', salaryMax: '20000', slots: 2, deadline: '2026-11-01', ...extra })
 const check = (extra) => validateJobPosting(valid(extra), { now })
 describe('job posting rules', () => {
+  it('rejects unknown skills and redundant parent/child skill selections', () => {
+    expect(check({ skills: ['sadsa'] }).errors.skills).toMatch(/approved list/)
+    for (const skills of [
+      ['Full-Stack Developer', 'Frontend Developer'],
+      ['Backend Developer', 'Full-Stack Developer'],
+      ['Microsoft Office', 'Excel'],
+      ['UI/UX Designer', 'UX Designer'],
+      ['Digital Marketing', 'SEO'],
+    ]) expect(check({ skills }).errors.skills).toMatch(/already covered/)
+    expect(check({ skills: ['Full-Stack Developer', 'React', 'Communication'] }).errors).toEqual({})
+  })
+  it('accepts every catalog barangay including names that start with Barangay', () => {
+    for (const [city, barangays] of Object.entries(PH_LOCATIONS)) {
+      for (const barangay of barangays) expect(matchBarangay(city, barangay)).toBe(barangay)
+    }
+  })
+  it('includes barangay in displayed locations and clears it for remote jobs', () => {
+    expect(formatLocation(check({ city: 'Manito', barangay: 'Nagotgot' }).value)).toBe('Nagotgot, Manito, Albay')
+    expect(check({ locationType: 'Remote', barangay: 'Nagotgot' }).value.barangay).toBe('')
+    expect(check({ city: 'Daraga', barangay: 'Nagotgot' }).errors.barangay).toBeTruthy()
+  })
   it('normalizes money, spaces, duplicate skills, and legacy employment values', () => {
     const { errors, value } = check({ city: '  Legazpi   City ', skills: ['Excel', 'excel', ' Sales '], employmentType: 'Contract' })
     expect(errors).toEqual({})

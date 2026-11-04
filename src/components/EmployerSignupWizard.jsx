@@ -59,13 +59,13 @@ function EmployerPrintWarnings({ warnings, onFix }) {
   )
 }
 
-export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCancel, onComplete }) {
-  const saved = useMemo(readDraft, [])
+export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCancel, onComplete, formOnly = false }) {
+  const saved = useMemo(() => formOnly ? {} : readDraft(), [formOnly])
   const [email, setEmail] = useState(saved.email || "")
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   const [consent, setConsent] = useState(Boolean(saved.consent))
-  const [mode, setMode] = useState(saved.mode || "")
+  const [mode, setMode] = useState(formOnly ? "online" : saved.mode || "")
   const [establishment, setEstablishment] = useState(saved.establishment || {})
   const [address, setAddress] = useState(saved.address || {})
   const [contact, setContact] = useState(saved.contact || {})
@@ -74,7 +74,7 @@ export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCance
   const [certified, setCertified] = useState(Boolean(saved.certified))
   const [signature, setSignature] = useState("")
   const [registrationFile, setRegistrationFile] = useState(null)
-  const [step, setStep] = useState(saved.step || "account")
+  const [step, setStep] = useState(formOnly ? "establishment" : saved.step || "account")
   const [maxPos, setMaxPos] = useState(0)
   const [stepValidity, setStepValidity] = useState({})
   const [errors, setErrors] = useState({})
@@ -92,7 +92,7 @@ export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCance
   const [warnings, setWarnings] = useState([])
   const [complete, setComplete] = useState(false)
   const codeRefs = useRef([])
-  const flow = mode === "upload"
+  const flow = formOnly ? ["establishment", "address", "contact", "certification", "review"] : mode === "upload"
     ? ["account", "form", "basic", "review"]
     : ["account", "form", "establishment", "address", "contact", "certification", "review"]
   const stepNames = {
@@ -103,13 +103,14 @@ export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCance
     contact: "Contact details",
     certification: "Certification",
     basic: "Basic information",
-    review: mode === "upload" ? "Review and submit" : "Preview and submit",
+    review: formOnly ? "Preview and download" : mode === "upload" ? "Review and submit" : "Preview and submit",
   }
   const flowPos = flow.indexOf(step)
   const barangays = locations?.[address.municipality] || []
   const hasPassword = isPasswordValid(password)
 
   useEffect(() => {
+    if (formOnly) return
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         email,
@@ -126,7 +127,7 @@ export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCance
     } catch (storageError) {
       console.error("Could not save employer sign-up draft:", storageError)
     }
-  }, [email, consent, mode, establishment, address, contact, basic, representative, certified, step])
+  }, [email, consent, mode, establishment, address, contact, basic, representative, certified, step, formOnly])
 
   useEffect(() => {
     if (resendIn <= 0) return undefined
@@ -251,7 +252,7 @@ export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCance
     if (digit && index < 5) codeRefs.current[index + 1]?.focus()
   }
 
-  const validateStep = () => {
+  const stepErrors = (step) => {
     const nextErrors = {}
     if (step === "account") {
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) nextErrors.email = "Enter a valid email address."
@@ -274,6 +275,7 @@ export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCance
       if (!provinceForCity(address.municipality)) nextErrors.municipality = "Choose a city/municipality from the location list."
       if (!address.barangay) nextErrors.barangay = "Barangay is required."
     } else if (step === "contact") {
+      if (formOnly && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) nextErrors.email = "Enter a valid email address."
       if (!contact.title) nextErrors.title = "Contact title is required."
       if (contact.title === "Others" && !contact.otherTitle?.trim()) nextErrors.otherTitle = "Specify the contact title."
       if (!contact.name?.trim()) nextErrors.contactName = "Contact name is required."
@@ -291,6 +293,11 @@ export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCance
       if (!provinceForCity(basic.municipality)) nextErrors.municipality = "Choose a city/municipality from the location list."
       if (!basic.barangay) nextErrors.barangay = "Barangay is required."
     }
+    return nextErrors
+  }
+
+  const validateStep = () => {
+    const nextErrors = stepErrors(step)
     setErrors(nextErrors)
     if (Object.keys(nextErrors).length) {
       const firstInvalid = Object.keys(nextErrors)[0]
@@ -336,6 +343,21 @@ export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCance
   })
 
   const generatePreview = async () => {
+    if (formOnly) {
+      const sections = flow.filter((id) => id !== 'review')
+      const allErrors = Object.assign({}, ...sections.map(stepErrors))
+      if (Object.keys(allErrors).length) {
+        setPreview(null)
+        setErrors(allErrors)
+        setError('Complete the highlighted required fields before previewing or downloading.')
+        const firstSection = sections.find((id) => Object.keys(stepErrors(id)).length)
+        setStep(firstSection)
+        const firstKey = Object.keys(stepErrors(firstSection))[0]
+        setTimeout(() => document.getElementById(`employer-${firstKey}`)?.focus(), 0)
+        return false
+      }
+      setErrors({})
+    }
     setBusy(true)
     setError("")
     try {
@@ -355,6 +377,7 @@ export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCance
       const header = response.headers.get("X-NSRP-Layout-Warnings")
       setWarnings(header ? JSON.parse(header) : [])
       setPreview(blob)
+      if (formOnly) setStepValidity(Object.fromEntries(flow.map((id) => [id, true])))
       setStepValidity((current) => ({ ...current, certification: true }))
       setMaxPos(flow.length - 1)
       setStep("review")
@@ -369,6 +392,12 @@ export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCance
   }
 
   const next = async () => {
+    if (formOnly) {
+      const target = flow[flowPos + 1]
+      if (target === 'review') await generatePreview()
+      else if (target) setStep(target)
+      return
+    }
     if (!validateStep()) return
     setStepValidity((current) => ({ ...current, [step]: true }))
     if (mode !== "upload" && step === "certification") {
@@ -388,6 +417,11 @@ export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCance
   const goTo = (target) => {
     const targetPos = flow.indexOf(target)
     if (targetPos < 0 || targetPos === flowPos) return
+    if (formOnly) {
+      if (target === 'review') void generatePreview()
+      else setStep(target)
+      return
+    }
     if (targetPos < flowPos) {
       setStep(target)
       return
@@ -410,6 +444,7 @@ export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCance
   }
 
   const submit = async () => {
+    if (formOnly) return
     if (!validateStep()) return
     setBusy(true)
     setError("")
@@ -519,16 +554,16 @@ export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCance
 
   return (
     <form className="auth-form auth-detail-form employer-signup-wizard" onSubmit={(event) => { event.preventDefault(); if (step === "review") submit(); else next() }}>
-      <nav aria-label="Employer sign-up progress" className="grid grid-cols-2 gap-1 sm:grid-cols-4">
+      <nav aria-label={formOnly ? "Employer NSRP progress" : "Employer sign-up progress"} className="grid grid-cols-2 gap-1 sm:grid-cols-4">
         {flow.map((id, index) => {
           const current = step === id
-          const done = index < flowPos || (index <= maxPos && stepValidity[id] !== false)
+          const done = formOnly ? stepValidity[id] === true : index < flowPos || (index <= maxPos && stepValidity[id] !== false)
           const tabErrors = Object.keys(errors).some((key) => errors[key] && (
             (id === "account" && ["email", "password", "confirmPassword", "consent"].includes(key))
             || (id === "form" && ["mode", "registrationFile"].includes(key))
             || (id === "establishment" && ["companyName", "employerType", "workforceSize", "lineOfBusiness"].includes(key))
             || (id === "address" && ["municipality", "barangay"].includes(key))
-            || (id === "contact" && ["title", "otherTitle", "contactName", "position", "mobile"].includes(key))
+            || (id === "contact" && ["email", "title", "otherTitle", "contactName", "position", "mobile", "telephone", "fax"].includes(key))
             || (id === "certification" && ["representative", "certified", "signature"].includes(key))
             || (id === "basic" && ["companyName", "contactName", "phone", "municipality", "barangay"].includes(key))
           ))
@@ -537,7 +572,7 @@ export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCance
               key={id}
               type="button"
               onClick={() => goTo(id)}
-              disabled={!current && index > maxPos + 1}
+              disabled={busy || (!formOnly && !current && index > maxPos + 1)}
               aria-current={current ? "step" : undefined}
               className={`rounded-lg px-2 py-2 text-left text-xs font-semibold ${current ? "bg-blue-600 text-white" : done ? "bg-blue-100 text-blue-900" : "bg-slate-100 text-slate-500"} disabled:cursor-not-allowed disabled:opacity-60`}
             >
@@ -600,7 +635,7 @@ export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCance
             </Field>
             <label className="flex items-start gap-2 text-sm text-slate-700">
               <input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} aria-invalid={Boolean(errors.consent) || undefined} />
-              <span>{CONSENT_TEXT}<span className="text-rose-600"> *</span></span>
+              <span>{CONSENT_TEXT} Verification includes automatic consistency and document checks. These assess evidence, not authenticity.<span className="text-rose-600"> *</span></span>
             </label>
             {errors.consent && <p role="alert" className="text-xs text-rose-600">{errors.consent}</p>}
           </div>
@@ -652,6 +687,7 @@ export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCance
 
         {step === "contact" && (
           <div className="grid gap-3 sm:grid-cols-2">
+            {formOnly && field("Email address", "email", email, (value) => { setEmail(value); setStepValidity((current) => ({ ...current, contact: false })); setErrors((current) => ({ ...current, email: undefined })); setPreview(null) }, { required: true, type: "email" })}
             {selectField("Title", "title", contact.title, TITLES, (value) => { setContact((current) => ({ ...current, title: value, otherTitle: value === "Others" ? current.otherTitle : "" })); setErrors((current) => ({ ...current, title: undefined, otherTitle: undefined })); setStepValidity((current) => ({ ...current, contact: false })); setPreview(null) }, "Select title")}
             {contact.title === "Others" && field("Specify title", "otherTitle", contact.otherTitle, (value) => updateValue(setContact, "otherTitle", value), { required: true })}
             {field("Contact person full name", "contactName", contact.name, (value) => updateValue(setContact, "name", value, "contactName"), { required: true })}
@@ -697,7 +733,7 @@ export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCance
             {mode !== "upload" && (
               <button type="button" onClick={generatePreview} disabled={busy} className="rounded-lg border border-blue-600 px-3 py-2 text-sm font-semibold text-blue-800">Regenerate preview</button>
             )}
-            <p className="text-xs text-slate-600">Review your Form 2 before creating your account. Admin approval is required before employer tools are available.</p>
+            <p className="text-xs text-slate-600">{formOnly ? 'Review your Form 2, then download or print the completed PDF.' : 'Review your Form 2 before creating your account. Admin approval is required before employer tools are available.'}</p>
           </div>
         )}
       </section>
@@ -705,9 +741,9 @@ export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCance
       {error && <p role="alert" className="rounded-lg border border-rose-300 bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <button type="button" onClick={() => flowPos <= 0 ? onCancel?.() : setStep(flow[flowPos - 1])} disabled={busy} className="auth-secondary-button">{flowPos <= 0 ? "Cancel" : "Back"}</button>
-        <button type="button" onClick={discard} className="text-sm font-medium text-rose-700 underline">Discard and start over</button>
+        {!formOnly && <button type="button" onClick={discard} className="text-sm font-medium text-rose-700 underline">Discard and start over</button>}
         {step === "review" ? (
-          <button type="submit" disabled={busy || !previewUrl} className="auth-primary-button">{busy ? "Creating account…" : "Create account"}</button>
+          formOnly ? <button type="button" onClick={onCancel} className="auth-secondary-button">Back to home</button> : <button type="submit" disabled={busy || !previewUrl} className="auth-primary-button">{busy ? "Creating account…" : "Create account"}</button>
         ) : (
           <button type="button" disabled={busy || (step === "account" && !emailVerified)} onClick={next} className="auth-primary-button">{busy ? "Validating…" : step === "certification" ? "Generate preview" : "Next"}</button>
         )}

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react"
+import { useBodyScrollLock } from '../hooks/useModalLayer'
 
 // LinkedIn-style filter bar for the applicant job board: pill buttons that open
 // checkbox popovers, active-filter chips, and a mobile bottom sheet.
@@ -86,6 +87,7 @@ export default function JobFiltersBar({ filters, facets, resultCount, mySkills =
   const [skillQuery, setSkillQuery] = useState('')
   const [locationQuery, setLocationQuery] = useState('')
   const [sheetOpen, setSheetOpen] = useState(false)
+  useBodyScrollLock(sheetOpen)
   const barRef = useRef(null)
 
   // Esc / click outside closes the open popover
@@ -105,10 +107,8 @@ export default function JobFiltersBar({ filters, facets, resultCount, mySkills =
     if (!sheetOpen) return undefined
     const onKeyDown = (event) => { if (event.key === 'Escape') setSheetOpen(false) }
     document.addEventListener('keydown', onKeyDown)
-    document.body.style.overflow = 'hidden'
     return () => {
       document.removeEventListener('keydown', onKeyDown)
-      document.body.style.overflow = ''
     }
   }, [sheetOpen])
 

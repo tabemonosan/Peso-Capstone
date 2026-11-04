@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { API_URL } from "../config"
 import { EMPLOYER_OUTCOMES, APPLICANT_OUTCOMES, outcomeLabel } from "../../shared/employmentReporting.js"
+import { fetchWithTimeout } from '../utils/fetchWithTimeout'
 
 function HireReportForm({ token, applicantId, jobId, referralId, onCreated, reporterRole = 'Employer', existingReport, initialStatus, onCancel }) {
   const isNewOutcome = initialStatus && initialStatus !== existingReport?.status
@@ -12,8 +13,13 @@ function HireReportForm({ token, applicantId, jobId, referralId, onCreated, repo
   const [error, setError] = useState("")
   const outcomes = reporterRole === 'Applicant' ? APPLICANT_OUTCOMES : EMPLOYER_OUTCOMES
   const fieldId = `${reporterRole}-${referralId || jobId}`
+  const [submitted, setSubmitted] = useState(null)
+  const inFlight = useRef(false)
+  const previousInput = useRef({ existingReport, initialStatus })
 
   useEffect(() => {
+    if (previousInput.current.existingReport === existingReport && previousInput.current.initialStatus === initialStatus) return
+    previousInput.current = { existingReport, initialStatus }
     const changingOutcome = initialStatus && initialStatus !== existingReport?.status
     setStatus(initialStatus || existingReport?.status || 'hired')
     setEmploymentDate(changingOutcome ? '' : existingReport?.employmentDate || '')
@@ -22,17 +28,19 @@ function HireReportForm({ token, applicantId, jobId, referralId, onCreated, repo
 
   const handleSubmit = async (event) => {
     event.preventDefault()
+    if (inFlight.current || reporterRole === 'Employer' && (existingReport || submitted?.key === fieldId)) return
     if (!token) {
       setError("Not authenticated")
       return
     }
 
+    inFlight.current = true
     setSubmitting(true)
     setError("")
     setSuccess('')
 
     try {
-      const response = await fetch(`${API_URL}/api/hire-reports`, {
+      const response = await fetchWithTimeout(`${API_URL}/api/hire-reports`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -42,18 +50,27 @@ function HireReportForm({ token, applicantId, jobId, referralId, onCreated, repo
       })
 
       const data = await response.json().catch(() => null)
+      if (response.status === 409 && data?.code === 'EMPLOYER_REPORT_LOCKED' && data.report) {
+        setSubmitted({ key: fieldId, report: data.report })
+        onCreated?.(data.report)
+        return
+      }
       if (!response.ok) {
         throw new Error(data?.error || `Request failed: ${response.status}`)
       }
 
+      if (reporterRole === 'Employer') setSubmitted({ key: fieldId, report: data })
       if (onCreated) onCreated(data)
       setSuccess('Your update was sent to PESO.')
     } catch (err) {
       setError(err?.message || "Failed to submit hire report")
     } finally {
+      inFlight.current = false
       setSubmitting(false)
     }
   }
+
+  if (reporterRole === 'Employer' && (existingReport || submitted?.key === fieldId)) return null
 
   return (
     <form

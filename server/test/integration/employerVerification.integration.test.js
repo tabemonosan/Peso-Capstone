@@ -167,10 +167,11 @@ describe("employer verification access control", () => {
       document: { version: 2, status: "pending" },
     })
 
+    const reviewQueue = await request(app).get(`/api/admin/document-verification/queue?recordId=${employerRequest._id}`).set({ Authorization: `Bearer ${adminToken()}` }).expect(200)
     const approval = await request(app)
       .put(`/api/employer-requests/${employerRequest._id}/status`)
       .set({ Authorization: `Bearer ${adminToken()}` })
-      .send({ status: "approved" })
+      .send({ status: "approved", reason: "Document and employer details reviewed", unresolved: reviewQueue.body.items[0].unresolved })
     expect(approval.status).toBe(200)
 
     const job = await request(app).post("/api/jobs").set(auth).send({

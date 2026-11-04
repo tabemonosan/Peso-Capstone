@@ -42,6 +42,36 @@ async function openForm() {
   return within(await screen.findByRole('dialog', { name: 'Request a Job Posting' }))
 }
 describe('create job posting address and errors', () => {
+  it('prefills the employer barangay, clears it for another municipality, and restores it on reset', async () => {
+    user.establishmentAddress = { city: 'Manito', province: 'Albay', barangay: 'Nagotgot' }
+    const form = await openForm()
+    expect(form.getByLabelText('Barangay')).toHaveValue('Nagotgot')
+    fireEvent.change(form.getByLabelText(/City.*Municipality/), { target: { value: 'Daraga' } })
+    expect(form.getByLabelText('Barangay')).toHaveValue('')
+    expect(within(form.getByLabelText('Barangay')).queryByRole('option', { name: 'Nagotgot' })).not.toBeInTheDocument()
+    fireEvent.click(form.getByRole('button', { name: 'Reset to my address' }))
+    expect(form.getByLabelText('Barangay')).toHaveValue('Nagotgot')
+  })
+  it.each(['pending', 'approved', 'declined'])('shows %s posting details in the right panel', async (status) => {
+    myJobs = [{ _id: 'view-job', status, title: 'Office Clerk', company: 'Example Works', description: 'Assist clients', requirements: 'Bring your application letter', skills: ['Excel'], locationType: 'On-site', city: 'Manito', province: 'Albay', salaryMin: 15000, salaryMax: 20000, slots: 2, reviewReason: 'Please clarify requirements' }]
+    await openForm()
+    fireEvent.click(screen.getByRole('button', { name: 'Close', exact: true }))
+    const card = await screen.findByRole('button', { name: 'View details for Office Clerk' })
+    expect(card.tagName).toBe('BUTTON')
+    fireEvent.click(card)
+    const detailPanel = await screen.findByRole('article', { name: 'Office Clerk job details' })
+    expect(within(detailPanel).getByText('Bring your application letter')).toBeInTheDocument()
+    expect(within(detailPanel).getByText('Manito, Albay')).toBeInTheDocument()
+    expect(within(detailPanel).getByText('Excel')).toBeInTheDocument()
+    if (status === 'declined') expect(within(detailPanel).getByText(/Please clarify requirements/)).toBeInTheDocument()
+    if (status === 'pending') {
+      fireEvent.click(within(detailPanel).getByRole('button', { name: 'Edit pending request' }))
+      expect(screen.getByRole('dialog', { name: 'Edit Job Posting' })).toBeInTheDocument()
+    } else {
+      expect(within(detailPanel).queryByRole('button', { name: 'Edit pending request' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('dialog', { name: 'Office Clerk' })).not.toBeInTheDocument()
+    }
+  })
   it('keeps complete city/province filter labels after URL reload', () => {
     const first = renderHook(() => useJobFilters())
     act(() => first.result.current.toggleValue('locations', 'Legazpi City, Albay'))
@@ -84,9 +114,15 @@ describe('create job posting address and errors', () => {
     myJobs = [{ _id: 'pending-job', status: 'pending', title: 'Office Clerk', company: 'Example Works', description: 'Assist clients', skills: ['Excel'], locationType: 'On-site', city: 'Legazpi City', province: 'Albay', salaryMin: 15000, salaryMax: 20000, slots: 2, deadline: deadlineBounds().min }]
     await openForm()
     fireEvent.click(screen.getByRole('button', { name: 'Close', exact: true }))
-    const card = await screen.findByRole('button', { name: 'Edit Office Clerk' })
+    const card = await screen.findByRole('button', { name: 'Edit pending request' })
     if (activation === 'click') fireEvent.click(card)
-    else fireEvent.keyDown(card, { key: activation })
+    else {
+      fireEvent.keyDown(card, { key: activation })
+      fireEvent.keyUp(card, { key: activation })
+      // JSDOM does not synthesize native button activation from keyboard events.
+      expect(card.tagName).toBe('BUTTON')
+      fireEvent.click(card)
+    }
     const dialog = within(screen.getByRole('dialog', { name: 'Edit Job Posting' }))
     const description = dialog.getByLabelText('Description *')
     expect(description).toHaveValue('Assist clients')
@@ -102,7 +138,7 @@ describe('create job posting address and errors', () => {
     myJobs = [{ _id: 'legacy-job', status: 'pending', title: 'Office Clerk', company: 'Example Works', description: 'Assist clients', skills: ['Excel'], locationType: 'On-site', location: 'rawis 119, Relocation, Brgy. Calpi, Oas, Albay, Landmark: Big Mac near Church', salaryMin: 15000, salaryMax: 20000, slots: 2, deadline: deadlineBounds().min }]
     await openForm()
     fireEvent.click(screen.getByRole('button', { name: 'Close', exact: true }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit Office Clerk' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit pending request' }))
     let dialog = within(screen.getByRole('dialog', { name: 'Edit Job Posting' }))
     expect(dialog.getByLabelText('City/Municipality *')).toHaveValue('Oas')
     expect(dialog.getByLabelText('Province *')).toHaveValue('Albay')
@@ -120,7 +156,7 @@ describe('create job posting address and errors', () => {
     vi.spyOn(window, 'alert').mockImplementation(() => {})
     fireEvent.click(dialog.getByRole('button', { name: 'Save Changes' }))
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Edit Job Posting' })).not.toBeInTheDocument())
-    fireEvent.click(screen.getByRole('button', { name: 'Edit Office Clerk' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Edit pending request' }))
     dialog = within(screen.getByRole('dialog', { name: 'Edit Job Posting' }))
     expect(dialog.getByLabelText('City/Municipality *')).toHaveValue('Manito')
     expect(dialog.getByLabelText('Province *')).toHaveValue('Albay')
@@ -130,7 +166,7 @@ describe('create job posting address and errors', () => {
     myJobs = [{ _id: 'pending-job', status: 'pending', title: 'Office Clerk', company: 'Example Works', description: 'Assist clients', skills: ['Excel'], locationType: 'On-site', city: 'Legazpi City', province: 'Albay', salaryMin: 15000, salaryMax: 20000, slots: 2, deadline: deadlineBounds().min }]
     await openForm()
     fireEvent.click(screen.getByRole('button', { name: 'Close', exact: true }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit Office Clerk' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit pending request' }))
     const dialog = within(screen.getByRole('dialog', { name: 'Edit Job Posting' }))
     const min = dialog.getByLabelText('Salary Min (\u20b1) *')
     const max = dialog.getByLabelText('Salary Max (\u20b1) *')
@@ -158,8 +194,10 @@ describe('create job posting address and errors', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close', exact: true }))
     expect(screen.queryByRole('button', { name: 'Edit Approved Clerk' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Edit Declined Clerk' })).not.toBeInTheDocument()
-    fireEvent.click(await screen.findByText('Approved Clerk'))
-    fireEvent.click(screen.getByText('Declined Clerk'))
+    fireEvent.click(await screen.findByRole('button', { name: 'View details for Approved Clerk' }))
+    expect(screen.queryByRole('button', { name: 'Edit pending request' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'View details for Declined Clerk' }))
+    expect(screen.queryByRole('button', { name: 'Edit pending request' })).not.toBeInTheDocument()
     expect(screen.queryByRole('dialog', { name: 'Edit Job Posting' })).not.toBeInTheDocument()
   })
   it('prefills the registered address, allows another branch, and resets it', async () => {

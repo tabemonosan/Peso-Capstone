@@ -1,4 +1,4 @@
-﻿import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import VerificationDocsReviewModal from '../components/VerificationDocsReviewModal'
 
@@ -220,9 +220,12 @@ describe('VerificationDocsReviewModal confirm step', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
 
     const dialog = await screen.findByRole('alertdialog', { name: 'Approve Valid ID #1 (SSS) for Eliseo Dajac Dioneda III?' })
-    expect(within(dialog).getByText('The applicant will be notified.')).toBeInTheDocument()
+    expect(within(dialog).getByText('0 flags unresolved. Approve anyway? The applicant will be notified.')).toBeInTheDocument()
     expect(mockFetch.mock.calls.filter(([, options]) => options?.method === 'PUT')).toHaveLength(0)
 
+    expect(within(dialog).getByRole('button', { name: 'Yes, approve' })).toBeDisabled()
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Reason' }), { target: { value: 'Document reviewed' } })
+    within(dialog).getAllByRole('checkbox').forEach(checkbox => fireEvent.click(checkbox))
     fireEvent.click(within(dialog).getByRole('button', { name: 'Yes, approve' }))
     await waitFor(() => expect(mockFetch.mock.calls.filter(([, options]) => options?.method === 'PUT')).toHaveLength(1))
     await screen.findByText('Valid ID #1 approved')
@@ -259,6 +262,8 @@ describe('VerificationDocsReviewModal confirm step', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
     const dialog = await screen.findByRole('alertdialog', { name: /Approve Valid ID/ })
     const confirmButton = within(dialog).getByRole('button', { name: 'Yes, approve' })
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Reason' }), { target: { value: 'Document reviewed' } })
+    within(dialog).getAllByRole('checkbox').forEach(checkbox => fireEvent.click(checkbox))
     fireEvent.click(confirmButton)
     fireEvent.click(confirmButton)
     fireEvent.click(confirmButton)
@@ -273,6 +278,8 @@ describe('VerificationDocsReviewModal confirm step', () => {
     await renderModal()
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
     const dialog = await screen.findByRole('alertdialog', { name: /Approve Valid ID/ })
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Reason' }), { target: { value: 'Document reviewed' } })
+    within(dialog).getAllByRole('checkbox').forEach(checkbox => fireEvent.click(checkbox))
     fireEvent.click(within(dialog).getByRole('button', { name: 'Yes, approve' }))
     await within(dialog).findByText('Storage unavailable')
     expect(within(dialog).getByRole('button', { name: 'Retry' })).toBeInTheDocument()
@@ -288,6 +295,8 @@ describe('VerificationDocsReviewModal confirm step', () => {
     const getsBefore = mockFetch.mock.calls.filter(([, o]) => !o?.method).length
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
     const dialog = await screen.findByRole('alertdialog', { name: /Approve Valid ID/ })
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Reason' }), { target: { value: 'Document reviewed' } })
+    within(dialog).getAllByRole('checkbox').forEach(checkbox => fireEvent.click(checkbox))
     fireEvent.click(within(dialog).getByRole('button', { name: 'Yes, approve' }))
     await waitFor(() => expect(screen.queryByRole('alertdialog', { name: /Approve Valid ID/ })).not.toBeInTheDocument())
     await waitFor(() => expect(mockFetch.mock.calls.filter(([, o]) => !o?.method).length).toBeGreaterThan(getsBefore))
