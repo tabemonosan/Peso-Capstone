@@ -15,8 +15,12 @@ export function createConsistencyWaitlist({ Applicant, automation, notify, notif
   const snapshot = account => Object.fromEntries(WAITLIST_DOCUMENTS.map(key => [key, latest(account, key)?.version || 0]))
   const unchanged = (a, b) => WAITLIST_DOCUMENTS.every(key => a[key] === b[key])
   async function publicState(id) {
-    const [account, config] = await Promise.all([get(id), settings()])
+    let [account, config] = await Promise.all([get(id), settings()])
     if (!account || account.deletedAt) fail('ACCOUNT_UNAVAILABLE', 'Account unavailable.', 403)
+    if (account.consistencyState?.status === 'checking' && +now() - +new Date(account.consistencyState.startedAt) >= timeoutMs) {
+      await finish(id, account.consistencyState.token, 'timeout')
+      account = await get(id)
+    }
     const state = account.consistencyState || {}, active = account.verificationStatus === 'waitlisted'
     return { status: account.verificationStatus, checking: state.status === 'checking' && +now() - +new Date(state.startedAt) < timeoutMs,
       waitlisted: active, message: active ? WAITLIST_MESSAGE : '', tip: WAITLIST_TIP, contact: config.pesoContact, officeHours: config.pesoOfficeHours,
@@ -82,12 +86,12 @@ export function createConsistencyWaitlist({ Applicant, automation, notify, notif
         for (const docKey of ['birthCertificate', 'validId1', 'validId2']) {
           const version = latest(account, docKey)?.version
           if (version) {
-            const result = await readImages({ accountId: id, docKey, version, settings: config, recheck: true })
-            await verifyDocument({ role: 'Applicant', accountId: id, docKey })
+            const result = await readImages({ accountId: id, docKey, version, settings: config, recheck: true, checkToken: token })
             if (!result?.completed) return 'unavailable'
+            await verifyDocument({ role: 'Applicant', accountId: id, docKey, checkToken: token })
           }
         }
-        await verifyDocument({ role: 'Applicant', accountId: id, docKey: 'nsrpForm' })
+        await verifyDocument({ role: 'Applicant', accountId: id, docKey: 'nsrpForm', checkToken: token })
         return 'complete'
       })()
       const result = await Promise.race([work, new Promise(resolve => { timer = setTimeout(() => resolve('timeout'), timeoutMs) })])
@@ -122,6 +126,7 @@ export function createConsistencyWaitlist({ Applicant, automation, notify, notif
     if (!['release', 'grant', 'request', 'resolve', 'decline'].includes(input.action)) fail('INVALID_ACTION', 'Choose a review action.', 400)
     const account = await get(id), state = account?.consistencyState || {}
     if (account?.verificationStatus !== 'waitlisted') fail('WAITLIST_CHANGED', 'This account is not waitlisted. Refresh the queue.')
+    if (input.token !== state.token) fail('WAITLIST_CHANGED', 'The documents or review changed. Refresh the queue before deciding.')
     if (input.action === 'release' && (input.compared !== true || input.unresolved !== (state.issues || []).length)) fail('COMPARISON_REQUIRED', 'Confirm that you compared the documents and refresh the unresolved flag count.', 400)
     if (['grant', 'request', 'resolve'].includes(input.action) && !WAITLIST_DOCUMENTS.includes(input.docKey)) fail('INVALID_DOCUMENT', 'Choose a document.', 400)
     const grant = input.action === 'grant' ? input.attempts : input.action === 'request' ? input.attempts || 0 : 0
@@ -139,7 +144,7 @@ export function createConsistencyWaitlist({ Applicant, automation, notify, notif
     }
     if (input.action === 'resolve') {
       const versions = account.verificationDocuments?.[input.docKey]?.versions || []
-      if (versions.length) set[`verificationDocuments.${input.docKey}.versions.${versions.length - 1}.explanation.status`] = 'reviewed'
+      versions.forEach((version, index) => { if (version.explanation?.status === 'submitted') set[`verificationDocuments.${input.docKey}.versions.${index}.explanation.status`] = 'reviewed' })
     }
     const changed = await Applicant.collection.updateOne({ _id: account._id, 'consistencyState.token': state.token, verificationStatus: 'waitlisted' }, { $set: set })
     if (!changed.modifiedCount) fail('WAITLIST_CHANGED', 'This review changed. Refresh and try again.')
@@ -156,8 +161,9 @@ export function createConsistencyWaitlist({ Applicant, automation, notify, notif
       if (changed.modifiedCount) await notify({ recipient: { id: account._id, role: 'Applicant' }, type: 'waitlist_reminder', title: 'Document review reminder', message: `Please open My Documents to correct or explain a difference, or contact PESO. ${config.pesoContact}`, link: '/profile?documents=1' })
     }
     const day = now().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' })
+    const end = new Date(`${day}T00:00:00+08:00`), start = new Date(+end - DAY)
     const guard = await mongoose.connection.db.collection('nsrp_auto_settings').updateOne({ _id: `waitlist-digest:${day}` }, { $setOnInsert: { at: now() } }, { upsert: true })
-    const fresh = accounts.filter(a => +now() - +new Date(a.consistencyState?.waitlistedAt) < DAY).length
+    const fresh = accounts.filter(a => +new Date(a.consistencyState?.waitlistedAt) >= +start && +new Date(a.consistencyState?.waitlistedAt) < +end).length
     if (guard.upsertedCount && fresh) await notifyAdmins({ type: 'waitlist_digest', title: 'Daily waitlist summary', message: `${fresh} applicants newly waitlisted for document review.`, link: '/verification-flagged' })
   }
   async function disable(actor) {

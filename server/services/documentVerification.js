@@ -6,6 +6,7 @@ import { loadDocumentFile } from '../utils/documentFiles.js'
 import { readOcr } from './localImageReading.js'
 import { reserveOcr } from './imageChecks.js'
 import { extractDocumentFields } from '../../shared/crossChecks.js'
+import { WAITLIST_LIMITS } from '../../shared/consistencyWaitlist.js'
 
 const fail = (status, message) => { const error = new Error(message); error.status = status; throw error }
 const oid = value => {
@@ -111,7 +112,7 @@ export function createDocumentVerification({ Applicant, Employer, EmployerReques
     const items = result.items.map(item => ({ ...item, label: DOCUMENT_LABELS[item.docKey], waitlistAttempts: config.waitlistAttempts,
       waitlisted: item.accountStatus === 'waitlisted',
       daysWaiting: item.consistencyState?.waitlistedAt ? Math.floor((Date.now() - +item.consistencyState.waitlistedAt) / 86400000) : 0,
-      staleWaitlist: item.accountStatus === 'waitlisted' && !item.consistencyState?.pausedAt && Date.now() - +new Date(item.consistencyState?.lastActivityAt || item.consistencyState?.waitlistedAt) >= 30 * 86400000,
+      staleWaitlist: item.accountStatus === 'waitlisted' && !item.consistencyState?.pausedAt && Date.now() - +new Date(item.consistencyState?.lastActivityAt || item.consistencyState?.waitlistedAt) >= WAITLIST_LIMITS.staleDays * 86400000,
       overdue: Date.now() - +item.at >= 7 * 86400000,
       unresolved: openFlags(item.findings).length,
       reasons: [...new Set([
@@ -210,7 +211,7 @@ export function createDocumentVerification({ Applicant, Employer, EmployerReques
     return { ok: true }
   }
   async function details(target) {
-    const { account, document } = await locate(target)
+    const { account, document, record } = await locate(target)
     const secret = target.docKey === 'birthCertificate' ? await mongoose.connection.db.collection('verification_private').findOne({ _id: `${account._id}:${target.docKey}:${document.version}` }, { projection: { code: 1 } }) : null
     let readValues = {}
     const settings = await automation.getSettings()
@@ -219,7 +220,8 @@ export function createDocumentVerification({ Applicant, Employer, EmployerReques
       if (file?.mimetype?.startsWith('image/')) readValues = (await readOcr(Buffer.from(file.data), text => ({ values: extractDocumentFields(text) }), { reserve: reserveOcr })).values || {}
     }
     if (document.declaredDetails?.idType === 'PhilSys National ID') delete readValues.idNumber
-    return { declaredDetails: document.declaredDetails || {}, readValues, quality: document.quality, qr: document.qr, comparisons: document.imageComparisons || [], authorizationCode: secret?.code || '', nsrp: account.profile?.nsrp || {}, explanation: document.explanation, version: document.version }
+    const previousExplanation = [...(record.verificationDocuments?.[target.docKey]?.versions || [])].reverse().find(v => v.explanation?.status === 'submitted')?.explanation
+    return { declaredDetails: document.declaredDetails || {}, readValues, quality: document.quality, qr: document.qr, comparisons: document.imageComparisons || [], authorizationCode: secret?.code || '', nsrp: account.profile?.nsrp || {}, explanation: previousExplanation || document.explanation, version: document.version }
   }
   return { list, act, details }
 }

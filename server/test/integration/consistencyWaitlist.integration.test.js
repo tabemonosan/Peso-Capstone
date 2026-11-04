@@ -4,13 +4,14 @@ import request from 'supertest'
 import jwt from 'jsonwebtoken'
 import bcrypt from 'bcryptjs'
 import sharp from 'sharp'
-import { startTestDb, stopTestDb, clearDb, validNsrpAnswers } from './helpers.js'
+import { generateKeyPairSync, sign } from 'node:crypto'
+import { startTestDb, stopTestDb, clearDb, validNsrpAnswers, validBasicInfo, emailProofFor, pdfBuffer } from './helpers.js'
 import { drainVerificationJobs } from '../../services/verificationJobs.js'
 import { storeDocumentFile } from '../../utils/documentFiles.js'
 import { createConsistencyWaitlist } from '../../services/consistencyWaitlist.js'
-const reading = vi.hoisted(() => ({ text: '', confidence: 95, fail: false }))
+const reading = vi.hoisted(() => ({ text: '', confidence: 95, fail: false, qr: '' }))
 vi.mock('../../services/localImageReading.js', () => ({
-  readQr: vi.fn(async () => ({ found: false })),
+  readQr: vi.fn(async (_buffer, consume) => { if (reading.qr && consume) await consume(reading.qr); return { found: Boolean(reading.qr) } }),
   readOcr: vi.fn(async (_buffer, compare) => { if (reading.fail) throw new Error('Reader unavailable'); return compare(reading.text, reading.confidence) }),
 }))
 vi.mock('../../mailer.js', async original => ({ ...await original(), sendEmail: vi.fn(async () => ({ delivered: true })), initMailer: vi.fn() }))
@@ -23,18 +24,37 @@ beforeAll(async () => {
   await startTestDb()
   image = await sharp(Buffer.from('<svg width="900" height="600"><rect width="900" height="600" fill="white"/><text x="60" y="180" font-size="72">SAMPLE</text><text x="60" y="280" font-size="30">FICTIONAL DATA ONLY</text></svg>')).png().toBuffer()
 }, 180000)
-afterAll(stopTestDb)
+afterAll(async () => { vi.unstubAllEnvs(); await stopTestDb() })
 beforeEach(async () => {
   await clearDb()
-  reading.text = sampleText('1992-02-03'); reading.confidence = 95; reading.fail = false
+  vi.unstubAllEnvs()
+  reading.text = sampleText('1992-02-03'); reading.confidence = 95; reading.fail = false; reading.qr = ''
   admin = await Admin.create({ email: 'waitlist-admin@example.test', passwordHash: 'unused' })
   applicant = await Applicant.create({ email: 'waitlist-sample@example.test', passwordHash: await bcrypt.hash('SamplePassword123!', 4), emailVerified: true, profile: { firstName: 'Sample', lastName: 'Example', dob: '1990-01-01', location: 'Albay', nsrp: validNsrpAnswers({ firstName: 'Sample', surname: 'Example', dob: '1990-01-01', gsisSss: '1234567890' }) }, verificationDocuments: Object.fromEntries(['nsrpForm', 'birthCertificate', 'validId1'].map(key => [key, { uploads: 1, versions: [{ version: 1, status: 'pending', mimetype: key === 'nsrpForm' ? 'application/pdf' : 'image/png', originalName: 'SAMPLE.png', uploadedAt: new Date(), quality: { passed: true }, declaredDetails: { idType: 'SSS', number: '1234567890', copyType: 'PSA copy on security paper' } }] }])) })
   for (const slot of ['birthCertificate', 'validId1']) await storeDocumentFile(applicant._id, slot, 1, 'front', { mimetype: 'image/png', buffer: image, size: image.length })
   await nsrpAutomation.updateSettings({ automaticApproval: false }, admin.email)
 })
 const check = async () => { await consistencyWaitlist.begin(applicant._id, 'signup'); await drainVerificationJobs(); return consistencyWaitlist.publicState(applicant._id) }
-const action = body => request(app).post(`/api/admin/document-verification/waitlist/${applicant._id}/action`).set(auth('Admin', admin)).send(body)
+const action = async body => {
+  const account = await Applicant.findById(applicant._id).select('+consistencyState').lean()
+  return request(app).post(`/api/admin/document-verification/waitlist/${applicant._id}/action`).set(auth('Admin', admin)).send({ token: account.consistencyState?.token, ...body })
+}
 describe('consistency waitlist', () => {
+  it.each([false, true])('signup succeeds with asynchronous screening when reader failure is %s', async readerFailure => {
+    reading.fail = readerFailure
+    const email = `signup-screening-${readerFailure}@example.test`
+    let submission = request(app).post('/api/signup').field('email', email).field('password', 'SamplePassword123!').field('consent', 'true').field('emailProof', emailProofFor(email)).field('nsrpMode', 'upload').field('id1Type', 'SSS').field('verificationDetails', JSON.stringify({ birthCertificate: { copyType: 'PSA copy on security paper' }, validId1: { number: '1234567890' } }))
+    for (const [key, value] of Object.entries(validBasicInfo())) submission = submission.field(key, value)
+    const response = await submission.attach('nsrpFile', pdfBuffer(), { filename: 'SAMPLE.pdf', contentType: 'application/pdf' }).attach('birthCertificate', image, { filename: 'SAMPLE-birth.png', contentType: 'image/png' }).attach('validId1Front', image, { filename: 'SAMPLE-id.png', contentType: 'image/png' })
+    expect(response.status, JSON.stringify(response.body)).toBe(200)
+    await drainVerificationJobs()
+    const created = await Applicant.findOne({ email })
+    expect(created.verificationStatus).toBe(readerFailure ? 'under_review' : 'waitlisted')
+    const state = await request(app).get('/api/profile/consistency').set('Authorization', `Bearer ${response.body.token}`).expect(200)
+    expect(state.body.waitlisted).toBe(!readerFailure)
+    expect(JSON.stringify(state.body)).not.toContain('1992-02-03')
+  })
+
   it('waitlists significant independent differences, reuses the flagged queue, and redacts applicant responses', async () => {
     const state = await check()
     expect(state).toMatchObject({ status: 'waitlisted', waitlisted: true, checking: false })
@@ -47,6 +67,18 @@ describe('consistency waitlist', () => {
     }
     const mail = await Notification.find({ 'recipient.id': applicant._id }).lean()
     expect(JSON.stringify(mail)).not.toMatch(/1992-02-03|other account|fraud|threshold/i)
+  })
+  it('uses verified QR differences even when OCR is unavailable and the ID was previously approved', async () => {
+    const keys = generateKeyPairSync('ed25519')
+    const header = Buffer.from(JSON.stringify({ alg: 'EdDSA', kid: 'sample' })).toString('base64url')
+    const payload = Buffer.from(JSON.stringify({ firstName: 'Sample', surname: 'Example', dob: '1992-02-03' })).toString('base64url')
+    const unsigned = `${header}.${payload}`
+    reading.qr = `${unsigned}.${sign(null, Buffer.from(unsigned), keys.privateKey).toString('base64url')}`
+    vi.stubEnv('PHILSYS_PUBLIC_KEYS', JSON.stringify({ sample: { pem: keys.publicKey.export({ type: 'spki', format: 'pem' }) } }))
+    await nsrpAutomation.updateSettings({ ocrTextReading: false }, admin.email)
+    await Applicant.updateOne({ _id: applicant._id }, { $set: { 'verificationDocuments.validId1.versions.0.status': 'approved', 'verificationDocuments.validId1.versions.0.declaredDetails': { idType: 'PhilSys National ID', format: 'Card' } } })
+    expect((await check()).waitlisted).toBe(true)
+    expect((await consistencyWaitlist.publicState(applicant._id)).issues.some(i => i.document === 'validId1' && i.fieldGroup === 'birth date')).toBe(true)
   })
   it.each([
     ['minor', sampleText('1990-01-01').replace('Example', 'Examplf'), 95],
@@ -87,8 +119,8 @@ describe('consistency waitlist', () => {
     expect(blocked.body.code).toBe('WAITLIST_ATTEMPTS_EXHAUSTED')
     await expect(consistencyWaitlist.assertSubmission(applicant._id, 'birthCertificate')).rejects.toMatchObject({ code: 'WAITLIST_ATTEMPTS_EXHAUSTED' })
     await request(app).post('/api/profile/document-explanations/birthCertificate').set(auth('Applicant', applicant)).field('category', 'Other').field('note', 'Please review.').expect(200)
-    await action({ action: 'grant', docKey: 'birthCertificate', attempts: 1, reason: '' }).expect(400)
-    await action({ action: 'grant', docKey: 'birthCertificate', attempts: 1, reason: 'Additional document requested by staff.' }).expect(200)
+    expect((await action({ action: 'grant', docKey: 'birthCertificate', attempts: 1, reason: '' })).status).toBe(400)
+    expect((await action({ action: 'grant', docKey: 'birthCertificate', attempts: 1, reason: 'Additional document requested by staff.' })).status).toBe(200)
     await expect(consistencyWaitlist.assertSubmission(applicant._id, 'birthCertificate')).resolves.toBeUndefined()
     expect((await Applicant.findById(applicant._id).select('+consistencyState')).consistencyState.history.at(-1).action).toBe('grant')
   })
@@ -122,6 +154,15 @@ describe('consistency waitlist', () => {
     await consistencyWaitlist.cancelReservation(applicant._id, reservation)
     expect((await Applicant.findById(applicant._id).select('+consistencyState')).consistencyState.used.birthCertificate).toBe(0)
   })
+  it('rejects a stale admin release even when the unresolved flag count is unchanged', async () => {
+    await check()
+    const old = (await Applicant.findById(applicant._id).select('+consistencyState')).consistencyState
+    await consistencyWaitlist.begin(applicant._id, 'signup'); await drainVerificationJobs()
+    const response = await action({ action: 'release', token: old.token, compared: true, unresolved: old.issues.length, reason: 'Documents were compared before the new check.' })
+    expect(response.status).toBe(409)
+    expect(response.body.code).toBe('WAITLIST_CHANGED')
+    expect((await Applicant.findById(applicant._id)).verificationStatus).toBe('waitlisted')
+  })
   it('the admin master switch releases existing waitlists to review without approving them', async () => {
     await check()
     await request(app).put('/api/admin/nsrp-automation/settings').set(auth('Admin', admin)).send({ waitlistOnMismatch: false }).expect(200)
@@ -139,13 +180,21 @@ describe('consistency waitlist', () => {
     expect((await Applicant.findById(applicant._id)).verificationStatus).toBe('under_review')
     expect(await Notification.countDocuments()).toBe(before)
   })
+  it('does not retroactively screen an approved account during profile-only edits', async () => {
+    await Applicant.updateOne({ _id: applicant._id }, { $set: { verificationStatus: 'approved', ...Object.fromEntries(['nsrpForm', 'birthCertificate', 'validId1'].map(key => [`verificationDocuments.${key}.versions.0.status`, 'approved'])) } })
+    await request(app).put('/api/profile').set(auth('Applicant', applicant)).send({ profile: { firstName: 'Sample', middleName: '', lastName: 'Example-Changed' } }).expect(200)
+    await drainVerificationJobs()
+    const saved = await Applicant.findById(applicant._id).select('+consistencyState')
+    expect(saved.verificationStatus).toBe('approved')
+    expect(saved.consistencyState).toBeUndefined()
+  })
   it.each(['release', 'request', 'resolve', 'decline'])('audits admin action %s and rejects non-admins', async actionName => {
     await check()
     const state = await Applicant.findById(applicant._id).select('+consistencyState').lean()
     const body = { action: actionName, docKey: 'birthCertificate', reason: 'Documents compared by staff.', compared: true, unresolved: state.consistencyState.issues.length, attempts: 0 }
     await request(app).post(`/api/admin/document-verification/waitlist/${applicant._id}/action`).set(auth('Applicant', applicant)).send(body).expect(403)
-    if (actionName === 'release') await action({ ...body, compared: false }).expect(400)
-    await action(body).expect(200)
+    if (actionName === 'release') expect((await action({ ...body, compared: false })).status).toBe(400)
+    expect((await action(body)).status).toBe(200)
     const saved = await Applicant.findById(applicant._id).select('+consistencyState').lean()
     expect(saved.consistencyState.history.at(-1)).toMatchObject({ action: actionName, reason: body.reason, by: admin.email })
     expect(saved.verificationStatus).toBe(actionName === 'release' ? 'under_review' : actionName === 'decline' ? 'declined' : 'waitlisted')

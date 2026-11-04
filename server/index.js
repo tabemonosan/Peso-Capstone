@@ -1783,7 +1783,7 @@ app.get('/api/applicants/:id/verification-documents', async (req, res) => {
     }
     res.json({
       documents: summarizeVerificationDocuments(applicant, { withUrls: true, includeHistory: decoded.role === 'Admin' }),
-      consistency: await consistencyWaitlist.publicState(applicant._id),
+      consistency: applicant.deletedAt ? null : await consistencyWaitlist.publicState(applicant._id),
       verificationStatus: applicant.verificationStatus,
       verificationReason: applicant.verificationReason,
       attentionCount: attentionCount(applicant),
@@ -1971,6 +1971,8 @@ app.put('/api/profile', async (req, res) => {
     if (decoded.role === 'Applicant') {
       identityAccount = await Applicant.findOne({ email: decoded.email }).lean()
       changedIdentity = ['firstName', 'lastName', 'middleName', 'suffix', 'dob', 'nsrp'].some(key => profile[key] !== undefined && JSON.stringify(profile[key]) !== JSON.stringify(identityAccount?.profile?.[key]))
+      // A profile-only edit must not retroactively screen an approved account.
+      if (identityAccount?.verificationStatus === 'approved') changedIdentity = false
       if (changedIdentity) await consistencyWaitlist.assertSubmission(identityAccount._id, 'nsrpForm')
     }
     if (decoded.role === 'Applicant' && profile.skills !== undefined) {

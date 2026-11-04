@@ -13,7 +13,7 @@ export default function AdminWaitlistActions({ item, token, onChanged }) {
   const perform = async reason => {
     setBusy(true); setError('')
     try {
-      const response = await fetchWithTimeout(`${API_URL}/api/admin/document-verification/waitlist/${item.accountId}/action`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ action, docKey, attempts: ['grant', 'request'].includes(action) ? Number(attempts) : 0, compared, unresolved: issues.length, reason }) })
+      const response = await fetchWithTimeout(`${API_URL}/api/admin/document-verification/waitlist/${item.accountId}/action`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ action, docKey, attempts: ['grant', 'request'].includes(action) ? Number(attempts) : 0, compared, unresolved: issues.length, reason, token: state.token }) })
       const body = await response.json(); if (!response.ok) throw new Error(body.error || 'Review action unavailable.')
       setAction(''); await onChanged?.(); window.dispatchEvent(new Event('verification-reviewed'))
     } catch (err) { setError(err.message) } finally { setBusy(false) }

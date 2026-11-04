@@ -2,7 +2,7 @@
 export const WAITLIST_RULES_VERSION = '2026-11-04.1'
 export const APPLICANT_STATUSES = ['under_review', 'waitlisted', 'approved', 'declined', 'restricted']
 export const WAITLIST_DEFAULTS = { waitlistOnMismatch: true, waitlistAttempts: 3, pesoContact: 'Contact your local PESO office.', pesoOfficeHours: 'Contact PESO to confirm office hours.' }
-export const WAITLIST_LIMITS = { timeoutMs: 90000, reminderDays: 7, staleDays: 30, maxAttemptsSetting: 5 }
+export const WAITLIST_LIMITS = { timeoutMs: 90000, reminderDays: 7, staleDays: 30, maxAttemptsSetting: 5, minOcrConfidence: 60 }
 export const WAITLIST_GROUPS = ['name', 'birth date', 'ID number']
 export const WAITLIST_DOCUMENTS = ['nsrpForm', 'birthCertificate', 'validId1', 'validId2']
 export const WAITLIST_TIP = 'Text reading is approximate. If your photo is blurry or cropped, retake it, or explain the difference.'

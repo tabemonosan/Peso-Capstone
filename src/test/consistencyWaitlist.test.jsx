@@ -27,7 +27,7 @@ it('keeps explanations available while upload chances are exhausted', () => {
 it('requires a comparison checkbox and reason for admin release', async () => {
   const fetcher = vi.fn(async () => ({ ok: true, json: async () => ({ ok: true }) }))
   vi.stubGlobal('fetch', fetcher)
-  render(<AdminWaitlistActions token="sample" item={{ waitlisted: true, accountId: 'sample', docKey: 'birthCertificate', daysWaiting: 1, consistencyState: { waitlistedAt: new Date(), issues: [{ docKey: 'birthCertificate', fieldGroup: 'birth date', evidence: 'independent' }] } }} />)
+  render(<AdminWaitlistActions token="sample" item={{ waitlisted: true, accountId: 'sample', docKey: 'birthCertificate', daysWaiting: 1, consistencyState: { token: 'sample-review-revision', waitlistedAt: new Date(), issues: [{ docKey: 'birthCertificate', fieldGroup: 'birth date', evidence: 'independent' }] } }} />)
   fireEvent.click(screen.getByRole('button', { name: 'Release from waitlist' }))
   const dialog = screen.getByRole('alertdialog')
   const confirm = within(dialog).getByRole('button', { name: 'Confirm' })
@@ -36,7 +36,7 @@ it('requires a comparison checkbox and reason for admin release', async () => {
   fireEvent.click(within(dialog).getByRole('checkbox', { name: 'I compared the documents' }))
   fireEvent.click(confirm)
   await waitFor(() => expect(fetcher).toHaveBeenCalled())
-  expect(JSON.parse(fetcher.mock.calls[0][1].body)).toMatchObject({ action: 'release', compared: true, unresolved: 1, reason: 'Documents compared by staff.' })
+  expect(JSON.parse(fetcher.mock.calls[0][1].body)).toMatchObject({ action: 'release', compared: true, unresolved: 1, reason: 'Documents compared by staff.', token: 'sample-review-revision' })
 })
 it('preflight is advisory and sends only typed data and uploaded files', async () => {
   const fetcher = vi.fn(async () => ({ ok: true, json: async () => ({ advisory: true, issues: [{ docKey: 'validId1', message: 'Please check the ID expiry.' }] }) }))

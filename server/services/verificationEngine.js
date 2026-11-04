@@ -12,13 +12,14 @@ const advisory = new Set(['education_age', 'work_start_age', 'experience_age', '
 const safeFinding = f => ({ ruleId: String(f.ruleId || f.code || 'provider_inconclusive').slice(0, 100), severity: ['info', 'warning', 'critical'].includes(f.severity) ? f.severity : 'info', fieldGroup: String(f.fieldGroup || 'document').slice(0, 60), evidence: f.evidence === 'independent' ? 'independent' : 'self-declared', status: f.status === 'dismissed' ? 'dismissed' : 'open', approvalBlocking: advisory.has(f.ruleId || f.code) ? false : f.approvalBlocking !== false })
 export function createVerificationEngine({ Applicant, Employer, EmployerRequest, automation, notify, notifyAdmins, recomputeApplicant, random = () => crypto.randomInt(1000000) / 1000000, providers, beforeApproval } = {}) {
   const decisions = () => automation.decisions()
-  async function process({ role, accountId, docKey, ip }) {
+  async function process({ role, accountId, docKey, ip, checkToken }) {
     const key = ['nsrpForm', 'employerNsrpForm'].includes(docKey) ? `${role}:${accountId}:` : `${role}:${accountId}:${docKey}:`
     let decisionKey, approved = false, locked = false
     try {
       const accountModel = role === 'Applicant' ? Applicant : Employer
-      const account = await accountModel.findById(accountId).select('+holdAutoApproval +verificationFailureCounts').lean()
+      const account = await accountModel.findById(accountId).select('+holdAutoApproval +verificationFailureCounts +consistencyState').lean()
       if (!account) return
+      if (checkToken && (account.consistencyState?.token !== checkToken || account.consistencyState?.status !== 'checking')) return
       const model = role === 'Applicant' ? Applicant : EmployerRequest
       const record = role === 'Applicant' ? account : await EmployerRequest.findOne({ email: account.email }).lean()
       const path = role === 'Applicant' ? `verificationDocuments.${docKey}.versions` : 'requirementsVersions'
@@ -70,7 +71,7 @@ export function createVerificationEngine({ Applicant, Employer, EmployerRequest,
       let reason = decisionReason(context), sampled = false
       if (document.qr?.domain && !document.qr.allowlisted) reason = 'Flagged'
       const base = `${path}.${versions.length - 1}`, at = new Date()
-      if (verifiedQr && role === 'Applicant') await model.collection.updateOne({ _id: record._id, [`${base}.version`]: document.version, [`${path}`]: { $size: versions.length } }, { $set: { [`${base}.imageComparisons`]: [...(document.imageComparisons || []), ...(providerResult.comparisons || []).map(c => ({ ...c, reliable: true }))] } })
+      if (verifiedQr && role === 'Applicant') await model.collection.updateOne({ _id: record._id, ...(checkToken ? { 'consistencyState.token': checkToken, 'consistencyState.status': 'checking' } : {}), [`${base}.version`]: document.version, [`${path}`]: { $size: versions.length } }, { $set: { [`${base}.imageComparisons`]: [...(document.imageComparisons || []), ...(providerResult.comparisons || []).map(c => ({ ...c, reliable: true }))] } })
       if (providerResult.result === 'failed') {
         const counter = await accountModel.findOneAndUpdate({ _id: account._id }, { $inc: { [`verificationFailureCounts.${docKey}`]: 1 } }, { returnDocument: 'after' }).select('+verificationFailureCounts').lean()
         const attempts = counter.verificationFailureCounts[docKey]
@@ -93,6 +94,7 @@ export function createVerificationEngine({ Applicant, Employer, EmployerRequest,
         if (!reason) {
           const revision = document.reviewRevision || 0
           const match = { _id: record._id, [path]: { $size: 1 }, [`${base}.version`]: 1, [`${base}.status`]: 'pending', $or: [{ [`${base}.reviewRevision`]: revision }, ...(revision === 0 ? [{ [`${base}.reviewRevision`]: { $exists: false } }] : [])] }
+          if (checkToken) Object.assign(match, { 'consistencyState.token': checkToken, 'consistencyState.status': 'checking' })
           const set = { [`${base}.status`]: 'approved', [`${base}.autoApproved`]: true, [`${base}.approvedBy`]: 'system', [`${base}.reviewedBy`]: REVIEWER_LABELS.system, [`${base}.reviewedAt`]: at, [`${base}.provider`]: providerResult.provider, [`${base}.assurance`]: providerResult.assurance, [`${base}.rulesVersion`]: DECISION_RULES_VERSION, [`${base}.autoApprovalSummary`]: [{ ruleId: settings.minimumEvidence === 'none' ? 'typed-only-override' : verifiedQr ? 'verified-qr' : 'eligible-evidence', level: 'clear' }], [`${base}.reviewReasons`]: [] }
           if (role === 'Employer') set['requirementsFile.status'] = 'approved'
           const historyPath = role === 'Applicant' ? `verificationDocuments.${docKey}.history` : 'reviewHistory'
