@@ -43,13 +43,13 @@ describe('employer interview results', () => {
     await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Retry' })) })
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
     expect(fetcher.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(1)
-    expect(screen.getByText(/PESO is reviewing/)).toBeInTheDocument()
+    expect(screen.getByText(/reputation policy was applied automatically/)).toBeInTheDocument()
   })
 
   it('enables early decisions but cancellation never sends a result', async () => {
     const fetcher = mount({ future: true })
     expect(await screen.findByRole('button', { name: 'Interview completed' })).toBeEnabled()
-    expect(screen.getByRole('button', { name: 'Report no-show' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Report no-show' })).toBeDisabled()
     expect(screen.getByText(/You can record a result ahead of time/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Send updated invitation' })).toBeEnabled()
     fireEvent.click(screen.getByRole('button', { name: 'Interview completed' }))
@@ -58,7 +58,7 @@ describe('employer interview results', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
     expect(fetcher.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(false)
   })
-  it.each([['Interview completed', '/held'], ['Report no-show', '/reports']])('requires explicit early confirmation for %s and displays the recorded time', async (label, suffix) => {
+  it.each([['Interview completed', '/held']])('requires explicit early confirmation for %s and displays the recorded time', async (label, suffix) => {
     const fetcher = mount({ future: true })
     fireEvent.click(await screen.findByRole('button', { name: label }))
     const dialog = screen.getByRole('alertdialog', { name: 'Record this interview result ahead of time?' })
@@ -91,7 +91,7 @@ describe('employer interview results', () => {
     await waitFor(() => expect(screen.getByText('3. Interview result review').closest('li')).toHaveAttribute('aria-current', 'step'))
     const sent = fetcher.mock.calls.find(([url, options]) => url.endsWith('/applications/reports') && options?.method === 'POST')
     expect(JSON.parse(sent[1].body)).toMatchObject({ referralId: 'referral1', type: 'no_show', reason: 'Applicant did not arrive for the interview.' })
-    expect(screen.getByText(/PESO is reviewing/)).toBeInTheDocument()
+    expect(screen.getByText(/reputation policy was applied automatically/)).toBeInTheDocument()
   })
   it.each([{ status: 'invited' }, { report: { status: 'pending' } }, { outcome: 'hired' }])('hides result controls for unavailable states %j', async options => {
     mount(options)

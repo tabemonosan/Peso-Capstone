@@ -175,7 +175,7 @@ describe('POST /api/signup (real database)', () => {
   })
 
   it('creates the applicant, the generated NSRP (v1, pending), and the other documents in one request', async () => {
-    const res = await signup('juan.cruz@gmail.com', { answers: validNsrpAnswers({ occupation1: 'Mechanic', skills: ['Auto Mechanic', 'Plumbing'] }) })
+    const res = await signup('juan.cruz@gmail.com', { answers: validNsrpAnswers({ occupation1: 'Mechanic', skills: ['Auto Mechanic', 'Plumbing', 'Others', 'Welder'] }) })
     expect(res.status).toBe(200)
     expect(res.body.user.email).toBe('juan.cruz@gmail.com')
     expect(res.body.token).toBeTruthy()
@@ -186,7 +186,8 @@ describe('POST /api/signup (real database)', () => {
     expect(applicant.profile.nsrp?.surname).toBe('Cruz')
     expect(applicant.profile.nsrp?.signatureDataUrl).toBeUndefined()
     expect(applicant.profile.summary).toBe('')
-    expect(applicant.profile.skills).toEqual(['Auto Mechanic', 'Plumbing'])
+    expect(applicant.profile.skills).toEqual(['Auto Mechanic', 'Plumbing', 'Welder'])
+    expect(applicant.profile.nsrp.skills).toContain('Others')
 
     const docs = applicant.verificationDocuments
     const nsrp = docs.nsrpForm.versions.at(-1)
@@ -373,6 +374,23 @@ describe('POST /api/signup (real database)', () => {
 })
 
 describe('PUT /api/profile/nsrp (Update NSRP)', () => {
+  it('validates, persists and clears applicant portfolio links without changing qualifications', async () => {
+    const email = 'portfolio@example.com'
+    await Applicant.create({ email, passwordHash: 'unused', emailVerified: true, verificationStatus: 'approved', profile: { firstName: 'Juan', lastName: 'Cruz', skills: ['Plumbing'] } })
+    const authorization = { Authorization: `Bearer ${applicantToken(email)}` }
+    const links = [{ label: 'My portfolio', url: 'https://example.com/work' }]
+    await request(app).put('/api/profile').set(authorization).send({ profile: { portfolioLinks: links } }).expect(200)
+    const loaded = await request(app).get('/api/profile').set(authorization).expect(200)
+    expect(loaded.body.profile.portfolioLinks).toEqual(links)
+    expect(loaded.body.profile.skills).toEqual(['Plumbing'])
+    for (const invalid of [[{ label: 'Invalid', url: 'javascript:alert(1)' }], Array(6).fill(links[0]), [{ label: '', url: links[0].url }]]) {
+      await request(app).put('/api/profile').set(authorization).send({ profile: { portfolioLinks: invalid } }).expect(422)
+    }
+    expect((await Applicant.findOne({ email })).profile.portfolioLinks.map(link => link.toObject())).toEqual(links)
+    await request(app).put('/api/profile').set(authorization).send({ profile: { portfolioLinks: [] } }).expect(200)
+    expect((await Applicant.findOne({ email })).profile.portfolioLinks).toHaveLength(0)
+  })
+
   it('moves a recognizable legacy NSRP skill bio into Skills and preserves NSRP when editing photos and About me', async () => {
     const email = 'profile-cleanup@example.com'
     const nsrp = { occupation1: 'Mechanic', skills: ['Auto Mechanic', 'Plumbing'] }
@@ -400,7 +418,7 @@ describe('PUT /api/profile/nsrp (Update NSRP)', () => {
     const update = await request(app)
       .put('/api/profile/nsrp')
       .set('Authorization', `Bearer ${token}`)
-      .send({ answers: validNsrpAnswers({ occupation1: 'Welder', skills: ['Auto Mechanic', 'Plumbing'], email: 'update-me@example.com' }) })
+      .send({ answers: validNsrpAnswers({ occupation1: 'Welder', skills: ['Auto Mechanic', 'Plumbing', 'Others', 'Welder'], email: 'update-me@example.com' }) })
     expect(update.status).toBe(200)
     expect(update.body.version).toBe(2)
     expect(update.body.status).toBe('pending')
@@ -413,7 +431,7 @@ describe('PUT /api/profile/nsrp (Update NSRP)', () => {
     expect(versions[1].version).toBe(2)
     expect(applicant.profile.nsrp.occupation1).toBe('Welder')
     expect(applicant.profile.summary).toBe('My personal introduction.')
-    expect(applicant.profile.skills).toEqual(['Auto Mechanic', 'Plumbing'])
+    expect(applicant.profile.skills).toEqual(['Auto Mechanic', 'Plumbing', 'Welder'])
   }, 60000)
 
   it('rejects changing the NSRP reference of a verified account (409)', async () => {
@@ -518,6 +536,24 @@ describe('legacy applicants (uploaded NSRP file, no structured data)', () => {
 })
 
 describe('document ownership', () => {
+  it('accepts an optional signup resume and supports replacing, downloading and deleting it', async () => {
+    const result = await signup('resume-owner@example.com', { resume: true })
+    expect(result.status).toBe(200)
+    const owner = await Applicant.findOne({ email: 'resume-owner@example.com' })
+    const authorization = { Authorization: `Bearer ${result.body.token}` }
+    const metadata = await request(app).get('/api/profile/resume').set(authorization).expect(200)
+    expect(metadata.body.resumeFile.originalName).toBe('resume.pdf')
+    expect(JSON.stringify(metadata.body)).not.toContain('data')
+    await request(app).get(`/api/applicants/${owner._id}/resume`).set(authorization).expect(200).expect('Content-Type', /application\/pdf/)
+    await request(app).post('/api/profile/resume').set(authorization).attach('resume', pdfBuffer(), { filename: 'updated.pdf', contentType: 'application/pdf' }).expect(200)
+    expect((await request(app).get('/api/profile/resume').set(authorization)).body.resumeFile.originalName).toBe('updated.pdf')
+    await request(app).post('/api/profile/resume').set(authorization).attach('resume', Buffer.from('invalid'), { filename: 'bad.pdf', contentType: 'application/pdf' }).expect(422)
+    await request(app).post('/api/profile/resume').set(authorization).attach('resume', pdfBuffer(FIVE_MB + 1), { filename: 'big.pdf', contentType: 'application/pdf' }).expect(422)
+    await request(app).delete('/api/profile/resume').set(authorization).expect(200)
+    expect((await request(app).get('/api/profile/resume').set(authorization)).body.resumeFile).toBeNull()
+    await request(app).get(`/api/applicants/${owner._id}/resume`).set(authorization).expect(404)
+  })
+
   it("prevents one applicant from reading or replacing another applicant's documents", async () => {
     const a = await signup('owner@example.com')
     const b = await signup('intruder@example.com')
@@ -534,7 +570,7 @@ describe('document ownership', () => {
     const resume = await request(app)
       .get(`/api/applicants/${owner._id}/resume`)
       .set('Authorization', `Bearer ${tokenB}`)
-    expect(resume.status).toBe(410)
+    expect(resume.status).toBe(403)
 
     const nsrp = await request(app)
       .get(`/api/applicants/${owner._id}/nsrp-verification`)

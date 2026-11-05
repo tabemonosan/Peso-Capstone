@@ -1,4 +1,12 @@
-import { PH_LOCATIONS } from './phLocations.js'
+import { PH_LOCATIONS, getEmployerJobAddress } from './phLocations.js'
+
+export function registeredInterviewAddress(employer = {}, request = {}) {
+  const address = getEmployerJobAddress(employer, request)
+  const landmark = employer.profile?.landmark || request.registrationDetails?.landmark
+    || employer.profile?.location?.match(/Landmark\s*:\s*(.+)$/i)?.[1]?.trim()
+    || request.location?.match(/Landmark\s*:\s*(.+)$/i)?.[1]?.trim() || ''
+  return { ...address, landmark }
+}
 
 export const INTERVIEW_MAX_DAYS = 365
 export const philippineDateTimeInput = date => new Date(+new Date(date) + 8 * 3600000).toISOString().slice(0, 16)

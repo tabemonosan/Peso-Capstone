@@ -35,20 +35,29 @@ async function fill() {
   await next()
   fireEvent.change(screen.getByLabelText('Resume'), { target: { files: [resume] } })
   await next()
-  fireEvent.change(screen.getByLabelText("Have you completed a bachelor's degree?"), { target: { value: 'Yes' } })
   fireEvent.change(screen.getByLabelText('Do you have work experience?'), { target: { value: 'Yes' } })
   fireEvent.change(screen.getByLabelText('Briefly describe your experience'), { target: { value: 'Delivery driver' } })
 }
 
 describe('application draft persistence', () => {
+  it('keeps a previously chosen application resume ahead of the profile default', async () => {
+    files.set(key, resume)
+    mount()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Next', exact: true })).toBeEnabled())
+    expect(fetch.mock.calls.some(([url]) => url.endsWith('/api/profile/resume'))).toBe(false)
+    fireEvent.change(screen.getByLabelText('Mobile number'), { target: { value: '09171234567' } })
+    await next()
+    expect(screen.getByText('my-resume.pdf')).toBeInTheDocument()
+  })
+
   it('restores every answer, the resume and the last step after reopening', async () => {
     const first = mount()
     await fill()
-    expect(readApplicationDraft(key)).toEqual({ step: 2, answers: { email: 'new.contact@gmail.com', mobile: '09171234567', bachelorDegree: 'Yes', hasExperience: 'Yes', experience: 'Delivery driver' } })
+    expect(readApplicationDraft(key)).toEqual({ step: 2, answers: { email: 'new.contact@gmail.com', mobile: '09171234567', hasExperience: 'Yes', experience: 'Delivery driver' } })
     first.unmount()
     mount()
     expect(screen.getByText('Step 3: Qualifications')).toBeInTheDocument()
-    expect(screen.getByLabelText("Have you completed a bachelor's degree?")).toHaveValue('Yes')
+    expect(screen.queryByLabelText("Have you completed a bachelor's degree?")).not.toBeInTheDocument()
     expect(screen.getByLabelText('Do you have work experience?')).toHaveValue('Yes')
     expect(screen.getByLabelText('Briefly describe your experience')).toHaveValue('Delivery driver')
     await waitFor(() => expect(screen.getByRole('button', { name: 'Next', exact: true })).toBeEnabled())

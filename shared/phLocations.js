@@ -792,6 +792,14 @@ export function validateApplicantLocation(input = {}, { barangay = true } = {}) 
 
 // City/province labels contain commas; serialize these as an array so filters
 // never mistake a province for a second selected location. Old URLs still work.
+// Saved job filters may still contain a full barangay/city/province address.
+// Use its municipality so the filter includes every barangay in that place.
+export function normalizeCityFilters(values = []) {
+  return [...new Set(values.filter(value => typeof value === 'string').map(value =>
+    parseStoredLocation(value)?.city || applicantCityName(value) || value.trim()
+  ).filter(Boolean))]
+}
+
 export function encodeLocationFilters(values) {
   return values.some((value) => value.includes(',')) ? JSON.stringify(values) : values.join(',')
 }
@@ -799,6 +807,7 @@ export function encodeLocationFilters(values) {
 export function decodeLocationFilters(value) {
   if (Array.isArray(value)) return value.flatMap(decodeLocationFilters).slice(0, 50)
   if (typeof value !== 'string') return []
+  if (parseStoredLocation(value)) return [value]
   if (value.startsWith('[')) {
     try {
       const parsed = JSON.parse(value)

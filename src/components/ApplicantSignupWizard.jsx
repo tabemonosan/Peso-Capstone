@@ -1,7 +1,8 @@
 import PasswordInput from './PasswordInput'
 import { useEffect, useMemo, useRef, useState } from "react"
 import { API_URL } from "../config"
-import { NSRP_SKILL_LABELS } from "../../shared/nsrpSkills.js"
+import NsrpSkillsField from './NsrpSkillsField'
+import { RESUME_ACCEPT, resumeError } from '../../shared/resume.js'
 import { NSRP_ROW_LIMITS } from "../../shared/nsrpTableLimits.js"
 import NsrpPdfPreview from "./NsrpPdfPreview"
 import NsrpWarningPanel from "./NsrpWarningPanel"
@@ -194,6 +195,8 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
   const [answers, setAnswers] = useState(() => isUpdate ? { ...initialAnswers, signatureDataUrl: "" } : saved.answers)
   const [consent, setConsent] = useState(saved.consent)
   const [docs, setDocs] = useState(emptyVerificationDocs)
+  const [resume, setResume] = useState(null)
+  const resumeInputRef = useRef(null)
   // NSRP path: 'online' (fill out) or 'upload' (pre-filled form). The uploaded
   // file itself stays in memory only — never in browser storage.
   const [nsrpMode, setNsrpMode] = useState(isUpdate ? "online" : saved.nsrpMode)
@@ -516,8 +519,9 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
       return response.ok
     }
     if (validationStep === 7) {
-      // The resume is optional and no longer collected at sign-up.
+      // A resume is optional and independent of identity verification.
       const localErrors = {}
+      if (resume && resumeError(resume)) localErrors.resume = resumeError(resume)
       if (!BIRTH_COPY_TYPES.includes(docs.birthDetails?.copyType)) localErrors.birthCertificate = 'Select the birth certificate copy type.'
       if (!validateVerificationDocs(docs)) localErrors.validId2 = "Add a birth certificate and complete Valid ID #1."
       if (docs.id1.type && docs.id2.type && docs.id1.type === docs.id2.type) localErrors.validId2 = "Choose a different type for Valid ID #2."
@@ -657,6 +661,7 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
         if (docs.id1.back) payload.append("validId1Back", docs.id1.back)
         if (docs.id2.front) payload.append("validId2Front", docs.id2.front)
         if (docs.id2.back) payload.append("validId2Back", docs.id2.back)
+        if (resume) payload.append('resume', resume)
         response = await fetch(`${API_URL}/api/signup`, { method: "POST", body: payload })
       }
       const data = await response.json().catch(() => null)
@@ -1189,13 +1194,7 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
                 })}
               </div>
             </section>
-            <fieldset className="rounded-xl border border-slate-200 p-3">
-              <legend className="px-1 text-sm font-semibold text-slate-800">Skills (optional)</legend>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {NSRP_SKILL_LABELS.map((skill) => <label key={skill} className="flex items-center gap-2 text-xs text-slate-700"><input type="checkbox" checked={(answers.skills || []).includes(skill)} onChange={(event) => updateAnswer("skills", event.target.checked ? [...(answers.skills || []), skill] : (answers.skills || []).filter((item) => item !== skill))} />{skill}</label>)}
-              </div>
-              {(answers.skills || []).includes("Others") && <label className="mt-3 block text-xs font-medium text-slate-700">Other skills, specify<input maxLength={60} value={answers.othersText || ""} onChange={(event) => updateAnswer("othersText", event.target.value)} className={inputClass} /></label>}
-            </fieldset>
+            <NsrpSkillsField skills={answers.skills || []} othersText={answers.othersText || ''} onChange={next => { updateAnswer('skills', next.skills); updateAnswer('othersText', next.othersText) }} />
             </>
           )}
           {step === 5 && answers.employmentStatus && (
@@ -1219,6 +1218,12 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
       {step === 7 && !isUpdate && (
         <>
           <VerificationDocumentsForm docs={docs} setDocs={setDocs} disabled={busy} fieldErrors={fieldErrors} nsrp={answers} />
+          <section className="mt-4 rounded-xl border border-slate-200 p-3">
+            <label className="block text-sm font-semibold">Resume (optional)<input ref={resumeInputRef} type="file" accept={RESUME_ACCEPT} disabled={busy} onChange={event => { const next = event.target.files?.[0] || null; setResume(next); setFieldErrors(current => ({ ...current, resume: next ? resumeError(next) : undefined })) }} className="mt-2 block w-full text-sm" /></label>
+            <p className="mt-2 text-xs text-slate-500">PDF or DOCX, up to 5 MB. Employers reviewing your profile can view it. You can also add or replace it later from the Profile menu.</p>
+            {resume && <button type="button" disabled={busy} onClick={() => { setResume(null); if (resumeInputRef.current) resumeInputRef.current.value = ''; setFieldErrors(current => ({ ...current, resume: undefined })) }} className="mt-2 text-sm text-rose-700">Remove selected resume</button>}
+            {fieldErrors.resume && <p role="alert" className="mt-2 text-xs text-rose-700">{fieldErrors.resume}</p>}
+          </section>
         </>
       )}
       {step === 8 && (

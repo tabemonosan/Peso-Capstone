@@ -35,6 +35,31 @@ beforeEach(async () => {
 })
 
 describe('ranked employer referrals', () => {
+  it('shares profile resume metadata and downloads only with employers holding an active referral', async () => {
+    await Applicant.updateOne({ _id: strong._id }, { $set: { resumeFile: { originalName: 'resume.pdf', mimetype: 'application/pdf', size: 8, data: Buffer.from('%PDFtest') } } })
+    const response = await request(app).get(`/api/referrals/employer/${employer._id}`).set(auth()).expect(200)
+    const candidate = response.body.find(entry => String(entry.applicantId._id) === String(strong._id)).applicantId
+    expect(candidate.resumeFile.originalName).toBe('resume.pdf')
+    expect(candidate.resumeFile).not.toHaveProperty('data')
+    const download = await request(app).get(`/api/applicants/${strong._id}/resume`).set(auth()).expect(200)
+    expect(download.body).toEqual(Buffer.from('%PDFtest'))
+    const ownDownload = await request(app).get(`/api/applicants/${strong._id}/resume`).set(auth('Applicant', strong.email)).expect(200)
+    expect(ownDownload.body).toEqual(Buffer.from('%PDFtest'))
+    expect(ownDownload.headers['content-length']).toBe('8')
+    await Employer.create({ email: 'unrelated@example.com', passwordHash: 'test', emailVerified: true, verificationStatus: 'approved' })
+    await request(app).get(`/api/applicants/${strong._id}/resume`).set(auth('Employer', 'unrelated@example.com')).expect(403)
+    await Referral.updateOne({ employerId: employer._id, applicantId: strong._id }, { $set: { status: 'withdrawn' } })
+    await request(app).get(`/api/applicants/${strong._id}/resume`).set(auth()).expect(403)
+    await request(app).get(`/api/applicants/${strong._id}/resume`).expect(401)
+  })
+
+  it('includes applicant portfolio links in the employer profile summary', async () => {
+    const links = [{ label: 'My portfolio', url: 'https://example.com/work' }]
+    await Applicant.updateOne({ _id: strong._id }, { $set: { 'profile.portfolioLinks': links } })
+    const response = await request(app).get(`/api/referrals/employer/${employer._id}`).set(auth()).expect(200)
+    expect(response.body.find(entry => String(entry.applicantId._id) === String(strong._id)).applicantId.profile.portfolioLinks).toEqual(links)
+  })
+
   it.each(['', '?page=1&limit=1'])('puts the strongest candidate first before pagination (%s)', async (suffix) => {
     const response = await request(app).get(`/api/referrals/employer/${employer._id}${suffix}`).set(auth())
     expect(response.status).toBe(200)

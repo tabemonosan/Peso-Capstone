@@ -1,3 +1,4 @@
+import { isJobArchived } from '../../shared/jobArchive.js'
 import { useEffect, useRef, useState } from 'react'
 import { formatLocation } from '../../shared/jobPosting.js'
 import JobPostingDetails from './JobPostingDetails'
@@ -15,7 +16,7 @@ export default function EmployerJobBrowser({ jobs, onEdit, profileImage = '' }) 
         <span className="job-browser-company-mark">{profileImage || job.employerBranding?.profileImage
           ? <img src={profileImage || job.employerBranding.profileImage} alt="" />
           : (job.company || 'Employer').trim().charAt(0).toUpperCase()}</span>
-        <span className="job-browser-row-copy"><strong>{job.title}</strong><span>{job.company}</span><span className="job-browser-muted">{formatLocation(job) || 'Not specified'}</span><span className={`job-browser-status status-${job.status || 'pending'}`}>{job.status || 'pending'}</span>{job.createdAt && <span className="job-browser-muted">Submitted {new Date(job.createdAt).toLocaleDateString()}</span>}</span>
+        <span className="job-browser-row-copy"><strong>{job.title}</strong><span>{job.company}</span><span className="job-browser-muted">{formatLocation(job) || 'Not specified'}</span><span className={`job-browser-status status-${job.status || 'pending'}`}>{isJobArchived(job) ? 'Archived' : job.status || 'pending'}</span>{job.createdAt && <span className="job-browser-muted">Submitted {new Date(job.createdAt).toLocaleDateString()}</span>}</span>
       </button>)}
     </section>
     <article ref={detailsRef} tabIndex={0} className="job-browser-details" aria-label={`${selected.title} job details`}>

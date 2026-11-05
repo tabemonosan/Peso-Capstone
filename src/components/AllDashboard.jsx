@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { API_URL } from '../config'
 import PortalNavIcon from './PortalNavIcon'
+import AdminDashboardReport from './AdminDashboardReport'
 
 const metricIcons = { Applicants: 'applicants', Employers: 'employers', 'Jobs pending': 'clock', 'Jobs approved': 'check', 'Jobs declined': 'jobs', 'Documents awaiting review': 'requests', Hires: 'check', Referrals: 'referrals', 'Hires reported': 'check', 'Account status': 'verification', Applications: 'jobs', 'Open jobs': 'jobs', Notifications: 'notify' }
 
@@ -81,6 +82,7 @@ export default function AllDashboard({ token, onNavigate, applicantOverview }) {
 
   if (error) return <p role="alert" className="text-rose-700">{error}</p>
   if (!data) return <Skeleton />
+  if (data.role === 'Admin') return <AdminDashboardReport data={data} onNavigate={onNavigate} />
 
   const cards = cardsFor(data.role, data.stats, applicantOverview)
   const workflow = data.stats.workflow

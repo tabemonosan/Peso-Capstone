@@ -14,6 +14,19 @@ function mock(items = [], account = {}, total = items.length) {
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('My applications', () => {
+  it('keeps past applications and timelines together regardless of job board filters', async () => {
+    window.history.replaceState({}, '', '/?locations=Tiwi&skills=Cooking')
+    const fetcher = mock([{ ...base, status: 'withdrawn', actions: [] }])
+    render(<MyApplicationsPage token="applicant" />)
+    expect(await screen.findByRole('heading', { name: 'Application history', exact: true })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Demo Driver' })).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Application timeline'))
+    expect(screen.getByText('application submitted')).toBeInTheDocument()
+    const call = fetcher.mock.calls.find(([url]) => url.includes('/mine?'))
+    expect(call[0]).not.toMatch(/locations=|skills=/)
+    window.history.replaceState({}, '', '/')
+  })
+
   it('shows companies in a sidebar and switches the focused application', async () => {
     const history = [{ action: 'interview_confirmed', status: 'confirmed', at: future }, { action: 'interview_confirmed', status: 'interview_confirmed', at: future }]
     mock([{ ...base, status: 'interview_confirmed', actions: [], history, employer: { name: 'Demo Company', profileImage: '/company.jpg' } }, { ...base, id: 'application2', job: { title: 'Office Clerk' }, employer: { name: 'Other Company' }, status: 'pending', actions: ['withdraw'] }])

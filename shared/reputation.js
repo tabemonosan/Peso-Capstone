@@ -25,7 +25,7 @@ function monthsBefore(time, months) {
   const lastDay = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 0)).getUTCDate()
   return Date.UTC(month.getUTCFullYear(), month.getUTCMonth(), Math.min(date.getUTCDate(), lastDay), date.getUTCHours(), date.getUTCMinutes(), date.getUTCSeconds(), date.getUTCMilliseconds())
 }
-const labels = { confirmed_no_show: 'PESO-confirmed interview no-show', late_cancellation: 'PESO-confirmed late cancellation', attended_interview: 'Interview attendance', hired: 'PESO-confirmed employment', manual_adjustment: 'PESO reputation adjustment', reversal: 'Event reversed', weekly_recovery: 'Weekly recovery' }
+const labels = { confirmed_no_show: 'Interview no-show', late_cancellation: 'PESO-confirmed late cancellation', attended_interview: 'Interview attendance', hired: 'PESO-confirmed employment', manual_adjustment: 'PESO reputation adjustment', reversal: 'Event reversed', weekly_recovery: 'Weekly recovery' }
 export const reputationEventLabel = type => labels[type] || 'PESO reputation adjustment'
 export function reputationSettings(input = {}) { return { ...REPUTATION_DEFAULTS, ...Object.fromEntries(Object.keys(REPUTATION_DEFAULTS).filter(key => Number.isFinite(input[key])).map(key => [key, input[key]])) } }
 export function validateReputationSettings(input) {
@@ -42,7 +42,7 @@ export function validateReputationSettings(input) {
 export function reputationPolicy(input) {
   const s = reputationSettings(input)
   return [
-    { type: 'confirmed_no_show', label: 'Confirmed interview no-show', delta: -s.noShowFirst, description: `First: −${s.noShowFirst}; second: −${s.noShowSecond}; third and later: −${s.noShowLater}, counted over ${s.graduationMonths} months. A report alone never deducts points.` },
+    { type: 'confirmed_no_show', label: 'Confirmed interview no-show', delta: -s.noShowFirst, description: `First: −${s.noShowFirst}; second: −${s.noShowSecond}; third and later: −${s.noShowLater}, counted over ${s.graduationMonths} months. Employer no-show reports after the scheduled interview time apply points automatically. You can request a review.` },
     { type: 'late_cancellation', label: 'Confirmed late cancellation', delta: -s.lateFirst, description: `Under ${s.lateCancellationHours} hours before the interview: −${s.lateFirst} first, −${s.lateLater} later, counted over ${s.graduationMonths} months. PESO must confirm it.` },
     { type: 'attended_interview', label: 'Attend an interview', delta: s.attendanceCredit, description: `+${s.attendanceCredit} after an employer records an attended interview outcome. Once per employer in ${s.employerCooldownDays} days.` },
     { type: 'hired', label: 'Confirmed employment', delta: s.employmentCredit, description: `+${s.employmentCredit} when PESO confirms employer-reported employment.` },

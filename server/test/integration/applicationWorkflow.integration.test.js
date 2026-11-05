@@ -56,6 +56,18 @@ beforeEach(async () => {
 })
 
 describe('applications, interviews and admin-confirmed events', () => {
+  it.each([{}, { city: '', barangay: '', province: 'Albay' }, { useRegisteredAddress: true, city: 'Oas', barangay: 'Calpi', province: 'Albay' }])('uses the registered NSRP address for an invitation with missing or hidden address fields %j', async addressFields => {
+    await Employer.updateOne({ _id: employer._id }, { $set: { establishmentAddress: { city: 'Manito', barangay: 'Nagotgot', province: 'Albay' }, 'profile.location': 'Nagotgot, Manito, Albay, Landmark: near the hall' } })
+    await apply().expect(200)
+    const referral = await Referral.findOne({ applicantId: applicant._id })
+    const result = await api('post', `/referrals/${referral._id}/interview`, 'Employer', employer, { ...addressFields, scheduledAt: new Date(Date.now() + DAY).toISOString(), mode: 'In person', message: 'Bring your resume.' }).expect(200)
+    expect(result.body).toMatchObject({ city: 'Manito', barangay: 'Nagotgot', province: 'Albay', landmark: 'near the hall', location: 'Nagotgot, Manito, Albay, Landmark: near the hall' })
+    const stored = await Interview.findById(result.body.id).lean()
+    expect(stored.location).toBe(result.body.location)
+    const received = await api('get', `/referrals/${referral._id}/interview`, 'Applicant', applicant).expect(200)
+    expect(received.body.location).toBe(result.body.location)
+  })
+
   it('persists exactly one locked employer report and notification under concurrent submissions', async () => {
     await apply().expect(200)
     const referral = await Referral.findOne({ applicantId: applicant._id })
@@ -109,7 +121,8 @@ describe('applications, interviews and admin-confirmed events', () => {
   it('restores invitation actions and interview progress after a no-show report is dismissed', async () => {
     const { referral, meeting } = await meetingFor()
     await api('post', `/interviews/${meeting.id}/respond`, 'Applicant', applicant, { action: 'confirm' }).expect(200)
-    const report = await request(app).post('/api/applications/reports').set(auth('Employer', employer)).send({ referralId: String(referral._id), type: 'no_show', reason: 'Mistaken early report.', confirmEarly: true }).expect(200)
+    await Interview.updateOne({ _id: meeting.id }, { scheduledAt: new Date(Date.now() - DAY) })
+    const report = await request(app).post('/api/applications/reports').set(auth('Employer', employer)).send({ referralId: String(referral._id), type: 'no_show', reason: 'Mistaken report.' }).expect(200)
     await api('post', `/admin/reports/${encodeURIComponent(report.body.id)}/review`, 'Admin', admin, { decision: 'dismissed', reason: 'Evidence does not support this report.' }).expect(200)
     await api('post', `/referrals/${referral._id}/interview`, 'Employer', employer, { scheduledAt: new Date(Date.now() + 2 * DAY).toISOString(), mode: 'In person', city: 'Manito', barangay: 'Nagotgot', province: 'Albay', message: 'Updated schedule.' }).expect(200)
     for (const path of ['/api/workflow/mine', '/api/applications/mine']) {
@@ -140,10 +153,11 @@ describe('applications, interviews and admin-confirmed events', () => {
     const other = await makeApplicant('other-reputation-owner@workflow.test')
     expect((await api('get', `/reputation?applicantId=${applicant._id}`, 'Applicant', other)).body.points).toBe(100)
   })
-  it('deducts no-show points only after PESO confirmation and does not deduct twice on retries', async () => {
-    const { report } = await reportNoShow()
-    expect((await api('get', '/reputation', 'Applicant', applicant)).body.points).toBe(100)
+  it('deducts no-show points immediately and does not deduct twice on report or confirmation retries', async () => {
+    const { report, referral } = await reportNoShow()
+    expect((await api('get', '/reputation', 'Applicant', applicant)).body.points).toBe(100 - REPUTATION_DEFAULTS.noShowFirst)
     await api('post', `/reports/${encodeURIComponent(report.id)}/respond`, 'Applicant', applicant, { response: 'Please review my explanation.' }).expect(200)
+    await request(app).post('/api/applications/reports').set(auth('Employer', employer)).send({ referralId: String(referral._id), type: 'no_show', reason: 'Retry report' }).expect(409)
     const decision = { decision: 'confirmed', reason: 'PRIVATE evidence reviewed by admin' }
     await api('post', `/admin/reports/${encodeURIComponent(report.id)}/review`, 'Admin', admin, decision).expect(200)
     await api('post', `/admin/reports/${encodeURIComponent(report.id)}/review`, 'Admin', admin, decision).expect(200)
@@ -354,13 +368,17 @@ describe('applications, interviews and admin-confirmed events', () => {
   it('validates future interview times and the complete municipality/barangay/province address on the server', async () => {
     const { referral } = await meetingFor()
     const valid = { scheduledAt: new Date(Date.now() + DAY).toISOString(), mode: 'In person', city: 'Manito', barangay: 'Nagotgot', province: 'Albay' }
-    for (const change of [{ scheduledAt: new Date(Date.now() - DAY).toISOString() }, { scheduledAt: 'invalid' }, { scheduledAt: new Date(Date.now() + 366 * DAY).toISOString() }, { city: '' }, { barangay: '' }, { province: '' }, { province: 'Other' }, { message: 'a'.repeat(51) }, { city: 'Oas', barangay: 'Nagotgot' }]) {
+    for (const change of [{ scheduledAt: new Date(Date.now() - DAY).toISOString() }, { scheduledAt: 'invalid' }, { scheduledAt: new Date(Date.now() + 366 * DAY).toISOString() }, { province: '' }, { province: 'Other' }, { message: 'a'.repeat(51) }, { city: 'Oas', barangay: 'Nagotgot' }]) {
       await api('post', `/referrals/${referral._id}/interview`, 'Employer', employer, { ...valid, ...change }).expect(403)
     }
     const updated = await api('post', `/referrals/${referral._id}/interview`, 'Employer', employer, { ...valid, landmark: '', message: 'a'.repeat(50), location: 'Ignore forged free text' }).expect(200)
     expect(updated.body).toMatchObject({ city: 'Manito', barangay: 'Nagotgot', province: 'Albay', landmark: '', location: 'Nagotgot, Manito, Albay' })
     const stored = await Interview.findOne({ referralId: referral._id }).lean()
     expect(stored.city).toBe('Manito')
+    for (const change of [{ city: '' }, { barangay: '' }]) {
+      const missing = await api('post', `/referrals/${referral._id}/interview`, 'Employer', employer, { ...valid, ...change }).expect(422)
+      expect(missing.body.code).toBe('REGISTERED_ADDRESS_REQUIRED')
+    }
     await api('post', `/referrals/${referral._id}/interview`, 'Employer', employer, { ...valid, mode: 'Online', meetingLink: '' }).expect(403)
     await api('post', `/referrals/${referral._id}/interview`, 'Employer', employer, { ...valid, mode: 'Online', meetingLink: 'https://example.invalid/demo', landmark: 'Demo office' }).expect(200)
   })
@@ -457,20 +475,20 @@ describe('applications, interviews and admin-confirmed events', () => {
     expect(await mongoose.connection.db.collection('referral_audit').countDocuments({ action: 'application_routed_for_review' })).toBe(0)
   })
 
-  it.each(['confirmed', 'dismissed'])('keeps no-show reports separate from ratings and changes trust only if admin %s', async decision => {
+  it.each(['confirmed', 'dismissed'])('applies no-show points automatically and handles optional admin decision %s', async decision => {
     const { report } = await reportNoShow()
-    expect((await score()).trustValue).toBe(100)
+    expect((await score()).trustValue).toBe(100 - REPUTATION_DEFAULTS.noShowFirst)
     if (decision === 'confirmed') await api('post', `/admin/reports/${encodeURIComponent(report.id)}/review`, 'Admin', admin, { decision, reason: 'Premature' }).expect(409)
     let mine = await api('get', '/mine', 'Applicant', applicant).expect(200)
     expect(mine.body.items[0].actions).toContain('respond_no_show')
     expect(+new Date(report.responseDeadline) - +new Date(mine.body.items[0].noShowReport.reportedAt)).toBe(7 * DAY)
     await api('post', `/reports/${encodeURIComponent(report.id)}/respond`, 'Applicant', applicant, { response: 'My factual explanation' }).expect(200)
-    expect((await score()).trustValue).toBe(100)
+    expect((await score()).trustValue).toBe(100 - REPUTATION_DEFAULTS.noShowFirst)
     await api('post', `/admin/reports/${encodeURIComponent(report.id)}/review`, 'Admin', admin, { decision, reason: 'PRIVATE admin evidence review' }).expect(200)
     await api('post', `/admin/reports/${encodeURIComponent(report.id)}/review`, 'Admin', admin, { decision, reason: 'Retry same decision' }).expect(200)
     const account = await score()
     expect(account.trustValue).toBe(decision === 'confirmed' ? 100 - REPUTATION_DEFAULTS.noShowFirst : 100)
-    expect(account.trustEvents).toHaveLength(decision === 'confirmed' ? 1 : 0)
+    expect(account.trustEvents).toHaveLength(decision === 'confirmed' ? 1 : 2)
     mine = await api('get', '/mine', 'Applicant', applicant).expect(200)
     if (decision === 'confirmed') expect(mine.body.items[0].actions).toContain('view_outcome')
     else expect(mine.body.items[0].status).toBe('interview_confirmed')
@@ -527,25 +545,14 @@ describe('applications, interviews and admin-confirmed events', () => {
     expect(decision.by).toBe('Employer')
     expect(saved.status).toBe('held')
   })
-  it('requires early no-show consent and retains the confirmation timestamp and PESO review', async () => {
+  it('rejects early no-show reports even with explicit consent and never deducts points', async () => {
     const { meeting, referral } = await meetingFor()
     await api('post', `/interviews/${meeting.id}/respond`, 'Applicant', applicant, { action: 'confirm' }).expect(200)
-    const path = '/api/applications/reports'
-    const body = { referralId: String(referral._id), type: 'no_show', reason: 'Employer recording the decision ahead of time.' }
-    const missing = await request(app).post(path).set(auth('Employer', employer)).send(body).expect(409)
-    expect(missing.body.code).toBe('EARLY_CONFIRMATION_REQUIRED')
-    const before = Date.now()
-    const result = await request(app).post(path).set(auth('Employer', employer)).send({ ...body, confirmEarly: true, at: '2000-01-01' }).expect(200)
-    const report = await ApplicationReport.findById(result.body.id).lean()
-    expect(+report.at).toBeGreaterThanOrEqual(before)
-    expect(report.status).toBe('pending')
-    expect(String(report.byId)).toBe(String(employer._id))
-    const saved = await Interview.findById(meeting.id).lean()
-    const decision = saved.history.find(entry => entry.action === 'employer_reported_no_show')
-    expect(+decision.at).toBe(+report.at)
-    expect(decision.reason).toContain('Employer confirmed an early decision')
-    const display = await api('get', `/referrals/${referral._id}/interview`, 'Employer', employer).expect(200)
-    expect(display.body.noShowReport.reportedAt).toBe(report.at.toISOString())
+    for (const confirmEarly of [false, true]) {
+      const response = await request(app).post('/api/applications/reports').set(auth('Employer', employer)).send({ referralId: String(referral._id), type: 'no_show', reason: 'Ahead of schedule.', confirmEarly }).expect(409)
+      expect(response.body.code).toBe('INTERVIEW_NOT_DUE')
+    }
+    expect(await ApplicationReport.countDocuments({ interviewId: meeting.id })).toBe(0)
     expect((await score()).trustValue).toBe(100)
   })
 

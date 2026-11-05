@@ -1,10 +1,12 @@
 import mongoose from 'mongoose'
 
-export const JOB_POLICY_VERSION = '2026-11-04.2'
+export const JOB_POLICY_VERSION = '2026-11-06.1'
 export const JOB_MODERATION_DEFAULTS = { enabled: true }
 const DAY = 86400000
 const normalize = value => String(value || '').normalize('NFKC').replace(/[\u200B-\u200D\uFEFF]/g, '').toLowerCase()
 const rules = [
+  ['abusive_language', 'Abusive content', 'Possible profanity, insults or harassment require PESO review.', /\b(?:f(?:u|\*|@)?c?k(?:ing|er|ers)?|sh[i!1*]t(?:ty)?|b[i!1*]tch(?:es)?|assholes?|putang\s*ina|tangina|gago|tanga|ulol|bobo)\b/],
+  ['hateful_content', 'Hateful or threatening content', 'Possible targeted hate, dehumanization or threats require PESO review.', /\b(?:(?:kill|exterminate|attack|hurt|hate|ban)\s+(?:all\s+)?(?:muslims?|christians?|jews?|hindus?|gay(?:s| people)?|lesbians?|transgender(?: people)?|disabled(?: people)?|pwd|immigrants?)|(?:muslims?|christians?|jews?|hindus?|gay(?:s| people)?|lesbians?|transgender(?: people)?|disabled(?: people)?|immigrants?)\s+(?:are\s+)?(?:inferior|subhuman|vermin)|(?:kill|hurt|attack)\s+(?:you|them|your family))\b/],
   ['prohibited_mlm', 'Prohibited content', 'Possible MLM or recruitment-based earning scheme.', /\b(?:mlm|multi[ -]?level marketing|pyramid scheme|downlines?|recruit (?:members|recruits) to earn)\b/],
   ['applicant_payment', 'Prohibited content', 'Possible applicant payment or investment requirement.', /\b(?:(?:pay|send|deposit|invest|magbayad)\b.{0,45}\b(?:fee|deposit|investment|registration|gcash|money|bayad)|(?:registration|placement|processing|joining|training) fee|buy (?:a |the )?starter kit)\b/],
   ['illegal_activity', 'Prohibited content', 'Possible illegal activity or document fraud.', /\b(?:money laundering|money mule|fake (?:ids?|documents?|passports?)|sell(?:ing)? illegal drugs|drug trafficking|illegal gambling|identity theft|stolen (?:accounts|credit cards))\b/],

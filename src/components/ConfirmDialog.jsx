@@ -33,6 +33,7 @@ export default function ConfirmDialog({
   onCancel,
   children,
   confirmDisabled = false,
+  automatic = false,
 }) {
   const [reason, setReason] = useState(initialReason)
   const cancelRef = useRef(null)
@@ -55,7 +56,7 @@ export default function ConfirmDialog({
 
   return (
     <Modal onClose={busy ? undefined : onCancel} labelledBy="confirm-dialog-title" describedBy="confirm-dialog-note" maxWidth="max-w-md" role="alertdialog">
-      <div>
+      <div data-action-confirmation={automatic ? 'automatic' : 'manual'}>
         <h3 id="confirm-dialog-title" className="text-lg font-bold text-slate-900">{title}</h3>
         {note && <p id="confirm-dialog-note" className="mt-1 text-sm text-slate-600">{note}</p>}
         {children}

@@ -1,7 +1,6 @@
 import { useRef, useState } from 'react'
-import CityProvinceFields from './CityProvinceFields'
-import { PH_LOCATIONS } from '../../shared/phLocations.js'
 import JobTitlePicker from './JobTitlePicker'
+import JobLanguageRequirements, { JobLanguageRequirementsFields } from './JobLanguageRequirements'
 import { LOCATION_TYPES, EMPLOYMENT_TYPES, PAY_FREQUENCIES, EDUCATION_LEVELS, EXPERIENCE_LEVELS, JOB_LIMITS, deadlineBounds, validateJobPosting, formatSalary, formatLocation, parseAmount } from '../../shared/jobPosting.js'
 import { minimumWageWarning } from '../../shared/minimumWage.js'
 import { JOB_SKILL_OPTIONS, canonicalJobSkill, normalizeJobSkill, coveringJobSkill, addJobSkill } from '../../shared/jobSkills.js'
@@ -10,7 +9,7 @@ const control = 'shared-form-control mt-2 w-full rounded-2xl border border-slate
 const digits = (value) => String(value ?? '').replace(/\D/g, '')
 const money = (value) => digits(value).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 
-export default function JobPostingFields({ value, onChange, categories, suggestions = [], errors = {}, setErrors, disabled = false, keepDeadline = '', registeredAddress = {}, id = 'request' }) {
+export default function JobPostingFields({ value, onChange, categories, suggestions = [], errors = {}, setErrors, disabled = false, keepDeadline = '', id = 'request' }) {
   const [focusedAmount, setFocusedAmount] = useState('')
   const [skill, setSkill] = useState('')
   const [skillsOpen, setSkillsOpen] = useState(false)
@@ -68,19 +67,14 @@ export default function JobPostingFields({ value, onChange, categories, suggesti
       <JobTitlePicker id={`${id}-title`} categories={categories} title={value.title} customTitle={value.customTitle} onChange={(next) => onChange({ ...value, ...next })} disabled={disabled} onBlur={() => blur('title')} error={errors.title} />
       {field('description', 'Description', { textarea: true, required: true, maxLength: JOB_LIMITS.descriptionMax })}
       <div className="grid gap-4 sm:grid-cols-2">{field('locationType', 'Location type', { options: LOCATION_TYPES, required: true })}{field('employmentType', 'Employment type', { options: EMPLOYMENT_TYPES, required: true })}
-        {value.locationType !== 'Remote' && <>
-          <CityProvinceFields id={id} city={value.city} province={value.province} disabled={disabled} errors={errors} onChange={(place) => { onChange({ ...value, ...place, barangay: '' }); setErrors?.((current) => ({ ...current, barangay: '' })) }} onBlur={(key) => { if (value[key]) blur(key) }} />
-          {field('barangay', 'Barangay', { options: PH_LOCATIONS[value.city] || [] })}
-          {registeredAddress.city && registeredAddress.province && <div className="sm:col-span-2 text-xs text-slate-600">
-            <p>Using your registered address. Change it if this job is in a different location.</p>
-            {(value.city !== registeredAddress.city || value.province !== registeredAddress.province || value.barangay !== (registeredAddress.barangay || '')) && <button type="button" disabled={disabled} className="mt-1 text-cyan-700 underline" onClick={() => { onChange({ ...value, barangay: '', ...registeredAddress }); setErrors?.((current) => ({ ...current, city: '', province: '', barangay: '' })) }}>Reset to my address</button>}
-          </div>}
-        </>}
       </div>
+      {value.locationType !== 'Remote' && (errors.city || errors.province || errors.barangay) && <p role="alert" className="text-xs text-rose-700">Your registered address is missing or incomplete. Update your NSRP registration address before submitting this job posting.</p>}
     </fieldset>
     <fieldset disabled={disabled} className="space-y-4 border-t border-slate-200 pt-4"><legend className="text-base font-semibold">Requirements</legend>
       <div className="grid gap-4 sm:grid-cols-2">{field('education', 'Educational attainment', { options: EDUCATION_LEVELS })}{field('experience', 'Years of experience', { options: EXPERIENCE_LEVELS })}</div>
       {field('requirements', 'Additional requirements', { textarea: true, maxLength: JOB_LIMITS.requirementsMax })}
+      <JobLanguageRequirementsFields value={value.languageRequirements} disabled={disabled} error={errors.languageRequirements} errorId={`${id}-languageRequirements-error`} onChange={next => { set('languageRequirements', next); setErrors?.(current => ({ ...current, languageRequirements: '' })) }} />
+      {error('languageRequirements')}
       <div><label htmlFor={`${id}-skills`} className="text-sm font-medium">Required skills *</label>
         <div className="job-selected-skills mt-2 flex flex-wrap gap-2" aria-label="Selected required skills">{value.skills.map((item) => <span key={item} className={`job-skill-chip ${canonicalJobSkill(item) ? '' : 'job-skill-chip-invalid'}`}><span aria-hidden="true">{canonicalJobSkill(item) ? '\u2713' : '!'}</span>{item}<button type="button" disabled={disabled} aria-label={`Remove ${item}`} onClick={() => { set('skills', value.skills.filter((entry) => entry !== item)); setErrors?.((current) => ({ ...current, skills: '' })); setSkillNotice('') }}>×</button></span>)}</div>
         {value.skills.some((item) => !canonicalJobSkill(item)) && <p className="mt-2 text-xs text-amber-800">Remove unrecognized skills and choose replacements from the approved list before submitting.</p>}
@@ -145,6 +139,6 @@ export default function JobPostingFields({ value, onChange, categories, suggesti
     </fieldset>
     <fieldset disabled={disabled} className="border-t border-slate-200 pt-4"><legend className="text-base font-semibold">Notes</legend>{field('notesToAdmin', 'Notes to PESO Admin (optional, private)', { textarea: true, maxLength: JOB_LIMITS.notesMax })}</fieldset>
     <button type="button" className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold" aria-expanded={preview} onClick={() => setPreview(!preview)}>{preview ? 'Hide preview' : 'Preview posting'}</button>
-    {preview && <article aria-label="Job seeker preview" className="space-y-3 rounded-2xl border border-slate-300 bg-slate-50 p-5"><h3 className="text-xl font-bold">{value.title === 'Other' ? value.customTitle : value.title || 'Job title'}</h3><p>{value.company}</p><p>{formatLocation(value)} · {value.locationType} · {value.employmentType}</p><p>{formatSalary({ ...value, salaryMin: parseAmount(value.salaryMin), salaryMax: parseAmount(value.salaryMax) }) || 'Salary not specified'}</p><p className="whitespace-pre-wrap">{value.description}</p><p>Education: {value.education || 'Not Required'} · Experience: {value.experience || 'No Experience'}</p><p className="whitespace-pre-wrap">{value.requirements}</p><p>Skills: {value.skills.join(', ')}</p><p>Slots: {value.slots || '—'} · Apply by: {value.deadline || '—'}</p></article>}
+    {preview && <article aria-label="Job seeker preview" className="space-y-3 rounded-2xl border border-slate-300 bg-slate-50 p-5"><h3 className="text-xl font-bold">{value.title === 'Other' ? value.customTitle : value.title || 'Job title'}</h3><p>{value.company}</p><p>{formatLocation(value)} · {value.locationType} · {value.employmentType}</p><p>{formatSalary({ ...value, salaryMin: parseAmount(value.salaryMin), salaryMax: parseAmount(value.salaryMax) }) || 'Salary not specified'}</p><p className="whitespace-pre-wrap">{value.description}</p><p>Education: {value.education || 'Not Required'} · Experience: {value.experience || 'No Experience'}</p><p className="whitespace-pre-wrap">{value.requirements}</p><p>Skills: {value.skills.join(', ')}</p><JobLanguageRequirements value={value.languageRequirements} /><p>Slots: {value.slots || '—'} · Apply by: {value.deadline || '—'}</p></article>}
   </div>
 }

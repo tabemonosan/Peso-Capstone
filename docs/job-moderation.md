@@ -1,6 +1,6 @@
 # Automatic job approval and safety screening
 
-New submissions and employer edits to pending jobs run through local,
+New submissions and employer edits to pending, approved and declined jobs run through local,
 deterministic, versioned rules before publication. The default is enabled.
 Existing jobs retain their status; nothing is backfilled or migrated.
 
@@ -10,7 +10,12 @@ A post is approved only when all content and context checks are clear, the
 employer has verified email and an approved account, the account is at least
 seven days old, the company matches the verified company, and the account is
 not suspended or deleted. Normal input validation and verification gates still
-apply. An approved job cannot be edited through the pending-job editor.
+apply. Employers may edit their own postings at any status. Every saved edit is
+screened again on the server; request-supplied approval and moderation results
+are ignored. A flagged edit changes the posting to pending and removes it from
+applicant listings until approved. Clear eligible edits are published automatically.
+Earlier moderation and review decisions remain in history, while obsolete
+approval stamps and decline reasons are cleared. Existing applications are retained.
 
 The employer sees whether the job was published or submitted for PESO review,
 along with the current findings. PESO sees the same findings in the existing
@@ -18,13 +23,15 @@ job review dialog. Employers receive a publication notification; admins receive
 an automatic-approval or pending-review notification. Admin approval/decline and
 their existing review history remain available for manual decisions.
 
-## Rules, version 2026-11-04.2
+## Rules, version 2026-11-06.1
 
 Every finding routes the posting to **pending**; the algorithm does not decline
 jobs, penalize accounts, or declare legal violations.
 
 | Code | Reason for review |
 | --- | --- |
+| `abusive_language` | Common English/Filipino profanity, insults or harassment signals |
+| `hateful_content` | Targeted hate, dehumanization or threatening-language signals |
 | `prohibited_mlm` | MLM, pyramid, downline or recruitment-based earning signals |
 | `applicant_payment` | Applicant fees, deposits, investment or starter-kit requirements |
 | `illegal_activity` | Money mules/laundering, document fraud, illegal drug activity, theft or illegal gambling signals |
@@ -67,7 +74,7 @@ Request payloads cannot supply approval or screening results.
 
 Settings use `job_moderation_settings` (`_id: global`). Atomic counters use
 `job_posting_counters`; hourly and daily buckets use fixed UTC boundaries and
-include pending-job edits and flagged submissions. TTL cleanup removes buckets
+include edits at every posting status and flagged submissions. TTL cleanup removes buckets
 one day after the bucket ends. Requests just across a bucket boundary can use
 both buckets; these are not rolling limits. Duplicates use exact comparisons,
 not semantic matching, and simultaneous identical submissions can race the

@@ -425,6 +425,8 @@ input[type='file']::file-selector-button { padding: 8px 13px; border: 1px solid 
 .portal-shell[class] .job-browser-details .job-browser-title { margin: 0 0 9px; font-size: 25px; font-weight: 700; line-height: 1.3; }
 .job-browser-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .job-browser-tags > span { padding: 4px 11px; border: 1px solid var(--peso-line); border-radius: 999px; background: var(--peso-canvas); color: var(--peso-body); font-size: 12px; }
+.job-browser-row-tags { margin-top: 0; gap: 5px; }
+.job-browser-row-tags > span { padding: 2px 9px; font-size: 11px; font-weight: 650; }
 .job-browser-salary { margin-top: 16px; font-size: 15px; font-weight: 650; }
 .job-browser-details .job-browser-match { margin-top: 12px; }
 .job-browser-apply { min-height: 42px; margin-top: 18px; padding: 9px 22px; border: 1px solid var(--peso-primary); border-radius: 999px; background: var(--peso-primary); color: #fff; font-size: 13px; font-weight: 650; }
@@ -452,6 +454,13 @@ input[type='file']::file-selector-button { padding: 8px 13px; border: 1px solid 
 .application-stage.is-complete::after { background: var(--peso-line-strong); }
 .application-stage.is-current { color: var(--peso-primary); font-weight: 700; }
 .application-stage.is-current .application-stage-number { border-color: var(--peso-primary); background: var(--peso-soft); box-shadow: 0 0 0 4px var(--peso-canvas); }
+.application-stages-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.application-completion { border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 700; }
+.application-completion.is-hired { color: #19744b; background: #e6f6ef; }
+.application-completion.is-closed { color: #52525b; background: #f4f4f5; }
+.application-stage.is-hired { color: #19744b; font-weight: 700; }
+.application-stage.is-closed { color: #52525b; font-weight: 700; }
+.application-stage.is-closed .application-stage-number { border-color: #a1a1aa; background: #f4f4f5; }
 @media (max-width: 540px) {
   .application-stage-list { grid-template-columns: minmax(0, 1fr); }
   .application-stage { flex-direction: row; text-align: left; }

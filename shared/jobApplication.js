@@ -13,9 +13,19 @@ export function validApplicationEmail(email) {
     && /^(?:[a-z]{2,63}|xn--[a-z0-9-]+)$/i.test(labels.at(-1))
 }
 
-export function validateJobApplication(input = {}, resume) {
+export function bachelorDegreeFromNsrp(profile = {}) {
+  const education = Array.isArray(profile.nsrp?.education) ? profile.nsrp.education : profile.education
+  return (Array.isArray(education) ? education : []).some(row =>
+    /^(tertiary|college)$/i.test(String(row?.level || '').trim())
+    && /^\d{4}$/.test(String(row?.year || '').trim())
+    && String(row?.course || '').trim()
+    && !/\b(associate|diploma|certificate|vocational)\b/i.test(String(row.course))
+  ) ? 'Yes' : 'No'
+}
+
+export function validateJobApplication(input = {}, resume, profile = {}) {
   const text = (value) => typeof value === 'string' ? value.trim() : ''
-  const value = { email: text(input?.email).toLowerCase(), mobile: text(input?.mobile), bachelorDegree: text(input?.bachelorDegree), hasExperience: text(input?.hasExperience), experience: text(input?.experience) }
+  const value = { email: text(input?.email).toLowerCase(), mobile: text(input?.mobile), bachelorDegree: bachelorDegreeFromNsrp(profile), hasExperience: text(input?.hasExperience), experience: text(input?.experience) }
   const errors = {}
   if (!validApplicationEmail(value.email)) errors.email = 'Enter a valid email address, such as name@gmail.com.'
   if (!/^\d{11}$/.test(value.mobile)) errors.mobile = 'Enter exactly 11 digits, using numbers only.'
@@ -24,7 +34,7 @@ export function validateJobApplication(input = {}, resume) {
   if (!resume) errors.resume = 'Upload your resume.'
   else if (!RESUME_TYPES[ext] || (resume.type || resume.mimetype) !== RESUME_TYPES[ext]) errors.resume = 'Upload a PDF or DOCX resume.'
   else if (!resume.size || resume.size > RESUME_MAX_BYTES) errors.resume = 'Your resume must be between 1 byte and 5 MB.'
-  for (const field of ['bachelorDegree', 'hasExperience']) if (!['Yes', 'No'].includes(value[field])) errors[field] = 'Select Yes or No.'
+  if (!['Yes', 'No'].includes(value.hasExperience)) errors.hasExperience = 'Select Yes or No.'
   if (value.hasExperience === 'Yes') {
     if (!value.experience) errors.experience = 'Briefly describe your experience.'
     else if (value.experience.length > 20) errors.experience = 'Use at most 20 characters.'

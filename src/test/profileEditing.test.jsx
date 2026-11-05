@@ -25,6 +25,27 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('profile editing and NSRP skills', () => {
+  it('opens portfolio links from the menu, saves them, and retains them when reopened', async () => {
+    render(<App />)
+    await screen.findByLabelText('About me')
+    fireEvent.click(screen.getByRole('button', { name: 'Profile', exact: true }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Portfolio Links' }))
+    const dialog = screen.getByRole('dialog', { name: 'Portfolio links' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add link' }))
+    fireEvent.change(within(dialog).getByLabelText('Link title 1'), { target: { value: 'My work' } })
+    fireEvent.change(within(dialog).getByLabelText('Website URL 1'), { target: { value: 'https://example.com/work' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save links' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Portfolio links' })).not.toBeInTheDocument())
+    expect(requests.at(-1)).toEqual({ profile: { portfolioLinks: [{ label: 'My work', url: 'https://example.com/work' }] } })
+    expect(screen.getByRole('link', { name: 'My work' })).toHaveAttribute('href', 'https://example.com/work')
+    fireEvent.click(screen.getByRole('button', { name: 'Profile', exact: true }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Portfolio Links' }))
+    expect(screen.getByLabelText('Website URL 1')).toHaveValue('https://example.com/work')
+    fireEvent.click(screen.getByRole('button', { name: 'Remove link 1' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save links' }))
+    await waitFor(() => expect(requests.at(-1)).toEqual({ profile: { portfolioLinks: [] } }))
+  })
+
   it('opens the skills catalog without typing and supports selection, filtering and dismissal', async () => {
     render(<App />)
     const cover = await screen.findByRole('group', { name: 'Profile pictures' })

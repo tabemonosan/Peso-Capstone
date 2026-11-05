@@ -1,5 +1,6 @@
 import { matchLocation, parseStoredLocation, matchBarangay, storedBarangay } from './phLocations.js'
 import { canonicalJobSkill, coveringJobSkill } from './jobSkills.js'
+import { validateJobLanguages } from './jobLanguages.js'
 // Job posting options, validation, and display helpers shared by the employer
 // request form (client) and the /api/jobs routes (server) so both enforce the
 // same rules and return the same field-level messages.
@@ -91,7 +92,7 @@ export function deriveSalaryFields(salary) {
 const text = (value) => (typeof value === 'string' ? value.trim() : '')
 const oneOf = (value, list) => list.includes(value)
 
-export const emptyJobPosting = () => ({ title: '', customTitle: '', description: '', requirements: '', skills: [], locationType: 'On-site', city: '', province: '', barangay: '', employmentType: 'Full-time', education: 'Not Required', experience: 'No Experience', salaryMin: '', salaryMax: '', payFrequency: 'Monthly', negotiable: false, slots: '', deadline: '', notesToAdmin: '' })
+export const emptyJobPosting = () => ({ title: '', customTitle: '', description: '', requirements: '', skills: [], languageRequirements: [], locationType: 'On-site', city: '', province: '', barangay: '', employmentType: 'Full-time', education: 'Not Required', experience: 'No Experience', salaryMin: '', salaryMax: '', payFrequency: 'Monthly', negotiable: false, slots: '', deadline: '', notesToAdmin: '' })
 
 // Recover legacy fields from the posting itself, preserving a different branch address.
 export function normalizeJobPosting(job = {}) {
@@ -106,6 +107,7 @@ export function normalizeJobPosting(job = {}) {
   return { ...job, ...place, barangay, ...(derived || {}), negotiable: job.negotiable || /^negotiable$/i.test(job.salary || ''),
     payFrequency: job.payFrequency || 'Monthly', employmentType: mapEmploymentType(job.employmentType),
     education: job.education || 'Not Required', experience: job.experience || 'No Experience',
+    languageRequirements: Array.isArray(job.languageRequirements) ? job.languageRequirements : [],
     skills: Array.isArray(job.skills) ? job.skills : (typeof job.skills === 'string' ? job.skills.split(',').map((s) => s.trim()).filter(Boolean) : []) }
 }
 
@@ -115,6 +117,9 @@ export function normalizeJobPosting(job = {}) {
 export function validateJobPosting(input = {}, { now = new Date(), keepDeadline = '' } = {}) {
   const errors = {}
   const value = {}
+  const languages = validateJobLanguages(input.languageRequirements)
+  if (languages.error) errors.languageRequirements = languages.error
+  value.languageRequirements = languages.value || []
 
   const title = text(input.title)
   const customTitle = text(input.customTitle)

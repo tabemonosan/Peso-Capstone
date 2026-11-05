@@ -7,6 +7,15 @@ const applicant = {
   profile: { firstName: 'Eliseos', middleName: 'Dakac', lastName: 'Dioneda', suffix: 'III', skills: ['Auto Mechanic', 'Plumbing', 'Auto Mechanic'], summary: 'Experienced in vehicle maintenance.', education: [{ level: 'Tertiary', course: 'Automotive Technology', privateId: 'PRIVATE-ID' }], nsrp: { tin: 'PRIVATE-TIN' } },
 }
 describe('applicant profile preview', () => {
+  it('shows portfolio links to employers and omits invalid destinations', () => {
+    render(<ApplicantProfileModal applicant={{ ...applicant, profile: { ...applicant.profile, portfolioLinks: [{ label: 'My portfolio', url: 'https://example.com/work' }, { label: 'Invalid link', url: 'javascript:alert(1)' }] } }} onClose={vi.fn()} />)
+    const link = screen.getByRole('link', { name: 'My portfolio' })
+    expect(link).toHaveAttribute('href', 'https://example.com/work')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+    expect(screen.queryByRole('link', { name: 'Invalid link' })).not.toBeInTheDocument()
+  })
+
   it('presents contact actions, distinct skill tags and the summary without exposing private fields', () => {
     render(<ApplicantProfileModal applicant={applicant} onClose={vi.fn()} />)
     const modal = screen.getByRole('dialog', { name: 'Eliseos Dakac Dioneda III' })

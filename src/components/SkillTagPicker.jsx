@@ -2,14 +2,14 @@ import { useEffect, useId, useRef, useState } from "react"
 import { JOB_SKILL_OPTIONS as availableSkills, addJobSkill, canonicalJobSkill, coveringJobSkill } from '../../shared/jobSkills.js'
 
 // Browse skills on focus; typing optionally filters the available choices.
-export default function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }) {
+export default function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark', options = availableSkills }) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false), [active, setActive] = useState(0)
   const [notice, setNotice] = useState('')
   const listId = useId(), inputRef = useRef(null)
   const normalized = Array.isArray(selected) ? selected : []
   const trimmed = query.trim()
-  const suggestions = availableSkills.filter(skill => !normalized.some(entry => canonicalJobSkill(entry) === skill) && (!trimmed || skill.toLowerCase().includes(trimmed.toLowerCase())))
+  const suggestions = options.filter(skill => !normalized.some(entry => canonicalJobSkill(entry) === skill) && (!trimmed || skill.toLowerCase().includes(trimmed.toLowerCase())))
   useEffect(() => { if (open) document.getElementById(`${listId}-${active}`)?.scrollIntoView?.({ block: 'nearest' }) }, [active, open, listId, trimmed])
   const choose = skill => {
     const result = addJobSkill(normalized, skill)

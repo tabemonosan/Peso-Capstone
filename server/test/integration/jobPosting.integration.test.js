@@ -22,6 +22,91 @@ beforeEach(async () => {
   await Admin.create({ email: 'admin@example.com', passwordHash: 'unused' })
 })
 describe('job request and review API', () => {
+  it('presents automatic archives without changing approval or deleting applications', async () => {
+    const deadline = new Date(Date.now() - 4 * 86400000)
+    const old = await JobPosting.create({ title: 'Expired position', company: 'Example Works', createdBy: 'employer@example.com', status: 'approved', deadline, applicants: [{ email: 'existing@example.test' }] })
+    const mine = await request(app).get('/api/jobs?status=mine').set(auth('Employer')).expect(200)
+    const archived = mine.body.find(job => job._id === String(old._id))
+    expect(archived).toMatchObject({ isArchived: true, status: 'approved', archivedAt: new Date(+deadline + 3 * 86400000).toISOString() })
+    expect(archived.applicants).toEqual([]) // Existing referral privacy rules still apply.
+    const stored = await JobPosting.findById(old._id).lean()
+    expect(stored.status).toBe('approved')
+    expect(stored.applicants).toHaveLength(1)
+    await JobPosting.updateOne({ _id: old._id }, { deadline: new Date(Date.now() + 86400000) })
+    const updated = await request(app).get('/api/jobs?status=mine').set(auth('Employer')).expect(200)
+    expect(updated.body.find(job => job._id === String(old._id))).toMatchObject({ isArchived: false, archivedAt: null })
+  })
+
+  it('filters whole municipalities across barangays and returns no jobs for a supported empty municipality', async () => {
+    await JobPosting.create([
+      { title: 'Oas structured', company: 'Example', status: 'approved', city: 'Oas', province: 'Albay', barangay: 'Calpi', location: 'Calpi, Oas, Albay', skills: ['Excel'] },
+      { title: 'Oas legacy', company: 'Example', status: 'approved', location: 'Balogo, Oas, Albay', skills: ['Excel'] },
+      { title: 'Manito job', company: 'Example', status: 'approved', city: 'Manito', location: 'Nagotgot, Manito, Albay', skills: ['Excel'] },
+    ])
+    await createViewer()
+    const matches = await request(app).get('/api/jobs').query({ status: 'approved', page: 1, locations: 'Oas' }).set(auth('Applicant')).expect(200)
+    expect(matches.body.items.map(job => job.title).sort()).toEqual(['Oas legacy', 'Oas structured'])
+    const legacy = await request(app).get('/api/jobs').query({ status: 'approved', page: 1, locations: 'Calpi, Oas, Albay' }).set(auth('Applicant')).expect(200)
+    expect(legacy.body.items.map(job => job.title).sort()).toEqual(['Oas legacy', 'Oas structured'])
+    expect(legacy.body.applied.locations).toEqual(['Oas'])
+    expect(legacy.body.facets.locations).toContainEqual({ value: 'Oas', count: 2 })
+    const empty = await request(app).get('/api/jobs').query({ status: 'approved', page: 1, locations: 'Tiwi' }).set(auth('Applicant')).expect(200)
+    expect(empty.body.total).toBe(0)
+    expect(empty.body.items).toEqual([])
+  })
+
+  it.each([
+    ['fck you peso', 'abusive_language'],
+    ['Kill all Muslims.', 'hateful_content'],
+    ['Pay a registration fee to apply.', 'applicant_payment'],
+  ])('re-screens published edits containing %s and removes them from applicant listings', async (description, code) => {
+    await Employer.updateOne({ email: 'employer@example.com' }, { createdAt: new Date(Date.now() - 8 * 86400000) }, { timestamps: false, overwriteImmutable: true })
+    const created = await request(app).post('/api/jobs').set(auth('Employer')).send(payload()).expect(200)
+    expect(created.body.status).toBe('approved')
+    await JobPosting.updateOne({ _id: created.body._id }, { $push: { applicants: { email: 'existing@example.test', appliedAt: new Date() } } })
+    const edited = await request(app).put(`/api/jobs/${created.body._id}`).set(auth('Employer')).send(payload({ company: 'Example Works', description, status: 'approved', approvedBy: 'forged', moderation: { decision: 'auto_approved', findings: [] }, applicants: [] })).expect(200)
+    expect(edited.body.status).toBe('pending')
+    expect(edited.body.moderation.findings).toEqual(expect.arrayContaining([expect.objectContaining({ code })]))
+    expect(edited.body.approvedBy).toBeUndefined()
+    expect(edited.body.approvedAt).toBeUndefined()
+    expect(edited.body.moderationHistory).toHaveLength(2)
+    expect(edited.body.reviewHistory).toHaveLength(1)
+    expect((await JobPosting.findById(created.body._id)).applicants[0].email).toBe('existing@example.test')
+    await createViewer()
+    expect((await request(app).get('/api/jobs?status=approved').set(auth('Applicant')).expect(200)).body).toHaveLength(0)
+    const corrected = await request(app).put(`/api/jobs/${created.body._id}`).set(auth('Employer')).send(payload({ company: 'Example Works', description: 'Assist clients and maintain accurate office records.' })).expect(200)
+    expect(corrected.body.status).toBe('approved')
+    expect(corrected.body.moderationHistory).toHaveLength(3)
+  })
+  it('lets the owner revise a declined posting and screens it again', async () => {
+    const created = await request(app).post('/api/jobs').set(auth('Employer')).send(payload()).expect(200)
+    await request(app).put(`/api/jobs/${created.body._id}/status`).set(auth('Admin')).send({ status: 'declined', reason: 'Clarify duties.' }).expect(200)
+    const edited = await request(app).put(`/api/jobs/${created.body._id}`).set(auth('Employer')).send(payload({ company: 'Example Works', description: 'Maintain office records and assist customers.' })).expect(200)
+    expect(edited.body.status).toBe('pending')
+    expect(edited.body.reviewReason).toBeUndefined()
+    expect(edited.body.reviewHistory[0]).toMatchObject({ status: 'declined', reason: 'Clarify duties.' })
+    await Employer.create({ email: 'other@example.com', passwordHash: 'unused', emailVerified: true, verificationStatus: 'approved' })
+    await request(app).put(`/api/jobs/${created.body._id}`).set(auth('Employer', 'other@example.com')).send(payload({ company: 'Example Works' })).expect(403)
+  })
+  it('saves, loads and edits language proficiency requirements', async () => {
+    const languageRequirements = [{ name: 'English', read: true, write: false, speak: true, understand: true }]
+    const created = await request(app).post('/api/jobs').set(auth('Employer')).send(payload({ languageRequirements })).expect(200)
+    expect(created.body.languageRequirements).toEqual(languageRequirements)
+    const stored = await JobPosting.findById(created.body._id).lean()
+    expect(stored.languageRequirements).toEqual(languageRequirements)
+    for (const name of ['Englishsdasd', 'Korean', 'Tagalog']) {
+      const invalidLanguage = await request(app).put(`/api/jobs/${created.body._id}`).set(auth('Employer')).send(payload({ company: 'Example Works', languageRequirements: [{ name, speak: true }] })).expect(422)
+      expect(invalidLanguage.body.fieldErrors.languageRequirements).toBeTruthy()
+    }
+    expect((await JobPosting.findById(created.body._id).lean()).languageRequirements).toEqual(languageRequirements)
+    const mine = await request(app).get('/api/jobs?status=mine').set(auth('Employer')).expect(200)
+    expect(mine.body.find(posting => posting._id === created.body._id).languageRequirements).toEqual(languageRequirements)
+    const invalid = await request(app).put(`/api/jobs/${created.body._id}`).set(auth('Employer')).send(payload({ company: 'Example Works', languageRequirements: [{ name: 'English' }] })).expect(422)
+    expect(invalid.body.fieldErrors.languageRequirements).toBeTruthy()
+    const edited = await request(app).put(`/api/jobs/${created.body._id}`).set(auth('Employer')).send(payload({ company: 'Example Works', languageRequirements: [] })).expect(200)
+    expect(edited.body.languageRequirements).toEqual([])
+  })
+
   it.each([
     ['No placement fee, pay a registration fee to apply.', 'applicant_payment'],
     ['Applicants must be at least 25 years old.', 'age_restriction'],
@@ -153,7 +238,9 @@ describe('job request and review API', () => {
       expect(jobs[0]).not.toHaveProperty('notesToAdmin')
     }
     const editApproved = await request(app).put(`/api/jobs/${id}`).set(auth('Employer')).send(payload({ company: 'Example Works' }))
-    expect(editApproved.status).toBe(400)
+    expect(editApproved.status).toBe(200)
+    expect(editApproved.body.status).toBe('pending')
+    expect(editApproved.body.moderation.decision).toBe('manual_review')
   })
   it('rejects invalid edits and preserves stored fields', async () => {
     const created = await request(app).post('/api/jobs').set(auth('Employer')).send(payload())

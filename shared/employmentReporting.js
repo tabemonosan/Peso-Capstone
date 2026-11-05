@@ -32,13 +32,14 @@ export function employerApplicantSummary(applicant) {
   return {
     _id: applicant._id,
     email: applicant.email,
+    ...(applicant.resumeFile?.originalName ? { resumeFile: pick(applicant.resumeFile, ['originalName', 'mimetype', 'size', 'uploadedAt']) } : {}),
     phone: applicant.phone || profile.phone || profile.nsrp?.cellphone || '',
     profile: {
-      ...pick(profile, ['firstName', 'middleName', 'lastName', 'suffix', 'name', 'skills', 'traits', 'summary', 'profileImage', 'bannerImage']),
+      ...pick(profile, ['firstName', 'middleName', 'lastName', 'suffix', 'name', 'skills', 'traits', 'summary', 'profileImage', 'bannerImage', 'portfolioLinks']),
       location: [profile.addressCity || profile.nsrp?.addressCity, profile.addressProvince || profile.nsrp?.addressProvince].filter(Boolean).join(', '),
       education: (profile.education || []).map((entry) => pick(entry, ['level', 'school', 'course', 'year'])),
-      technicalTraining: (profile.technicalTraining || []).map((entry) => pick(entry, ['name', 'provider', 'course', 'year'])),
-      workExperience: (profile.workExperience || []).map((entry) => pick(entry, ['company', 'position', 'startDate', 'endDate'])),
+      technicalTraining: (profile.technicalTraining || []).map((entry) => ({ ...pick(entry, ['name', 'course', 'year']), provider: entry.provider || entry.institution || '' })),
+      workExperience: (profile.workExperience || []).map((entry) => ({ ...pick(entry, ['company', 'position']), startDate: entry.startDate || entry.fromDate || '', endDate: entry.endDate || entry.toDate || '' })),
     },
   }
 }

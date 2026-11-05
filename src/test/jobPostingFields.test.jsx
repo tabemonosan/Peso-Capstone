@@ -9,6 +9,31 @@ function Form({ suggestions = ['Excel'] }) {
   return <form><JobPostingFields value={value} onChange={setValue} categories={[]} suggestions={suggestions} errors={errors} setErrors={setErrors} /></form>
 }
 describe('job request fields', () => {
+  it('adds optional languages and proficiencies to the posting preview and removes them', () => {
+    render(<Form />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add language' }))
+    fireEvent.change(screen.getByRole('combobox', { name: 'Language 1' }), { target: { value: 'English' } })
+    fireEvent.click(screen.getByLabelText('speak language 1'))
+    fireEvent.click(screen.getByLabelText('understand language 1'))
+    fireEvent.click(screen.getByRole('button', { name: 'Preview posting' }))
+    expect(screen.getByRole('region', { name: 'Required language proficiency' })).toHaveTextContent('English: speak, understand')
+    fireEvent.click(screen.getByRole('button', { name: 'Remove language 1' }))
+    expect(screen.queryByRole('region', { name: 'Required language proficiency' })).not.toBeInTheDocument()
+  })
+
+  it('offers only English and Filipino and prevents duplicate selections', () => {
+    render(<Form />)
+    fireEvent.click(screen.getByRole('button', { name: 'Add language' }))
+    const first = screen.getByRole('combobox', { name: 'Language 1' })
+    expect([...first.options].map(option => option.value)).toEqual(['', 'English', 'Filipino'])
+    fireEvent.change(first, { target: { value: 'English' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add language' }))
+    const second = screen.getByRole('combobox', { name: 'Language 2' })
+    expect([...second.options].find(option => option.value === 'English')).toBeDisabled()
+    expect([...second.options].find(option => option.value === 'Filipino')).toBeEnabled()
+    expect(screen.queryByRole('button', { name: 'Add language' })).not.toBeInTheDocument()
+  })
+
   it('replaces narrower selections and disables skills covered by a broader selection', () => {
     render(<Form suggestions={['Full-Stack Developer', 'Frontend Developer', 'Backend Developer', 'React']} />)
     fireEvent.focus(screen.getByLabelText('Required skills *'))

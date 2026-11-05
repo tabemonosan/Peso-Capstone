@@ -10,9 +10,7 @@ input. No score automatically suspends, declines, or blocks an applicant.
 Applicants start at **100**, with a range of **0–100**. Confirmed no-shows cost
 **10, 20, then 25** points, counted over the last **12 calendar months**.
 Confirmed cancellations **strictly under 24 hours** before an interview cost
-**5, then 10** points over the same period. An employer report alone never
-deducts points: PESO still reviews the response or waits for the existing
-seven-day response deadline before confirming a no-show.
+**5, then 10** points over the same period. Employer no-show reports made after the scheduled interview time now apply the penalty automatically, without PESO confirmation. Early no-show reports are rejected. Applicants retain seven days to respond and can request a penalty review. Dismissing a report reverses its automatic penalty; confirming it never deducts twice. Existing reports are not retroactively penalized.
 
 Every full **7 days** without a new penalty restores **2 previously lost points**.
 Recovery stops when the actual remaining loss is restored and cannot exceed
@@ -139,7 +137,7 @@ count uses a rolling calendar-month window, including leap-year boundaries.
 
 - Recovery periods and 30-day windows are elapsed UTC durations. The 12-month
   graduation/count window uses calendar months, not a fixed 365 days. Display
-  dates use Asia/Manila. New penalty timestamps are PESO confirmation times.
+  dates use Asia/Manila. New no-show penalty timestamps are employer report times.
 - The forecast assumes no new penalties, credits, reversals, or policy changes.
   Credits can bring the date forward; new penalties can delay it.
 - The policy's new default is enabled through the admin-editable values. Set

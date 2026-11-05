@@ -16,7 +16,6 @@ const QUICK_REJECT_REASONS = ["Blurry or unreadable", "Wrong document type", "Na
 // - Resubmitted documents (new pending version after a rejection) are flagged.
 // - Version history is expandable so admins can compare with previous versions.
 // - Reject requires a reason; the applicant only has to re-upload that document.
-import { AdminNsrpAccountDecision } from './AdminNsrpAutomation'
 import ManualDocumentChecklist from './ManualDocumentChecklist'
 import { needsManualChecklist, completeChecklist } from '../../shared/manualDocumentReview.js'
 
@@ -189,7 +188,6 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
         </div>
 
         <section aria-labelledby="applicant-details-heading" className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
-          {!readOnly && <AdminNsrpAccountDecision token={token} accountId={applicant.id} role="Applicant" onChanged={() => { load(); onReviewed?.() }} />}
           <h3 id="applicant-details-heading" className="font-semibold text-slate-900">Applicant details</h3>
           {!readOnly && <AdminReputationAccount token={token} applicantId={applicant.id || applicant._id} />}
           <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">

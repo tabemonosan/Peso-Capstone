@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 
-export default function ProfileDropdown({ children, className, onProfile, onSettings }) {
+export default function ProfileDropdown({ children, className, onProfile, onSettings, onLinks, onResume }) {
   const [open, setOpen] = useState(false)
   const root = useRef(null)
   const trigger = useRef(null)
@@ -33,6 +33,8 @@ export default function ProfileDropdown({ children, className, onProfile, onSett
     </button>
     {open && <div id={menuId} role="menu" aria-label="Profile options" className="portal-profile-menu">
       <button type="button" role="menuitem" onClick={() => choose(onProfile)}>View Profile</button>
+      {onLinks && <button type="button" role="menuitem" onClick={() => choose(onLinks)}>Portfolio Links</button>}
+      {onResume && <button type="button" role="menuitem" onClick={() => choose(onResume)}>Resume</button>}
       <button type="button" role="menuitem" onClick={() => choose(onSettings)}>Account Settings</button>
     </div>}
   </div>

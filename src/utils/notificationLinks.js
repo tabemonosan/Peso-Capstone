@@ -10,7 +10,7 @@ const destinations = {
     '/my-applications': ['my-applications', 'Open My applications'],
     '/my-reputation': ['my-reputation', 'View my reputation'],
     '/jobs': ['jobs', 'View job applications'],
-    '/employment-reports': ['employment-reports', 'View employment updates'],
+    '/employment-reports': ['my-applications', 'Open My applications'],
     '/profile': ['profile', 'View my profile'],
   },
   Admin: {
@@ -37,6 +37,7 @@ export function notificationDestination(notification, role) {
   return target ? { view: target[0], label: target[1], href: `?notificationView=${encodeURIComponent(target[0])}` } : null
 }
 export function notificationViewFromQuery(role, search) {
-  const view = new URLSearchParams(search).get('notificationView')
+  const requested = new URLSearchParams(search).get('notificationView')
+  const view = role === 'Applicant' && requested === 'employment-reports' ? 'my-applications' : requested
   return Object.values(destinations[role] || {}).some(([allowed]) => allowed === view) ? view : null
 }

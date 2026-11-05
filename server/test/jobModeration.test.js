@@ -9,6 +9,11 @@ const decide = extra => decideJobModeration({ job, employer, now, ...extra })
 describe('job policy screening', () => {
   it('approves a low-risk job for an established verified employer', () => expect(decide()).toMatchObject({ decision: 'auto_approved', findings: [] }))
   it.each([
+    ['fck you peso', 'abusive_language'],
+    ['You are a fucking idiot.', 'abusive_language'],
+    ['Gago ka.', 'abusive_language'],
+    ['Kill all Muslims.', 'hateful_content'],
+    ['Immigrants are subhuman.', 'hateful_content'],
     ['Join our MLM and build your downline.', 'prohibited_mlm'],
     ['Multi-level marketing opportunity.', 'prohibited_mlm'],
     ['Pay a registration fee to apply.', 'applicant_payment'],

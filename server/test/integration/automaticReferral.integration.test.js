@@ -5,6 +5,8 @@ import request from 'supertest'
 import jwt from 'jsonwebtoken'
 import { startTestDb, stopTestDb, clearDb } from './helpers.js'
 import { jobApplicationRequest } from './helpers.js'
+import { generateNsrpPdf } from '../../nsrpPdf.js'
+import { storeDocumentFile } from '../../utils/documentFiles.js'
 
 // DNS is deterministic; no external mailbox or DNS service is contacted in tests.
 vi.mock('node:dns/promises', () => ({ Resolver: class {
@@ -102,7 +104,8 @@ describe('automatic applications and referral oversight', () => {
     expect(await Referral.countDocuments()).toBe(0)
   })
   it('stores the four-step answers and resume, shares only with the job employer, and revokes resume access on pullback', async () => {
-    const result = await jobApplicationRequest(request(app).post(`/api/jobs/${job._id}/apply`).set(auth('Applicant', applicant.email)), { email: 'contact@auto.test', bachelorDegree: 'Yes', hasExperience: 'Yes', experience: 'Delivery driver' })
+    await Applicant.updateOne({ _id: applicant._id }, { $set: { 'profile.nsrp.education': [{ level: 'Tertiary', course: 'BS Computer Science', year: '2020' }] } })
+    const result = await jobApplicationRequest(request(app).post(`/api/jobs/${job._id}/apply`).set(auth('Applicant', applicant.email)), { email: 'contact@auto.test', bachelorDegree: 'No', hasExperience: 'Yes', experience: 'Delivery driver' })
     expect(result.status, JSON.stringify(result.body)).toBe(200)
     const application = await JobApplication.findOne().lean()
     expect(application.applicationDetails).toMatchObject({ email: 'contact@auto.test', mobile: '09171234567', bachelorDegree: 'Yes', hasExperience: 'Yes', experience: 'Delivery driver' })
@@ -125,9 +128,38 @@ describe('automatic applications and referral oversight', () => {
     const revoked = await request(app).get(`/api/referrals/employer/${employer._id}`).set(auth('Employer', employer.email))
     expect(revoked.body[0]).not.toHaveProperty('application')
   })
+  it('reads a completed college degree from a legacy NSRP PDF and refreshes older application answers', async () => {
+    await JobPosting.updateOne({ _id: job._id }, { $set: { title: 'Driver', requirements: 'English proficiency' } })
+    const pdf = await generateNsrpPdf({ firstName: 'Test', surname: 'Applicant', education: [{ level: 'Tertiary', school: 'Example College', course: 'BSIT', year: '2025' }], languages: [{ name: 'English', read: true, write: true, speak: true, understand: true }, { name: 'Filipino', read: false, write: false, speak: true, understand: true }], workExperience: [{ company: 'Prior Employer', position: 'Driver', fromDate: '2020-01-01', toDate: '2023-01-01', address: 'PRIVATE-WORK-STREET' }], technicalTraining: [{ course: 'Driver safety', institution: 'Training Center', certificate: 'Driving' }] })
+    await storeDocumentFile(applicant._id, 'nsrpForm', 1, 'front', { buffer: pdf, mimetype: 'application/pdf', size: pdf.length })
+    const qualifications = await request(app).get('/api/profile/qualifications').set(auth('Applicant', applicant.email)).expect(200)
+    expect(qualifications.body.bachelorDegree).toBe('Yes')
+    await apply().expect(200)
+    expect((await JobApplication.findOne().lean()).applicationDetails.bachelorDegree).toBe('Yes')
+    await JobApplication.updateOne({}, { $set: { 'applicationDetails.bachelorDegree': 'No' } })
+    const list = await request(app).get(`/api/referrals/employer/${employer._id}`).set(auth('Employer', employer.email)).expect(200)
+    expect(list.body[0].application.details.bachelorDegree).toBe('Yes')
+    expect(list.body[0].suitability.qualifications.languages).toEqual([
+      { name: 'English', read: true, write: true, speak: true, understand: true },
+      { name: 'Filipino', read: false, write: false, speak: true, understand: true },
+    ])
+    expect(list.body[0].suitability.qualifications.workExperience[0]).toMatchObject({ company: 'PRIOR EMPLOYER', position: 'DRIVER' })
+    expect(list.body[0].suitability.components.find(item => item.key === 'workExperience').points).toBeGreaterThan(0)
+    expect(list.body[0].applicantId.profile.workExperience[0]).toMatchObject({ company: 'PRIOR EMPLOYER', position: 'DRIVER' })
+    expect(list.body[0].suitability.qualifications.technicalTraining[0].course).toBe('DRIVER SAFETY')
+    expect(JSON.stringify(list.body)).not.toContain('PRIVATE-WORK-STREET')
+    expect(list.body[0].applicantId).not.toHaveProperty('verificationDocuments')
+    expect(JSON.stringify(list.body)).not.toContain('%PDF')
+  })
+  it('ignores a claimed degree when the saved NSRP shows unfinished college', async () => {
+    await Applicant.updateOne({ _id: applicant._id }, { $set: { 'profile.nsrp.education': [{ level: 'Tertiary', course: 'BS Computer Science', undergradLevel: 'Third year', yearLastAttended: '2020' }] } })
+    await jobApplicationRequest(request(app).post(`/api/jobs/${job._id}/apply`).set(auth('Applicant', applicant.email)), { email: applicant.email, bachelorDegree: 'Yes' }).expect(200)
+    expect((await JobApplication.findOne().lean()).applicationDetails.bachelorDegree).toBe('No')
+  })
+
   it.each([
     [{ email: 'invalid' }, 'email'], [{ mobile: '0917123456' }, 'mobile'], [{ mobile: '091712345678' }, 'mobile'],
-    [{ mobile: '0917abc4567' }, 'mobile'], [{ bachelorDegree: '' }, 'bachelorDegree'], [{ hasExperience: 'Yes', experience: 'a'.repeat(21) }, 'experience'],
+    [{ mobile: '0917abc4567' }, 'mobile'], [{ hasExperience: 'Yes', experience: 'a'.repeat(21) }, 'experience'],
   ])('rejects invalid four-step answers %j without saving records', async (change, field) => {
     const result = await jobApplicationRequest(request(app).post(`/api/jobs/${job._id}/apply`).set(auth('Applicant', applicant.email)), { email: applicant.email, ...change })
     expect(result.status).toBe(403)

@@ -1,6 +1,9 @@
+import { confirmMutation, CONFIRMED_REQUEST, cancelledActionResponse } from './actionConfirmation'
+
 // A timeout does not mean a server mutation was rolled back. Check current
 // status before retrying an approval or acceptance.
 export async function fetchWithTimeout(url, options = {}, timeoutMs = 30000) {
+  if (!await confirmMutation(url, options)) return cancelledActionResponse()
   const controller = new AbortController()
   const abort = () => controller.abort()
   if (options.signal?.aborted) abort()
@@ -13,7 +16,7 @@ export async function fetchWithTimeout(url, options = {}, timeoutMs = 30000) {
         controller.abort()
       }, timeoutMs)
     })
-    return await Promise.race([globalThis.fetch(url, { ...options, signal: controller.signal }), timeout])
+    return await Promise.race([globalThis.fetch(url, { ...options, signal: controller.signal, [CONFIRMED_REQUEST]: true }), timeout])
   } finally {
     clearTimeout(timer)
     options.signal?.removeEventListener('abort', abort)

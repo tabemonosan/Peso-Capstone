@@ -54,6 +54,20 @@ async function renderModal(props = {}) {
 }
 
 describe('VerificationDocsReviewModal confirm step', () => {
+  it('shows the current account status without an obsolete NSRP auto-approval banner', async () => {
+    mockFetch.mockImplementation(async (url) => ({
+      ok: true,
+      json: async () => url.includes('/nsrp-automation/decisions')
+        ? { items: [{ result: 'Auto-approved', at: '2026-11-01T10:00:00Z', rulesVersion: '2026-11-01.1' }] }
+        : docsResponse,
+    }))
+    await renderModal()
+    expect(screen.getByText('under review')).toBeInTheDocument()
+    expect(screen.queryByText('Auto-approved')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Revoke auto-approval' })).not.toBeInTheDocument()
+    expect(mockFetch.mock.calls.some(([url]) => url.includes('/nsrp-automation/decisions'))).toBe(false)
+  })
+
   it.each(['restrict', 'unrestrict'])('confirms %s, supports cancellation, and updates the available action', async (action) => {
     let currentStatus = action === 'restrict' ? 'approved' : 'restricted'
     const change = vi.fn(async () => { currentStatus = action === 'restrict' ? 'restricted' : 'approved'; return { ok: true, verificationStatus: currentStatus } })

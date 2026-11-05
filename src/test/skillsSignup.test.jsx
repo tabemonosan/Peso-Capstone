@@ -206,6 +206,7 @@ describe('Applicant sign-up wizard', () => {
     fireEvent.change(within(docsFieldset).getByLabelText(/^Birth certificate copy type/), { target: { value: 'PSA copy on security paper' } })
     await screen.findByText('birth.pdf')
     await screen.findByText('id-front.pdf')
+    fireEvent.change(screen.getByLabelText('Resume (optional)'), { target: { files: [pdfFile('resume.pdf')] } })
     const savedDraft = localStorage.getItem('peso-applicant-signup-draft')
     expect(savedDraft).not.toContain('resume.pdf')
     expect(savedDraft).not.toContain('birth.pdf')
@@ -221,8 +222,7 @@ describe('Applicant sign-up wizard', () => {
     expect(JSON.parse(request.body.get('nsrpAnswers')).surname).toBe('Cruz')
     expect(request.body.has('birthCertificate')).toBe(true)
     expect(request.body.has('validId1Front')).toBe(true)
-    // The resume is optional and no longer collected at sign-up
-    expect(request.body.has('resume')).toBe(false)
+    expect(request.body.get('resume').name).toBe('resume.pdf')
     expect(request.body.get('nsrpMode')).toBe('online')
     expect(request.body.has('nsrpForm')).toBe(false)
     expect(request.body.get('emailProof')).toBe('proof-token-123')

@@ -25,6 +25,7 @@ function ReferralList({ token, employerId, profileImage = '' }) {
   const [ratedHireReports, setRatedHireReports] = useState({})
   const [selectedProfile, setSelectedProfile] = useState(null)
   const [selectedJobId, setSelectedJobId] = useState(null)
+  const [expandedDeclined, setExpandedDeclined] = useState({})
   const [decision, setDecision] = useState(null), [responding, setResponding] = useState(false)
   const responseInFlight = useRef(false)
   const referralsPanelRef = useRef(null)
@@ -106,6 +107,7 @@ function ReferralList({ token, employerId, profileImage = '' }) {
         current.map((item) => (String(item._id) === String(referralId) ? { ...item, status: data.status, history: data.history || item.history } : item)),
       )
       setDecision(null)
+      if (data.status === 'declined') setExpandedDeclined(current => ({ ...current, [String(referralId)]: false }))
       showNotice(status === 'accepted' ? 'Referral accepted.' : 'Referral declined.', 'success')
     } catch (err) {
       setError(err?.message || "Failed to update referral status")
@@ -215,6 +217,16 @@ function ReferralList({ token, employerId, profileImage = '' }) {
             const jobId = referral.jobId?._id || referral.jobId?.id || referral.jobId
             const hasRating = hireReport && ratedHireReports[String(hireReport._id)]
 
+            if (status === 'declined' && !expandedDeclined[referralId]) {
+              return <div key={referral._id} className="flex flex-wrap items-center gap-3 rounded-2xl border border-slate-300 bg-white p-4">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-slate-300 bg-cyan-100 font-bold text-cyan-800">
+                  {referral.applicantId?.profile?.profileImage ? <img src={referral.applicantId.profile.profileImage} alt="" className="h-full w-full object-cover" /> : applicantName.trim().charAt(0).toUpperCase()}
+                </span>
+                <div className="min-w-0 flex-1"><p className="break-words text-sm font-semibold text-black">{applicantName}</p><span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-xs uppercase tracking-wider ${getStatusClasses(status)}`}>Declined</span></div>
+                <button type="button" aria-expanded={false} aria-label={`Show details for ${applicantName}`} onClick={() => setExpandedDeclined(current => ({ ...current, [referralId]: true }))} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-cyan-800 hover:bg-cyan-50">Show details <span aria-hidden="true">⌄</span></button>
+              </div>
+            }
+
             return (
               <div
                 key={referral._id}
@@ -239,7 +251,7 @@ function ReferralList({ token, employerId, profileImage = '' }) {
                     <div>
                       <p className="text-lg font-semibold text-black">{applicantName}</p>
                       <ApplicantSuitability suitability={referral.suitability} />
-                      {referral.application?.details && <div className="mt-2 text-sm text-slate-700"><p>Completed bachelor's degree: {referral.application.details.bachelorDegree}</p><p>Work experience: {referral.application.details.hasExperience}{referral.application.details.experience ? ` - ${referral.application.details.experience}` : ''}</p><p>Mobile: {referral.application.details.mobile}</p></div>}
+                      {referral.application?.details && <div className="mt-2 text-sm text-slate-700"><p>Completed bachelor's degree: {referral.application.details.bachelorDegree}</p><p>Work experience (application answer): {referral.application.details.hasExperience}{referral.application.details.experience ? ` - ${referral.application.details.experience}` : ''}</p><p>Mobile: {referral.application.details.mobile}</p></div>}
                       <ApplicationResumeButton token={token} application={referral.application} />
                       <p className="mt-1 text-sm text-black">Job: {jobTitle}</p>
                       {referral.applicantId?.email && (
@@ -256,25 +268,25 @@ function ReferralList({ token, employerId, profileImage = '' }) {
                       )}
                     </div>
                   </div>
-                  <span
+                  <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end"><span
                     className={`inline-flex rounded-full px-3 py-1 text-xs uppercase tracking-[0.2em] ${getStatusClasses(status)}`}
                   >
                     {status === 'withdrawn_by_admin' ? 'Returned to PESO review' : status}
                   </span>
+                  {status === 'declined' && <button type="button" aria-expanded={true} aria-label={`Minimize details for ${applicantName}`} onClick={() => setExpandedDeclined(current => ({ ...current, [referralId]: false }))} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-cyan-800 hover:bg-cyan-50">Minimize <span aria-hidden="true">⌃</span></button>}</div>
                 </div>
 
                 <p className="mt-2 text-xs text-slate-600">Source: {referral.source === 'auto' ? 'Automatic application' : 'Admin referral'}</p>
                 <details className="mt-3 text-sm"><summary>Application timeline</summary><ApplicationTimeline history={referral.history || []} /></details>
-                {!['withdrawn', 'withdrawn_by_admin'].includes(status) ? <EmployerInterviewPanel token={token} referralId={referralId} referralStatus={status} outcome={hireReport?.status} /> : <ApplicationStages audience="employer" application={{ status }} />}
-                {status === "pending" && (
+                {!['withdrawn', 'withdrawn_by_admin'].includes(status) ? <EmployerInterviewPanel token={token} referralId={referralId} referralStatus={status} outcome={hireReport?.status} renderActions={canAccept => status === "pending" && (
                   <div className="mt-4 flex flex-wrap items-center gap-2">
-                    <button
+                    {canAccept && <button
                       type="button"
                       onClick={() => { setError(''); setDecision({ referralId: referral._id, status: 'accepted' }) }}
                       className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
                     >
                       Accept
-                    </button>
+                    </button>}
                     <button
                       type="button"
                       onClick={() => { setError(''); setDecision({ referralId: referral._id, status: 'declined' }) }}
@@ -283,7 +295,7 @@ function ReferralList({ token, employerId, profileImage = '' }) {
                       Decline
                     </button>
                   </div>
-                )}
+                )} /> : <ApplicationStages audience="employer" application={{ status }} />}
 
                 {(status === "accepted" || status === "declined") && applicantId && jobId && (
                   <>

@@ -6,6 +6,13 @@ const pending = { _id: 'job1', title: 'Office Clerk', company: 'Example Works', 
 const approved = { ...pending, _id: 'job2', title: 'Delivery Driver', status: 'approved', skills: ['Driving'], description: 'Deliver orders', requirements: 'Valid license' }
 
 describe('employer job browser', () => {
+  it('places a normalized employment type tag above the job details', () => {
+    render(<EmployerJobBrowser jobs={[{ ...pending, employmentType: 'Contract' }]} />)
+    const details = screen.getByRole('article', { name: 'Office Clerk job details' })
+    const tag = within(details).getByLabelText('Employment type: Contractual')
+    expect(tag).toHaveTextContent('Contractual')
+    expect(tag.compareDocumentPosition(within(details).getByRole('region', { name: 'Required skills' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
   it('shows the company photo and updates it when the employer changes their profile picture', () => {
     const branded = { ...pending, employerBranding: { profileImage: '/saved-company.jpg' } }
     const { rerender } = render(<EmployerJobBrowser jobs={[branded]} />)
@@ -17,7 +24,7 @@ describe('employer job browser', () => {
     expect(row.querySelector('img')).toBeNull()
     expect(row.querySelector('.job-browser-company-mark')).toHaveTextContent('E')
   })
-  it('switches the right panel when selecting a posting and shows edits only for pending requests', () => {
+  it('switches the right panel and lets employers edit pending and approved postings', () => {
     const edit = vi.fn()
     render(<EmployerJobBrowser jobs={[pending, approved]} onEdit={edit} />)
     const list = screen.getByRole('region', { name: 'My job postings' })
@@ -31,6 +38,8 @@ describe('employer job browser', () => {
     expect(within(second).getByText('Deliver orders')).toBeInTheDocument()
     expect(within(second).getByText('Valid license')).toBeInTheDocument()
     expect(within(second).queryByRole('button', { name: 'Edit pending request' })).not.toBeInTheDocument()
+    fireEvent.click(within(second).getByRole('button', { name: 'Edit job posting' }))
+    expect(edit).toHaveBeenLastCalledWith(approved)
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
   it('replaces a selected posting when filters or pagination remove it', () => {

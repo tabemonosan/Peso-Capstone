@@ -131,6 +131,7 @@ const applicantSchema = new Schema({
     workExperience: { type: [nsrpWorkExperienceSchema], default: [] },
     nsrp: { type: Schema.Types.Mixed, default: undefined },
     traits: String,
+    portfolioLinks: { type: [new Schema({ label: String, url: String }, { _id: false })], default: [] },
     summary: String,
     summarySource: { type: String, enum: ['personal'] },
     profileImage: String,

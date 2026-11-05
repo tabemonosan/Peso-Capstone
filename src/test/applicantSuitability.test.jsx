@@ -42,6 +42,14 @@ describe('job-specific applicant suitability', () => {
     expect(result.components.find((component) => component.key === 'technicalTraining').points).toBe(0)
     expect(result.components.find((component) => component.key === 'workExperience').detail).toContain('1 recorded years')
   })
+  it('matches only the language proficiencies explicitly required by the posting', () => {
+    const languageRequirements = [{ name: 'Bikol', read: false, write: false, speak: true, understand: true }]
+    const result = assessApplicantSuitability({ ...job, requirements: '', languageRequirements }, candidate({ languages: [{ name: 'Others', otherName: 'Bicol', speak: true, understand: true }] }), { now })
+    expect(result.components.find(item => item.key === 'languages').points).toBe(5)
+    const partial = assessApplicantSuitability({ ...job, languageRequirements }, candidate({ languages: [{ name: 'Bikol', speak: true, read: true }] }), { now })
+    expect(partial.components.find(item => item.key === 'languages').points).toBe(2.5)
+  })
+
   it('allows eligibility valid through today and supports NSRP other-language names', () => {
     const result = assessApplicantSuitability({ ...job, requirements: 'Excel certification and Bikol proficiency' }, candidate({
       eligibility: [{ eligibility: 'Excel certification', validUntil: '2026-11-02' }],

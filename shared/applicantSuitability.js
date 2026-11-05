@@ -1,6 +1,7 @@
 import { jobSkillMatchCount } from './jobSkills.js'
+import { LANGUAGE_OPTIONS, LANGUAGE_PROFICIENCIES, languageKey } from './jobLanguages.js'
 
-export const SUITABILITY_VERSION = '2026-11-02.1'
+export const SUITABILITY_VERSION = '2026-11-05.1'
 export const SUITABILITY_WEIGHTS = { skills: 40, workExperience: 25, technicalTraining: 15, eligibility: 10, languages: 5, availability: 5 }
 const text = (value) => typeof value === 'string' ? value.trim() : ''
 const rows = (value) => Array.isArray(value) ? value.filter((entry) => entry && typeof entry === 'object').slice(0, 50) : []
@@ -59,8 +60,6 @@ function workYears(entries, now) {
   return merged.reduce((total, [from, to]) => total + to - from, 0) / (365.25 * 86400000)
 }
 
-const LANGUAGES = ['English', 'Filipino', 'Tagalog', 'Bikol', 'Bicol', 'Cebuano', 'Ilocano', 'Waray', 'Hiligaynon', 'Pangasinan', 'Kapampangan', 'Mandarin', 'Japanese', 'Korean', 'Spanish', 'Arabic', 'French', 'German']
-const languageKey = (value) => ({ tagalog: 'filipino', bicol: 'bikol' }[value.toLowerCase()] || value.toLowerCase())
 
 export function assessApplicantSuitability(job = {}, applicant = {}, { now = new Date() } = {}) {
   const qualifications = applicantQualifications(applicant)
@@ -94,8 +93,10 @@ export function assessApplicantSuitability(job = {}, applicant = {}, { now = new
   add('eligibility', eligibilityRelevance, eligibilityRequired ? eligibilityRelevance ? 'Relevant current eligibility recorded' : 'No relevant current eligibility recorded' : 'No eligibility requirement stated in this posting', eligibilityRequired)
 
   const requirementText = ` ${tokens(job.requirements).join(' ')} `
-  const requiredLanguages = [...new Set(LANGUAGES.filter((name) => requirementText.includes(` ${name.toLowerCase()} `)).map(languageKey))]
-  const languageMatches = requiredLanguages.map((name) => Math.max(0, ...qualifications.languages.filter((row) => languageKey(row.name) === name).map((row) => ['read', 'write', 'speak', 'understand'].filter((key) => row[key]).length / 4)))
+  const requiredLanguages = job.languageRequirements?.length
+    ? job.languageRequirements.map(row => ({ name: languageKey(row.name), proficiencies: LANGUAGE_PROFICIENCIES.filter(key => row[key]) }))
+    : [...new Set(LANGUAGE_OPTIONS.filter((name) => requirementText.includes(` ${name.toLowerCase()} `)).map(languageKey))].map(name => ({ name, proficiencies: LANGUAGE_PROFICIENCIES }))
+  const languageMatches = requiredLanguages.map(({ name, proficiencies }) => Math.max(0, ...qualifications.languages.filter(row => languageKey(row.name) === name).map(row => proficiencies.length ? proficiencies.filter(key => row[key]).length / proficiencies.length : 0)))
   add('languages', languageMatches.length ? languageMatches.reduce((sum, value) => sum + value, 0) / languageMatches.length : 0,
     requiredLanguages.length ? `${languageMatches.filter((count) => count > 0).length} of ${requiredLanguages.length} requested language(s) recorded` : 'No language requirement stated in this posting', requiredLanguages.length > 0)
   add('availability', qualifications.immediatelyAvailable ? 1 : 0, qualifications.immediatelyAvailable ? 'Available to work immediately' : 'Immediate availability not confirmed')

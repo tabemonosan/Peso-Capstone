@@ -1,7 +1,12 @@
+import AdminReportMaker from './components/AdminReportMaker'
+import { partitionJobArchive } from '../shared/jobArchive.js'
 import PasswordInput from './components/PasswordInput'
 import SkillTagPicker from './components/SkillTagPicker'
 import LandingPage from './components/LandingPage'
 import ProfileDropdown from './components/ProfileDropdown'
+import PortfolioLinksEditor from './components/PortfolioLinksEditor'
+import PortfolioLinks from './components/PortfolioLinks'
+import ResumeUploader from './components/ResumeUploader'
 import NsrpImportReview from './components/NsrpImportReview'
 import PageGuide from './components/PageGuide'
 import MyApplicationsPage from './components/MyApplicationsPage'
@@ -13,7 +18,7 @@ import JobScreeningSummary from './components/JobScreeningSummary'
 import { applicantProfileContent } from '../shared/applicantProfile.js'
 import EditableProfileCover from './components/EditableProfileCover'
 import { PH_LOCATIONS as albayLocations, getEmployerJobAddress as getEmployerAddress } from '../shared/phLocations.js'
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { API_URL } from "./config"
 import { JOB_SKILL_OPTIONS as availableSkills } from '../shared/jobSkills.js'
 import JobsView from "./components/JobsView"
@@ -38,7 +43,6 @@ import { validatePassword } from "./utils/passwordPolicy"
 import { SUFFIX_OPTIONS, capitalizeName, validateNameField, formatFullName, formatDisplayName } from "../shared/nameFields.js"
 import { EMPLOYER_VERIFICATION_STATUS as EMPLOYER_STATUS } from "../shared/employerVerification.js"
 import ReferralList from "./components/ReferralList"
-import ApplicantEmploymentReports from "./components/ApplicantEmploymentReports"
 import ApplicantAccountSettings from "./components/ApplicantAccountSettings"
 import AdminAccountDeletionRequests from "./components/AdminAccountDeletionRequests"
 import AdminEmploymentUpdatesPage from "./components/AdminEmploymentUpdatesPage"
@@ -80,6 +84,7 @@ function formatApplicantPhone(phone) {
 const navigationByRole = {
   Admin: [
     { id: "dashboard", label: "Dashboard" },
+    { id: "report-maker", label: "Report maker" },
     { id: "employers", label: "Employers" },
     { id: "applicants", label: "Applicants" },
     { id: "requests", label: "Employer Requests" },
@@ -101,7 +106,6 @@ const navigationByRole = {
   Applicant: [
     { id: "complete", label: "Complete Registration" },
     { id: "dashboard", label: "Home" },
-    { id: "employment-reports", label: "Employment updates" },
     { id: "my-applications", label: "My applications" },
     { id: "my-reputation", label: "My reputation" },
     { id: "jobs", label: "Jobs" },
@@ -174,12 +178,18 @@ function App() {
   const [activeRole, setActiveRole] = useState(() => typeof window !== "undefined" ? (localStorage.getItem('peso-active-role') || 'Applicant') : 'Applicant')
   const [activeView, setActiveView] = useState(() => {
     const saved = typeof window !== 'undefined' ? localStorage.getItem('peso-active-view') : null
-    return saved === 'all-dashboard' ? 'dashboard' : (saved || 'dashboard')
+    return saved === 'employment-reports' ? 'my-applications' : saved === 'all-dashboard' ? 'dashboard' : (saved || 'dashboard')
   })
   const [currentUser, setCurrentUser] = useState(null)
   const [showProfileDocuments, setShowProfileDocuments] = useState(() => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('editNsrp') === '1')
   const documentLinkHandled = useRef(false)
   const [isLoggedIn, setIsLoggedIn] = useState(false)
+  useLayoutEffect(() => {
+    if (!isLoggedIn) return
+    const page = document.scrollingElement || document.documentElement
+    page.scrollTop = 0
+    page.scrollLeft = 0
+  }, [isLoggedIn])
   const [userAccounts, setUserAccounts] = useState(initialAccounts)
   const [formData, setFormData] = useState(() => ({
     email: typeof window !== "undefined" ? localStorage.getItem("peso-portal-remembered-email") || "" : "",
@@ -205,6 +215,9 @@ function App() {
     website: "",
   })
   const [isEditingProfile, setIsEditingProfile] = useState(false)
+  const [showPortfolioLinks, setShowPortfolioLinks] = useState(false)
+  const [showResumeUploader, setShowResumeUploader] = useState(false)
+  const [confirmLogout, setConfirmLogout] = useState(false)
   const [profileSaving, setProfileSaving] = useState(false)
   const profilePhotoInputRef = useRef(null)
   const [resumeFile, setResumeFile] = useState(null)
@@ -330,6 +343,15 @@ const toggleSkill = (selected, skill) => {
   const [declinedJobs, setDeclinedJobs] = useState([])
   const [referredApplicantIdsByJob, setReferredApplicantIdsByJob] = useState({})
   const [myJobs, setMyJobs] = useState([])
+  const [jobArchiveClock, setJobArchiveClock] = useState(Date.now)
+  useEffect(() => {
+    if (!isLoggedIn || activeRole !== 'Employer') return undefined
+    const refresh = () => setJobArchiveClock(Date.now())
+    refresh()
+    const timer = setInterval(refresh, 60000)
+    window.addEventListener('focus', refresh)
+    return () => { clearInterval(timer); window.removeEventListener('focus', refresh) }
+  }, [isLoggedIn, activeRole])
   const [jobSearchTerm, setJobSearchTerm] = useState('')
   const [adminJobSearchTerm, setAdminJobSearchTerm] = useState('')
   const [adminEmployerSearchTerm, setAdminEmployerSearchTerm] = useState('')
@@ -403,7 +425,7 @@ const toggleSkill = (selected, skill) => {
   const [adminEmployersData, setAdminEmployersData] = useState({ items: [], total: 0, totalPages: 1 })
   const [adminEmployersLoading, setAdminEmployersLoading] = useState(false)
   // Other long lists share the same hook with client-side slicing (no URL sync)
-  const myJobsPagination = usePagination({ resetDeps: [employerJobStatusFilter], syncUrl: false })
+  const myJobsPagination = usePagination({ resetDeps: [employerJobStatusFilter, partitionJobArchive(myJobs, jobArchiveClock).archived.length], syncUrl: false })
   const myJobsSort = useSort({ options: MY_JOBS_SORT_OPTIONS, defaultId: 'createdAt:desc', urlSync: false, onChange: () => myJobsPagination.setPage(1) })
   const notifPagination = usePagination({ urlKey: 'notifPage' })
   const [notifTotal, setNotifTotal] = useState(0)
@@ -897,7 +919,7 @@ const toggleSkill = (selected, skill) => {
       setEditingJob(null)
       fetchJobs()
       fetchNotifications()
-      showNotice('Job posting updated successfully', 'success')
+      showNotice(data.status === 'approved' ? 'Changes passed safety screening. Your job posting is published.' : 'Changes saved for PESO review. This posting is hidden from applicants until approved.', 'success')
     } catch (err) {
       console.error(err)
       showNotice(err?.message || 'Failed to update job posting')
@@ -1311,7 +1333,7 @@ const toggleSkill = (selected, skill) => {
     }
     if (activeRole === 'Applicant' && (notification?.type === 'employment_update' || (notification?.type === 'application_status_changed' && notification?.metadata?.status === 'accepted'))) {
       setSelectedNotification(null)
-      setActiveView('employment-reports')
+      setActiveView('my-applications')
       return
     }
     if (activeRole === 'Admin' && notification?.type === 'account_deletion_requested') {
@@ -1670,10 +1692,11 @@ const toggleSkill = (selected, skill) => {
   const filteredDeclinedJobs = declinedJobs.filter((job) => (activeRole === 'Admin' ? matchesAdminJobSearch(job) : true))
   const registeredJobAddress = profileData.establishmentAddress || {}
   const jobSkillSuggestions = availableSkills
-  const employerPendingJobs = myJobs.filter((job) => job.status === 'pending')
-  const employerDeclinedJobs = myJobs.filter((job) => job.status === 'declined')
-  const employerApprovedJobs = myJobs.filter((job) => job.status === 'approved')
-  const filteredMyJobs = employerJobStatusFilter === 'all' ? myJobs : myJobs.filter((job) => (job.status || 'pending') === employerJobStatusFilter)
+  const { active: activeMyJobs, archived: archivedMyJobs } = partitionJobArchive(myJobs, jobArchiveClock)
+  const employerPendingJobs = activeMyJobs.filter((job) => job.status === 'pending')
+  const employerDeclinedJobs = activeMyJobs.filter((job) => job.status === 'declined')
+  const employerApprovedJobs = activeMyJobs.filter((job) => job.status === 'approved')
+  const filteredMyJobs = employerJobStatusFilter === 'archive' ? archivedMyJobs : employerJobStatusFilter === 'all' ? activeMyJobs : activeMyJobs.filter((job) => (job.status || 'pending') === employerJobStatusFilter)
   const sortedMyJobs = sortItems(filteredMyJobs, myJobsSort.sortBy, myJobsSort.order)
   const showPendingAdminSection = activeRole === 'Admin' && (adminJobStatusFilter === 'all' || adminJobStatusFilter === 'pending')
   const showApprovedAdminSection = activeRole === 'Admin' && (adminJobStatusFilter === 'all' || adminJobStatusFilter === 'approved')
@@ -2103,6 +2126,8 @@ const toggleSkill = (selected, skill) => {
             {showProfileTab && (
               <ProfileDropdown
                 onProfile={() => { setShowProfileDocuments(false); setActiveView("profile") }}
+                onLinks={activeRole === 'Applicant' ? () => setShowPortfolioLinks(true) : undefined}
+                onResume={activeRole === 'Applicant' ? () => setShowResumeUploader(true) : undefined}
                 onSettings={activeRole === 'Applicant' ? () => {
                   setShowProfileDocuments(false)
                   setActiveView('account-settings')
@@ -2123,7 +2148,7 @@ const toggleSkill = (selected, skill) => {
             )}
             <button
               type="button"
-              onClick={handleLogout}
+              onClick={() => setConfirmLogout(true)}
               className="portal-logout"
             >
               Logout
@@ -2173,7 +2198,7 @@ const toggleSkill = (selected, skill) => {
 
           <main className="space-y-6">
           {!showProfileDocuments && <PageGuide key={`${currentUser?.id}:${activeRole}:${activeView}`} role={activeRole} view={activeView} state={currentUser?.pageGuides} token={getToken()} onSaved={saveGuideState} />}
-          {activeRole === 'Admin' && <AdminNsrpAutomation key={activeView} token={getToken()} bannerOnly={activeView !== 'verification-rules'} />}
+          {activeRole === 'Admin' && activeView === 'verification-rules' && <AdminNsrpAutomation key={activeView} token={getToken()} />}
           {activeRole === 'Admin' && ['verification-flagged', 'verification-auto'].includes(activeView) && <AdminDocumentVerification key={activeView} token={getToken()} queue={activeView === 'verification-auto' ? 'auto' : 'flagged'} />}
           {approvalNotice && activeRole === 'Employer' && (
             <section className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-green-300 bg-green-50 p-5 text-green-950" role="status">
@@ -2253,13 +2278,13 @@ const toggleSkill = (selected, skill) => {
                         <h3>Approved Job Postings</h3>
                         <p>All approved vacancies currently visible to applicants.</p>
                       </div>
-                      <span>{myJobs.filter((job) => job.status === 'approved').length} approved</span>
+                      <span>{employerApprovedJobs.length} approved</span>
                     </div>
-                    {myJobs.filter((job) => job.status === 'approved').length === 0 ? (
+                    {employerApprovedJobs.length === 0 ? (
                       <p className="employer-dashboard-empty">No approved job postings yet.</p>
                     ) : (
                       <div className="employer-dashboard-posting-list">
-                        {myJobs.filter((job) => job.status === 'approved').map((job) => (
+                        {employerApprovedJobs.map((job) => (
                           <article
                             key={job._id}
                             className="employer-dashboard-posting cursor-pointer"
@@ -2503,6 +2528,8 @@ const toggleSkill = (selected, skill) => {
               readOnly={Boolean(reviewDocsApplicant.deletedAt)}
             />
           )}
+          {activeRole === 'Admin' && activeView === 'report-maker' && <AdminReportMaker token={getToken()} />}
+
           {activeRole === 'Admin' && activeView === 'employment-updates' && (
             <AdminEmploymentUpdatesPage key={`${hiringUpdates.applicantId || ''}:${hiringUpdates.jobId || ''}`} token={getToken()} applicantId={hiringUpdates.applicantId} jobId={hiringUpdates.jobId} />
           )}
@@ -2566,6 +2593,7 @@ const toggleSkill = (selected, skill) => {
                         <span className="text-sm text-slate-400">Choose your skills to show on your profile.</span>
                       )}
                     </div>
+                    <PortfolioLinks links={currentUser?.profile?.portfolioLinks} />
                   </div>
 
                   <form className="mt-6 space-y-4" onSubmit={(event) => event.preventDefault()}>
@@ -2817,13 +2845,14 @@ const toggleSkill = (selected, skill) => {
 
               <div className="employer-pending-panel mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-5">
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <h3 className="text-lg font-semibold text-slate-900">My Job Requests</h3>
+                  <div><h3 className="text-lg font-semibold text-slate-900">My Job Requests</h3><p className="mt-1 text-xs text-slate-600">Expired postings move to Archive three days after their application deadline.</p></div>
                   <div className="flex flex-wrap gap-2">
                     {[
-                      { id: 'all', label: 'All', activeClass: 'bg-slate-200 text-slate-950', count: myJobs.length },
+                      { id: 'all', label: 'All', activeClass: 'bg-slate-200 text-slate-950', count: activeMyJobs.length },
                       { id: 'pending', label: 'Pending', activeClass: 'bg-yellow-400 text-slate-950', count: employerPendingJobs.length },
                       { id: 'approved', label: 'Approved', activeClass: 'bg-green-500 text-slate-900', count: employerApprovedJobs.length },
                       { id: 'declined', label: 'Declined', activeClass: 'bg-red-500 text-slate-900', count: employerDeclinedJobs.length },
+                      { id: 'archive', label: 'Archive', activeClass: 'bg-slate-200 text-slate-950', count: archivedMyJobs.length },
                     ].map((filter) => (
                       <button
                         key={filter.id}
@@ -2841,7 +2870,7 @@ const toggleSkill = (selected, skill) => {
                   </div>
                 </div>
                 {filteredMyJobs.length === 0 ? (
-                  <p className="mt-3 text-slate-600">{myJobs.length === 0 ? 'No job requests submitted yet.' : `No ${employerJobStatusFilter} job requests.`}</p>
+                  <p className="mt-3 text-slate-600">{employerJobStatusFilter === 'archive' ? 'No archived job postings. Expired postings move here three days after their deadline.' : myJobs.length === 0 ? 'No job requests submitted yet.' : `No ${employerJobStatusFilter} job requests.`}</p>
                 ) : (
                   <>
                     <div className="mt-3">
@@ -2949,10 +2978,6 @@ const toggleSkill = (selected, skill) => {
             <AdminAccountDeletionRequests token={getToken()} onMessage={(text) => { setAppMessage({ type: 'success', text }); fetchAdminUsers(); fetchAdminApplicants() }} onViewRetained={(record) => setReviewDocsApplicant({ id: record.applicantId, email: record.email, displayName: record.applicantName, deletedAt: true })} />
           )}
 
-          {activeView === "employment-reports" && activeRole === "Applicant" && (
-            <ApplicantEmploymentReports token={getToken()} applicantId={currentUser?._id || currentUser?.id} />
-          )}
-
           {activeView === "notify" && (
             <section className="notifications-module employer-notifications-card portal-card rounded-2xl border border-slate-300 bg-white p-6 text-black">
               <h2 className="text-xl font-semibold text-black">Notifications</h2>
@@ -3020,6 +3045,9 @@ const toggleSkill = (selected, skill) => {
             </section>
           )}
 
+          {showPortfolioLinks && activeRole === 'Applicant' && <PortfolioLinksEditor links={currentUser?.profile?.portfolioLinks} onClose={() => setShowPortfolioLinks(false)} onSave={links => saveProfile({ portfolioLinks: links })} />}
+          {showResumeUploader && activeRole === 'Applicant' && <ResumeUploader token={getToken()} onClose={() => setShowResumeUploader(false)} />}
+          {confirmLogout && <ConfirmDialog title="Log out of your account?" note="You will return to the sign-in page." confirmLabel="Confirm logout" onConfirm={() => { setConfirmLogout(false); handleLogout() }} onCancel={() => setConfirmLogout(false)} />}
           {showSkillPrompt && activeRole === 'Applicant' && (
             <div
               className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4"
@@ -3089,7 +3117,7 @@ const toggleSkill = (selected, skill) => {
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <h2 id="edit-job-title" className="text-lg font-semibold text-black">{editingJobCanSave ? 'Edit Job Posting' : 'Job Posting Details'}</h2>
-                    <p className="mt-1 text-sm text-black">{editingJobCanSave ? 'Update your pending job request before admin review.' : 'Approved postings are read-only.'}</p>
+                    <p className="mt-1 text-sm text-black">{editingJobCanSave ? 'Every saved change runs through safety screening. Flagged changes are hidden from applicants until PESO approves them.' : 'Review the details of this job posting.'}</p>
                   </div>
                   <button
                     type="button"

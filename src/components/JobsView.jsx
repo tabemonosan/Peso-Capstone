@@ -1,11 +1,12 @@
+import { PH_LOCATIONS, applicantCityName, parseStoredLocation } from '../../shared/phLocations.js'
 import { EMPLOYMENT_TYPES, formatSalary, formatLocation, mapEmploymentType, normalizeJobPosting } from '../../shared/jobPosting.js'
 import { jobSkillMatchCount } from '../../shared/jobSkills.js'
 import { rankJobApplicants } from '../../shared/applicantSuitability.js'
 import ApplicantSuitability from './ApplicantSuitability'
+import JobLanguageRequirements from './JobLanguageRequirements'
 import JobModerationSettings from './JobModerationSettings'
 import JobScreeningSummary from './JobScreeningSummary'
 import { showNotice } from '../utils/portalNotice'
-import ApplicantApplicationHistory from './ApplicantApplicationHistory'
 import ApplicantJobBrowser from './ApplicantJobBrowser'
 import JobApplicationWizard from './JobApplicationWizard'
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -93,7 +94,6 @@ function JobsView({
 
   // Pagination for the long lists in this view (applicant jobs, applications, admin queues)
   const availableJobsPg = usePagination({ urlKey: 'jobPage' })
-  const appliedJobsPg = usePagination({ syncUrl: false })
   const pendingJobsPg = usePagination({ resetDeps: [adminJobSearchTerm], syncUrl: false })
   const approvedJobsPg = usePagination({ resetDeps: [adminJobSearchTerm], syncUrl: false })
   const declinedJobsPg = usePagination({ resetDeps: [adminJobSearchTerm], syncUrl: false })
@@ -214,9 +214,14 @@ function JobsView({
   }, [activeRole, token, availableJobsPg.page, availableJobsPg.pageSize, jobFilters.queryParams, debouncedKeyword, applicantSkillsKey])
 
   // Facet options: data values merged with the app's known lists
+  const cityCounts = new Map(Object.keys(PH_LOCATIONS).map(city => [city, 0]))
+  for (const entry of applicantJobsData.facets.locations || []) {
+    const city = parseStoredLocation(entry.value)?.city || applicantCityName(entry.value)
+    if (city) cityCounts.set(city, (cityCounts.get(city) || 0) + (entry.count || 0))
+  }
   const applicantFacets = {
     skills: mergeFacetOptions(applicantJobsData.facets.skills, availableSkills),
-    locations: applicantJobsData.facets.locations,
+    locations: [...cityCounts].map(([value, count]) => ({ value, count })).sort((a, b) => a.value.localeCompare(b.value)),
     locationTypes: mergeFacetOptions(applicantJobsData.facets.locationTypes, ['On-site', 'Remote', 'Hybrid']),
     employmentTypes: mergeFacetOptions(applicantJobsData.facets.employmentTypes, EMPLOYMENT_TYPES),
   }
@@ -232,9 +237,6 @@ function JobsView({
   const applicantJobs = activeRole === 'Applicant' ? applicantJobsData.items.filter((job) => jobSkillMatchCount(job.skills, applicantMySkills) > 0) : []
   const applicationByJobId = new Map(applicationHistory.map((entry) => [String(entry.jobId), entry]))
   const appliedPostingById = new Map((Array.isArray(appliedJobs) ? appliedJobs : []).map((job) => [String(job._id), job]))
-  const visibleJobIds = new Set(applicantJobs.map((job) => String(job._id)))
-  const otherAppliedJobs = [...appliedPostingById.values()].filter((job) => !visibleJobIds.has(String(job._id)))
-  const otherApplicationsPage = Math.min(appliedJobsPg.page, Math.max(1, Math.ceil(otherAppliedJobs.length / appliedJobsPg.pageSize)))
   const applicantJobsTotal = applicantMySkills.length ? applicantJobsData.total : 0
   const applicantHasActiveFilters = jobFilters.activeCount > 0
   const [selectedApplicantsByJob, setSelectedApplicantsByJob] = useState({})
@@ -354,7 +356,6 @@ function JobsView({
               filters={jobFilters.filters}
               facets={applicantFacets}
               resultCount={applicantJobsTotal}
-              mySkills={applicantMySkills}
               onToggle={jobFilters.toggleValue}
               onDatePosted={jobFilters.setDatePosted}
               onKeyword={jobFilters.setKeyword}
@@ -388,7 +389,7 @@ function JobsView({
                 <p className="mt-4 text-slate-600">{applicantMySkills.length ? 'No available jobs match your saved skills. Check back soon.' : 'Add skills to your profile to see matching job offers.'}</p>
               )
             ) : (
-              <ApplicantJobBrowser jobs={applicantJobs} applicationByJobId={applicationByJobId} appliedPostingById={appliedPostingById} appliedJobIds={appliedJobIds} currentUser={currentUser} token={token} onApply={openApplication} onHistoryChanged={loadApplicationHistory} loading={applicantJobsLoading} />
+              <ApplicantJobBrowser jobs={applicantJobs} applicationByJobId={applicationByJobId} appliedPostingById={appliedPostingById} appliedJobIds={appliedJobIds} currentUser={currentUser} onApply={openApplication} loading={applicantJobsLoading} />
             )}
 
             {applicantJobsTotal > 0 && (
@@ -404,41 +405,7 @@ function JobsView({
               />
             )}
           </div>
-          {otherAppliedJobs.length > 0 && <div className="applicant-applied-jobs rounded-2xl border border-slate-800 bg-slate-950/80 p-4">
-            <h3 className="text-lg font-semibold text-white">Application history</h3>
-            <p className="mt-1 text-sm text-slate-600">Applications to jobs outside the current results.</p>
-              <div className="mt-4 space-y-3">
-                {otherAppliedJobs.slice((otherApplicationsPage - 1) * appliedJobsPg.pageSize, otherApplicationsPage * appliedJobsPg.pageSize).map((job) => {
-                  const myApplication = (job.applicants || []).find((applicant) => applicant.email === currentUser?.email)
-                  return (
-                    <div key={`applied-${job._id}`} className="applicant-application-item rounded-2xl border border-slate-700 bg-slate-900 p-4">
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                        <div>
-                          <p className="text-base font-semibold text-white">{job.title}</p>
-                          <p className="text-sm text-slate-400">{job.company} • {job.location || 'Remote'}</p>
-                        </div>
-                        <span className="rounded-full bg-slate-700 px-3 py-1 text-xs uppercase tracking-[0.2em] text-slate-200">
-                          {job.status || 'unknown'}
-                        </span>
-                      </div>
-                      <p className="mt-2 text-sm text-slate-400">
-                        Applied on: {myApplication?.appliedAt ? new Date(myApplication.appliedAt).toLocaleString() : 'N/A'}
-                      </p>
-                      <ApplicantApplicationHistory application={applicationByJobId.get(String(job._id))} token={token} onChanged={loadApplicationHistory} />
-                    </div>
-                  )
-                })}
-              </div>
-              <Pagination
-                page={otherApplicationsPage}
-                pageSize={appliedJobsPg.pageSize}
-                totalItems={otherAppliedJobs.length}
-                onPageChange={appliedJobsPg.setPage}
-                onPageSizeChange={appliedJobsPg.setPageSize}
-                itemLabel="applications"
-                ariaLabel="Applications pagination"
-              />
-          </div>}
+
         </div>
       )}
 
@@ -821,6 +788,7 @@ function JobsView({
                 <h3 className="text-sm font-semibold">Requirements</h3>
                 <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">{reviewJob.requirements || 'No additional requirements provided.'}</p>
               </div>
+              <JobLanguageRequirements value={reviewJob.languageRequirements} />
               <JobScreeningSummary moderation={reviewJob.moderation} />
               <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4"><h3 className="text-sm font-semibold">Notes to PESO Admin</h3><p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">{reviewJob.notesToAdmin || 'No private notes provided.'}</p></div>
               <div className="rounded-xl bg-slate-50 p-3 sm:col-span-2">

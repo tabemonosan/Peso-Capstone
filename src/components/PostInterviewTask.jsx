@@ -10,6 +10,7 @@ export default function PostInterviewTask({ token, interviewId, task, audience =
   const employer = audience === 'employer'
   const [editing, setEditing] = useState(false), [requirements, setRequirements] = useState([]), [instructions, setInstructions] = useState('')
   const [files, setFiles] = useState({}), [busy, setBusy] = useState(false), [error, setError] = useState(''), [confirm, setConfirm] = useState('')
+  const [uploadKey, setUploadKey] = useState('')
   if (!task && (!employer || !canRequest)) return null
   const toggle = key => setRequirements(previous => previous.includes(key) ? previous.filter(item => item !== key) : [...previous, key])
   const perform = async () => {
@@ -30,7 +31,7 @@ export default function PostInterviewTask({ token, interviewId, task, audience =
       const response = await fetchWithTimeout(`${API_URL}/api/workflow/interviews/${interviewId}/task/${key}/file`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body })
       const result = await response.json()
       if (!response.ok) throw new Error(result.error || 'Upload failed.')
-      setFiles(previous => ({ ...previous, [key]: null })); await onChanged?.()
+      setFiles(previous => ({ ...previous, [key]: null })); setUploadKey(''); await onChanged?.()
     } catch (err) { setError(err.message) }
     finally { setBusy(false) }
   }
@@ -62,12 +63,13 @@ export default function PostInterviewTask({ token, interviewId, task, audience =
       <ul className="mt-3 space-y-3">{task.requirements.map(({ key, label, file }) => <li key={key} className="rounded-lg border border-blue-100 bg-white p-3">
         <p className="font-medium">{label}</p>
         {file ? <><button type="button" disabled={busy} className="mt-2 text-left text-xs text-blue-800 underline" onClick={() => download(file)}>Download {file.name}</button><p className="mt-1 text-xs text-slate-500">Uploaded {workflowDate(file.uploadedAt)} · Expires {workflowDate(file.expiresAt)}</p></> : <p className="mt-1 text-xs text-slate-600">Not uploaded yet</p>}
-        {!employer && !readOnly && task.status !== 'completed' && (!file || file.version < 3) && <div className="mt-2"><label className="block text-xs">{file ? 'Replace' : 'Upload'} {label}<input key={file?.id || key} type="file" accept="application/pdf,image/jpeg,image/png" disabled={busy} className="mt-1 block w-full text-xs" onChange={event => setFiles(previous => ({ ...previous, [key]: event.target.files?.[0] }))} /></label><button type="button" className={`${button} mt-2`} disabled={busy || !files[key]} onClick={() => upload(key)}>{busy ? 'Please wait...' : 'Upload document'}</button></div>}
+        {!employer && !readOnly && task.status !== 'completed' && (!file || file.version < 3) && <div className="mt-2"><label className="block text-xs">{file ? 'Replace' : 'Upload'} {label}<input key={file?.id || key} type="file" accept="application/pdf,image/jpeg,image/png" disabled={busy} className="mt-1 block w-full text-xs" onChange={event => setFiles(previous => ({ ...previous, [key]: event.target.files?.[0] }))} /></label><button type="button" className={`${button} mt-2`} disabled={busy || !files[key]} onClick={() => { setError(''); setUploadKey(key) }}>{busy ? 'Please wait...' : 'Upload document'}</button></div>}
       </li>)}</ul>
       {employer && !readOnly && task.status !== 'completed' && <button type="button" className={`${button} mt-3`} disabled={busy || task.status !== 'submitted'} onClick={() => { setError(''); setConfirm('complete') }}>Mark document task complete</button>}
       {task.completedAt && <p className="mt-3 text-xs text-emerald-800">Employer marked complete {workflowDate(task.completedAt)}. The hiring outcome is recorded separately.</p>}
     </>}
-    {error && <p role="alert" className="mt-2 text-xs text-rose-700">{error}</p>}
+    {error && !confirm && !uploadKey && <p role="alert" className="mt-2 text-xs text-rose-700">{error}</p>}
+    {uploadKey && <ConfirmDialog title="Upload this document?" note={`Send ${files[uploadKey]?.name || 'the selected file'} to the employer for this post-interview requirement. It will replace any previous file for this requirement.`} confirmLabel="Confirm upload" busyLabel="Uploading..." busy={busy} error={error} onConfirm={() => upload(uploadKey)} onCancel={() => { setUploadKey(''); setError('') }} />}
     {confirm && <ConfirmDialog title={confirm === 'complete' ? 'Mark document task complete?' : 'Request pre-employment documents?'} note={confirm === 'complete' ? 'Confirm that you reviewed all requested documents. This does not record a hiring outcome.' : 'The applicant will see these requirements and instructions and can upload the requested files privately in My applications.'} busy={busy} error={error} onConfirm={perform} onCancel={() => setConfirm('')} />}
   </section>
 }

@@ -1,4 +1,4 @@
-import { decodeLocationFilters } from '../../shared/phLocations.js'
+import { decodeLocationFilters, PH_LOCATIONS, parseStoredLocation, normalizeCityFilters } from '../../shared/phLocations.js'
 import { LEGACY_EMPLOYMENT_TYPES, mapEmploymentType } from '../../shared/jobPosting.js'
 // Job-board filter logic for GET /api/jobs (approved jobs list).
 // Pure functions, unit-tested; the endpoint supplies the values that exist in
@@ -38,11 +38,19 @@ export function buildJobFilter(raw, { skills = [], locations = [], locationTypes
     groups.push({ skills: { $in: selectedSkills.map((v) => new RegExp(`^${escapeRegex(v)}$`, 'i')) } })
   }
 
-  const exactLocation = typeof raw.locations === 'string' ? canonicalize([raw.locations], locations) : []
-  const selectedLocations = exactLocation.length ? exactLocation : canonicalize(decodeLocationFilters(raw.locations), locations)
+  const allowedLocations = [...new Set([...locations, ...Object.keys(PH_LOCATIONS)])]
+  const exactLocation = typeof raw.locations === 'string' ? canonicalize(normalizeCityFilters([raw.locations]), allowedLocations) : []
+  const selectedLocations = exactLocation.length ? exactLocation : canonicalize(normalizeCityFilters(decodeLocationFilters(raw.locations)), allowedLocations)
   if (selectedLocations.length) {
     applied.locations = selectedLocations
-    groups.push({ location: { $in: selectedLocations.map((v) => new RegExp(`^${escapeRegex(v)}$`, 'i')) } })
+    const cities = selectedLocations.filter(value => Object.hasOwn(PH_LOCATIONS, value))
+    const legacy = selectedLocations.filter(value => !Object.hasOwn(PH_LOCATIONS, value))
+    const matches = cities.flatMap(city => [
+      { city: new RegExp(`^${escapeRegex(city)}$`, 'i') },
+      { $and: [{ city: { $in: [null, ''] } }, { location: new RegExp(`^(?:.*?,\\s*)?${escapeRegex(city)}(?:,\\s*Albay)?$`, 'i') }] },
+    ])
+    if (legacy.length) matches.push({ location: { $in: legacy.map(value => new RegExp(`^${escapeRegex(value)}$`, 'i')) } })
+    groups.push(cities.length ? { $or: matches } : matches[0])
   }
 
   const selectedLocationTypes = canonicalize(splitParam(raw.locationTypes), locationTypes)
@@ -103,7 +111,7 @@ export function countJobFacets(jobs) {
   }
   return {
     skills: count((job) => (Array.isArray(job.skills) ? job.skills : [])),
-    locations: count((job) => [job.location]),
+    locations: count((job) => [parseStoredLocation(job.location)?.city || job.city || job.location]),
     locationTypes: count((job) => [job.locationType]),
     employmentTypes: count((job) => [mapEmploymentType(job.employmentType)]),
   }

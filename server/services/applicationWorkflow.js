@@ -2,7 +2,7 @@ import mongoose from 'mongoose'
 import { ApplicationError, WITHDRAWN_REFERRALS } from './referralWorkflow.js'
 import { recordTrustEvent } from './trustPolicy.js'
 import { loadReputationSettings } from './reputationSettings.js'
-import { validateInterviewInvitation } from '../../shared/interviewInvitation.js'
+import { validateInterviewInvitation, registeredInterviewAddress } from '../../shared/interviewInvitation.js'
 const fail = (code, message, status = 409) => { throw new ApplicationError(code, message, status) }
 const id = (value) => { if (!mongoose.isValidObjectId(value)) fail('INVALID_RECORD', 'Choose a valid record.', 403); return value }
 const reasonText = (reason) => { if (typeof reason !== 'string' || !reason.trim() || reason.length > 1000) fail('REASON_REQUIRED', 'Enter a reason of 1 to 1,000 characters.', 403); return reason.trim() }
@@ -34,14 +34,24 @@ export function createApplicationWorkflow({ Applicant, Employer, JobPosting, Job
   const messageApplicant = (referral, type, message) => notify({ recipient: { id: referral.applicantId, role: 'Applicant' }, type, title: 'Application update', message, link: '/my-applications', metadata: { referralId: String(referral._id) }, email: true })
   async function invite(actor, referralId, body) {
     if (actor.role !== 'Employer') fail('FORBIDDEN', 'Employers only.', 403)
-    const { referral } = await ownedReferral(actor, referralId)
+    const { account, referral } = await ownedReferral(actor, referralId)
     const applicant = await Applicant.findById(referral.applicantId).lean()
     if (!applicant || applicant.applyingSuspendedAt || applicant.verificationStatus !== 'approved') fail('APPLICANT_UNAVAILABLE', 'This applicant is unavailable for a new invitation.', 403)
-    const { value: invitation, errors } = validateInterviewInvitation(body, now())
+    let invitationBody = body
+    if (body.useRegisteredAddress === true || !body.city || !body.barangay) {
+      let address = registeredInterviewAddress(account)
+      if (!address.city || !address.barangay) {
+        const request = await mongoose.models.EmployerRequest?.findOne({ email: account.email }).lean()
+        address = registeredInterviewAddress(account, request || {})
+      }
+      if (!address.city || !address.province || !address.barangay) fail('REGISTERED_ADDRESS_REQUIRED', 'Your registered address is incomplete. Update your NSRP registration address before sending an invitation.', 422)
+      invitationBody = { ...body, ...address }
+    }
+    const { value: invitation, errors } = validateInterviewInvitation(invitationBody, now())
     if (Object.keys(errors).length) fail('INVALID_INTERVIEW', Object.values(errors).join(' '), 403)
     if (await ApplicationReport.exists({ referralId: referral._id, type: 'no_show', status: { $in: ['pending', 'responded', 'confirmed'] } })) fail('INTERVIEW_UNAVAILABLE', 'PESO must complete the existing report before another invitation.')
     const previous = await Interview.findOne({ referralId: referral._id }).lean()
-    if (previous && (['held', 'attended', 'missed'].includes(previous.status) || previous.status === 'confirmed' && +previous.scheduledAt <= +now())) fail('INTERVIEW_COMPLETE', 'This interview is already complete.')
+    if (previous && (['held', 'attended', 'missed'].includes(previous.status) || previous.status === 'confirmed' && +previous.scheduledAt <= +now() && !await ApplicationReport.exists({ interviewId: previous._id, type: 'no_show', status: 'dismissed' }))) fail('INTERVIEW_COMPLETE', 'This interview is already complete.')
     const entry = { action: previous ? 'interview_rescheduled' : 'interview_invited', status: 'invited', by: 'Employer', at: now() }
     const meeting = await Interview.findOneAndUpdate({ referralId: referral._id, ...(previous ? { status: previous.status } : {}) }, { $set: { applicationId: referral.applicationId, applicantId: referral.applicantId, employerId: referral.employerId, jobId: referral.jobId, ...invitation, responseMessage: '', status: 'invited' }, $push: { history: entry } }, { upsert: !previous, returnDocument: 'after' })
     if (!meeting) fail('INTERVIEW_CHANGED', 'The interview changed. Refresh and try again.')
@@ -103,15 +113,26 @@ export function createApplicationWorkflow({ Applicant, Employer, JobPosting, Job
     if (body.type === 'no_show') {
       meeting = await Interview.findOne({ referralId: referral._id }).lean()
       if (!meeting || meeting.status !== 'confirmed') fail('INTERVIEW_NOT_DUE', 'A no-show report requires a confirmed interview.')
-      if (+meeting.scheduledAt > +now() && body.confirmEarly !== true) fail('EARLY_CONFIRMATION_REQUIRED', 'Confirm that you intend to report a no-show before the scheduled interview time.')
+      if (+meeting.scheduledAt > +now()) fail('INTERVIEW_NOT_DUE', 'A no-show can only be reported after the scheduled interview time.')
     }
     const day = now().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' })
     const at = now()
     const reportReason = meeting && +meeting.scheduledAt > +at ? `Employer confirmed an early decision: ${reason}` : reason
     const entry = await ApplicationReport.create({ _id: `${referral._id}:${actor.role}:${account._id}:${body.type}:${day}`, referralId: referral._id, interviewId: meeting?._id, applicantId: referral.applicantId, employerId: referral.employerId, jobId: referral.jobId, type: body.type, byRole: actor.role, byId: account._id, reason: reportReason, at, status: 'pending', ...(meeting ? { responseDeadline: new Date(+at + 7 * DAY) } : {}) })
+    if (meeting) {
+      try {
+        const applied = await recordTrustEvent(Applicant, { applicantId: referral.applicantId, key: `no-show:${entry._id}`, type: 'confirmed_no_show', applicationId: referral._id, employerId: referral.employerId, by: actor.email, actor: { role: 'Employer', label: actor.email }, reason, at })
+        if (applied) await notify({ recipient: { id: referral.applicantId, role: 'Applicant' }, type: 'reputation_updated', title: 'Reputation points updated', message: 'An employer reported a missed interview. The reputation policy was applied automatically. Open My reputation to view your points or request a review.', link: '/my-reputation' })
+      } catch (error) {
+        // Keep a saved ledger event and its source together if notification fails.
+        const booked = await Applicant.exists({ _id: referral.applicantId, 'trustEvents.key': `no-show:${entry._id}` })
+        if (!booked) await ApplicationReport.deleteOne({ _id: entry._id })
+        throw error
+      }
+    }
     if (meeting) await Interview.updateOne({ _id: meeting._id }, { $push: { history: { action: 'employer_reported_no_show', status: 'no_show_pending', by: 'Employer', reason: reportReason, at: entry.at } } })
     await event(referral, body.type === 'no_show' ? 'employer_reported_no_show' : 'problem_report_submitted', meeting ? 'no_show_pending' : referral.status, actor.role, meeting ? reportReason : undefined)
-    if (meeting) await messageApplicant(referral, 'no_show_response_requested', 'The employer reported a missed interview. You have 7 days to respond in My applications before PESO reviews the report.')
+    if (meeting) await messageApplicant(referral, 'no_show_response_requested', 'The employer reported a missed interview. Your reputation was updated automatically. You have 7 days to respond in My applications, or request a penalty review in My reputation.')
     await notifyAdmins({ type: body.type === 'no_show' ? 'application_no_show' : 'application_problem', title: body.type === 'no_show' ? 'No-show report received' : 'Application problem reported', message: 'A report is ready for PESO review in Referrals and applications.', link: '/peso-referrals', metadata: { referralId: String(referral._id), reportId: entry._id } })
     return { ok: true, id: entry._id, responseDeadline: entry.responseDeadline }
   }
@@ -141,6 +162,13 @@ export function createApplicationWorkflow({ Applicant, Employer, JobPosting, Job
       const applied = await recordTrustEvent(Applicant, { applicantId: existing.applicantId, key: `no-show:${reportId}`, type: 'confirmed_no_show', applicationId: existing.referralId, employerId: existing.employerId, by: admin.email, reason, at: now() })
       if (applied) await notify({ recipient: { id: existing.applicantId, role: 'Applicant' }, type: 'reputation_updated', title: 'Reputation points updated', message: 'PESO confirmed a reputation event. Open My reputation to view your points and history.', link: '/my-reputation' })
       await Interview.updateOne({ _id: existing.interviewId }, { $set: { status: 'missed' } })
+    }
+    if (existing.type === 'no_show' && body.decision === 'dismissed') {
+      const targetKey = `no-show:${reportId}`
+      const account = await Applicant.findById(existing.applicantId).select('+trustEvents').lean()
+      if (account?.trustEvents?.some(entry => entry.key === targetKey) && !account.trustEvents.some(entry => entry.type === 'reversal' && entry.targetKey === targetKey)) {
+        await recordTrustEvent(Applicant, { applicantId: existing.applicantId, key: `no-show-dismissed:${reportId}`, type: 'reversal', targetKey, by: admin.email, reason, at: now() })
+      }
     }
     if (changed) {
       await audit({ action: `report_${body.decision}`, reportId, applicantId: existing.applicantId, by: admin.email, reason })

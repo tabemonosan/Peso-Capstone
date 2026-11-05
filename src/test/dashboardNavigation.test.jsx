@@ -30,6 +30,34 @@ function mockRole(role, overrides = {}) {
   }))
 }
 describe('one dashboard per role', () => {
+  it('opens the admin report maker from navigation and restores it on reload', async () => {
+    mockRole('Admin')
+    localStorage.setItem('peso-token', 'token')
+    localStorage.setItem('peso-active-role', 'Admin')
+    const app = render(<App />)
+    const navigation = await screen.findByRole('navigation', { name: 'Admin navigation' })
+    fireEvent.click(within(navigation).getByRole('button', { name: 'Report maker', exact: true }))
+    expect(await screen.findByRole('heading', { name: 'Report maker', exact: true })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Report period' })).toBeInTheDocument()
+    expect(localStorage.getItem('peso-active-view')).toBe('report-maker')
+    app.unmount()
+    render(<App />)
+    expect(await screen.findByRole('heading', { name: 'Report maker', exact: true })).toBeInTheDocument()
+  })
+
+  it('replaces the retired applicant employment updates page with My applications', async () => {
+    mockRole('Applicant')
+    localStorage.setItem('peso-token', 'token')
+    localStorage.setItem('peso-active-role', 'Applicant')
+    localStorage.setItem('peso-active-view', 'employment-reports')
+    render(<App />)
+    expect(await screen.findByRole('heading', { name: 'My applications', exact: true })).toBeInTheDocument()
+    const navigation = screen.getByRole('navigation', { name: 'Applicant navigation' })
+    expect(within(navigation).queryByRole('button', { name: 'Employment updates' })).not.toBeInTheDocument()
+    expect(within(navigation).getByRole('button', { name: 'My applications' })).toHaveClass('is-active')
+    expect(localStorage.getItem('peso-active-view')).toBe('my-applications')
+    expect(fetch.mock.calls.some(([url]) => url.includes('/api/hire-reports'))).toBe(false)
+  })
   it('opens profile options, dismisses them, and opens a separate account settings window', async () => {
     mockRole('Applicant')
     localStorage.setItem('peso-token', 'token')
@@ -45,6 +73,10 @@ describe('one dashboard per role', () => {
     fireEvent.keyDown(profile, { key: 'ArrowDown' })
     await waitFor(() => expect(screen.getByRole('menuitem', { name: 'View Profile' })).toHaveFocus())
     fireEvent.keyDown(document.activeElement, { key: 'ArrowDown' })
+    expect(screen.getByRole('menuitem', { name: 'Portfolio Links' })).toHaveFocus()
+    fireEvent.keyDown(document.activeElement, { key: 'ArrowDown' })
+    expect(screen.getByRole('menuitem', { name: 'Resume' })).toHaveFocus()
+    fireEvent.keyDown(document.activeElement, { key: 'ArrowDown' })
     expect(screen.getByRole('menuitem', { name: 'Account Settings' })).toHaveFocus()
     fireEvent.keyDown(document.activeElement, { key: 'Escape' })
     expect(profile).toHaveFocus()
@@ -59,7 +91,7 @@ describe('one dashboard per role', () => {
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
   })
 
-  it('groups all three sections in Account Settings and limits the dropdown to two choices', async () => {
+  it('groups settings separately and includes portfolio links in the profile menu', async () => {
     mockRole('Applicant', { verificationDocuments: [{ docKey: 'nsrpForm', sourceType: 'uploaded' }] })
     localStorage.setItem('peso-token', 'token')
     localStorage.setItem('peso-active-view', 'profile')
@@ -68,7 +100,7 @@ describe('one dashboard per role', () => {
     expect(screen.queryByRole('heading', { name: 'Use your completed NSRP' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Account settings' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Profile', exact: true }))
-    expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['View Profile', 'Account Settings'])
+    expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['View Profile', 'Portfolio Links', 'Resume', 'Account Settings'])
     fireEvent.click(screen.getByRole('menuitem', { name: 'Account Settings' }))
     expect(await screen.findByRole('heading', { name: 'Account settings' })).toBeInTheDocument()
     expect(await screen.findByRole('heading', { name: 'Documents submitted to PESO' })).toBeInTheDocument()

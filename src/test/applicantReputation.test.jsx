@@ -12,7 +12,7 @@ describe('applicant reputation window', () => {
     expect(await screen.findByLabelText('80 out of 100 reputation points')).toBeInTheDocument()
     expect(screen.getByText('-20 points')).toBeInTheDocument()
     expect(screen.getByText(/100 → 80 points/)).toBeInTheDocument()
-    expect(screen.getByText(/A no-show report alone never deducts points/)).toBeInTheDocument()
+    expect(screen.getByText(/apply the reputation policy automatically/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Open My applications' }))
     expect(onOpen).toHaveBeenCalledOnce()
   })

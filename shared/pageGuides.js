@@ -12,7 +12,6 @@ export const PAGE_GUIDES = {
     jobs: { title: 'Find a job that fits', tips: ['Use the filters to narrow jobs by location and skills.', 'Open a job to read its requirements before applying.', 'Track your next steps in My applications.'] },
     'my-applications': { title: 'Follow your applications', tips: ['Check application decisions, referrals, and interview schedules.', 'Open an application to see its available actions and next steps.'] },
     'my-reputation': { title: 'Understand your reputation', tips: ['View your points and the events that changed them.', 'Read the policy to understand how points are recorded.'] },
-    'employment-reports': { title: 'Share your employment updates', tips: ['Report when you are hired and keep your employment details current.', 'PESO checks reports against the employer’s information.'] },
     reputation: { title: 'View your reviews', tips: ['Read feedback related to your employment.', 'Review ratings are separate from reputation points.'] },
   },
   Employer: {

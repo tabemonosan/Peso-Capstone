@@ -1,4 +1,6 @@
 import Modal from './Modal'
+import PortfolioLinks from './PortfolioLinks'
+import ApplicantResume from './ApplicantResume'
 import { formatFullName } from '../../shared/nameFields.js'
 
 function ProfileIcon({ type }) {
@@ -39,6 +41,8 @@ export default function ApplicantProfileModal({ applicant, onClose }) {
       <div className="candidate-profile-section-heading"><h3>Skills</h3><span>{skills.length} listed</span></div>
       {skills.length ? <ul className="candidate-profile-skills">{skills.map((skill, index) => <li className={`skill-tone-${index % 3}`} key={skill}>{skill}</li>)}</ul> : <p className="candidate-profile-empty">No skills listed yet.</p>}
     </section>
+    <PortfolioLinks links={profile.portfolioLinks} />
+    <ApplicantResume applicant={applicant} />
     {profile.summary && <section className="candidate-profile-section candidate-profile-summary"><h3>Profile summary</h3><p>{profile.summary}</p></section>}
     {profile.traits && <section className="candidate-profile-section"><h3>Personal strengths</h3><p className="candidate-profile-copy">{Array.isArray(profile.traits) ? profile.traits.join(' · ') : profile.traits}</p></section>}
     {sections.map(({ key, title, fields }) => Array.isArray(profile[key]) && profile[key].length > 0 && <section className="candidate-profile-section" key={key}><h3>{title}</h3><ul className="candidate-profile-records">{profile[key].map((entry, index) => <li key={index}>{fields.map((field) => entry[field]).filter(Boolean).join(' · ')}</li>)}</ul></section>)}

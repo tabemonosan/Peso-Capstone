@@ -29,6 +29,8 @@ describe('optional post-interview documents', () => {
     expect(upload).toBeDisabled()
     fireEvent.change(screen.getByLabelText('Upload Background-check authorization form'), { target: { files: [new File(['%PDF-demo'], 'authorization.pdf', { type: 'application/pdf' })] } })
     fireEvent.click(upload)
+    expect(fetcher).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm upload' }))
     await waitFor(() => expect(onChanged).toHaveBeenCalledOnce())
     const [url, options] = fetcher.mock.calls[0]
     expect(url).toContain('/interviews/meeting1/task/background_authorization/file')

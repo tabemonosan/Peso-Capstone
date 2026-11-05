@@ -85,6 +85,7 @@ describe('PESO Portal prototype', () => {
 
   it('renders the portal after a successful admin login without admin role switching controls', async () => {
     render(<App />)
+    document.documentElement.scrollTop = 1200
     const emailInput = screen.getByLabelText(/Email/i)
     const passwordInput = screen.getByLabelText(/Password/i, { selector: 'input' })
     const submitButton = screen.getByRole('button', { name: /Sign in/i })
@@ -94,6 +95,7 @@ describe('PESO Portal prototype', () => {
     fireEvent.click(submitButton)
 
     expect(await screen.findByText(/Online Employment Services Platform/i)).toBeInTheDocument()
+    expect(document.documentElement.scrollTop).toBe(0)
     expect(screen.queryByText(/Access Control/i)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Apply Role/i })).not.toBeInTheDocument()
     expect(await screen.findByRole('heading', { name: 'Dashboard', exact: true })).toBeInTheDocument()

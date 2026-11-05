@@ -12,7 +12,7 @@ beforeEach(() => { vi.restoreAllMocks(); global.fetch = vi.fn() })
 describe('employment updates', () => {
   it('opens an in-app referral confirmation and makes no change when cancelled', async () => {
     const nativeConfirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    fetch.mockImplementation(async url => response(url.endsWith('/api/hire-reports') ? [] : [{ _id: 'r1', status: 'pending', applicantId: { _id: 'a1', profile: { firstName: 'Ana', lastName: 'Cruz' } }, jobId: { _id: 'j1', title: 'Office Clerk' } }]))
+    fetch.mockImplementation(async url => response(url.includes('/api/workflow/referrals/') ? { id: 'meeting1', status: 'held' } : url.endsWith('/api/hire-reports') ? [] : [{ _id: 'r1', status: 'pending', applicantId: { _id: 'a1', profile: { firstName: 'Ana', lastName: 'Cruz' } }, jobId: { _id: 'j1', title: 'Office Clerk' } }]))
     render(<ReferralList token="token" employerId="e1" />)
     fireEvent.click(await screen.findByRole('button', { name: 'Accept', exact: true }))
     const dialog = screen.getByRole('alertdialog', { name: 'Accept this referral?' })
@@ -28,6 +28,7 @@ describe('employment updates', () => {
     let attempts = 0
     fetch.mockImplementation(async (url, options) => {
       if (options?.method === 'PUT') return ++attempts === 1 ? response({ error: 'Please try again.' }, false) : response({ _id: 'r1', status: 'accepted' })
+      if (url.includes('/api/workflow/referrals/')) return response({ id: 'meeting1', status: 'held' })
       return response(url.endsWith('/api/hire-reports') ? [] : [{ _id: 'r1', status: 'pending', applicantId: { _id: 'a1', profile: { firstName: 'Ana', lastName: 'Cruz' } }, jobId: { _id: 'j1', title: 'Office Clerk' } }])
     })
     render(<ReferralList token="token" employerId="e1" />)
@@ -43,6 +44,25 @@ describe('employment updates', () => {
     expect(document.body.style.overflow).toBe('')
   })
   it.each([
+    [null, false], ['invited', false], ['confirmed', false], ['held', true], ['attended', true],
+  ])('shows Accept only after the interview reaches step 3 (%s)', async (meetingStatus, visible) => {
+    fetch.mockImplementation(async url => {
+      if (url.includes('/api/workflow/referrals/')) return response(meetingStatus ? { id: 'meeting1', status: meetingStatus } : null)
+      if (url.endsWith('/api/hire-reports')) return response([])
+      return response([{ _id: 'r1', status: 'pending', applicantId: { _id: 'a1', profile: { firstName: 'Ana', lastName: 'Cruz' } }, jobId: { _id: 'j1', title: 'Clerk' } }])
+    })
+    render(<ReferralList token="token" employerId="e1" />)
+    if (meetingStatus) await screen.findByRole('list', { name: 'Application stages' })
+    else {
+      await screen.findByText('No interview invitation sent yet.')
+      expect(screen.queryByRole('list', { name: 'Application stages' })).not.toBeInTheDocument()
+    }
+    if (visible) expect(await screen.findByRole('button', { name: 'Accept', exact: true })).toBeInTheDocument()
+    else expect(screen.queryByRole('button', { name: 'Accept', exact: true })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Decline', exact: true })).toBeInTheDocument()
+  })
+
+  it.each([
     ['invited', null, '1. Invitation sent', /Waiting for the applicant response/],
     ['confirmed', null, '2. Invitation accepted', /The applicant accepted/],
     ['held', null, '3. Post-interview task', /Provide any post-interview task/],
@@ -57,7 +77,13 @@ describe('employment updates', () => {
     })
     render(<ReferralList token="token" employerId="e1" />)
     const graph = await screen.findByRole('list', { name: 'Application stages' })
-    await waitFor(() => expect(graph.querySelector('[aria-current="step"]')).toHaveTextContent(stage))
+    await waitFor(() => {
+      if (outcome) {
+        expect(within(graph.closest('section')).getByText('Complete')).toBeInTheDocument()
+        expect(within(graph).getAllByRole('listitem')[3]).toHaveClass('is-complete', outcome === 'hired' ? 'is-hired' : 'is-closed')
+        expect(graph.querySelector('[aria-current="step"]')).toBeNull()
+      } else expect(graph.querySelector('[aria-current="step"]')).toHaveTextContent(stage)
+    })
     expect(within(graph).getAllByRole('listitem')).toHaveLength(4)
     expect(within(graph.closest('section')).getByRole('status')).toHaveTextContent(message)
   })
@@ -107,6 +133,7 @@ describe('employment updates', () => {
     fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'not_hired' } })
     fireEvent.change(screen.getByLabelText('Notes to PESO (optional)'), { target: { value: 'Position filled' } })
     fireEvent.click(screen.getByRole('button', { name: 'Send update to PESO' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm update' }))
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Send update to PESO' })).not.toBeInTheDocument())
     expect(fetch.mock.calls[0][0]).toBe(`${API_URL}/api/hire-reports`)
     expect(JSON.parse(fetch.mock.calls[0][1].body)).toMatchObject({ status: 'not_hired', notes: 'Position filled', employmentDate: '', referralId: 'r1' })
@@ -127,6 +154,7 @@ describe('employment updates', () => {
     const onCreated = vi.fn()
     render(<HireReportForm token="token" applicantId="a1" jobId="j1" referralId="r1" onCreated={onCreated} />)
     fireEvent.click(screen.getByRole('button', { name: 'Send update to PESO' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm update' }))
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith(report))
     expect(screen.queryByLabelText('Status')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Send update to PESO' })).not.toBeInTheDocument()
@@ -156,6 +184,7 @@ describe('employment updates', () => {
     fireEvent.change(screen.getByLabelText('Date hired (optional)'), { target: { value: '2026-10-30' } })
     fireEvent.change(screen.getByLabelText('Notes to PESO (optional)'), { target: { value: 'Offer accepted.' } })
     fireEvent.click(screen.getByRole('button', { name: 'Send update to PESO' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm update' }))
     await screen.findByText('Update sent to PESO')
     expect(screen.queryByLabelText('Status')).toBeNull()
     expect(screen.getByText('October 30, 2026')).toBeTruthy()
@@ -171,6 +200,7 @@ describe('employment updates', () => {
     expect(screen.getByLabelText('Actual deployment date (optional)').value).toBe('')
     fireEvent.change(screen.getByLabelText('Actual deployment date (optional)'), { target: { value: '2026-10-31' } })
     fireEvent.click(screen.getByRole('button', { name: 'Send update to PESO' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm update' }))
     await screen.findByText('Update sent to PESO')
     expect(screen.getByText('Deployed', { exact: true })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Report deployment' })).toBeNull()
@@ -185,6 +215,7 @@ describe('employment updates', () => {
     await screen.findByLabelText('Notes to PESO (optional)')
     fireEvent.change(screen.getByLabelText('Notes to PESO (optional)'), { target: { value: 'Keep my note' } })
     fireEvent.click(screen.getByRole('button', { name: 'Send update to PESO' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm update' }))
     await screen.findByText('Please try again.')
     expect(screen.queryByText('Update sent to PESO')).toBeNull()
     expect(screen.getByLabelText('Notes to PESO (optional)').value).toBe('Keep my note')
@@ -202,9 +233,33 @@ describe('employment updates', () => {
     const decision = screen.getByRole('alertdialog', { name: 'Decline this referral?' })
     expect(fetch.mock.calls.some(([, options]) => options?.method === 'PUT')).toBe(false)
     fireEvent.click(within(decision).getByRole('button', { name: 'Confirm decline' }))
+    const expand = await screen.findByRole('button', { name: 'Show details for Juan Cruz' })
+    expect(expand).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('button', { name: 'Send update to PESO' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Email: juan@example.com')).not.toBeInTheDocument()
+    fireEvent.click(expand)
     await waitFor(() => expect(screen.getByRole('button', { name: 'Send update to PESO' })).toBeTruthy())
     expect(screen.getByText('Juan Cruz')).toBeTruthy()
+    expect(screen.getByText('Email: juan@example.com')).toBeInTheDocument()
     expect(screen.getByRole('option', { name: 'Not hired' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Minimize details for Juan Cruz' }))
+    expect(screen.queryByRole('button', { name: 'Send update to PESO' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Show details for Juan Cruz' })).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('starts saved declined referrals minimized while accepted applicants remain expanded', async () => {
+    fetch.mockImplementation(async url => {
+      if (url.includes('/api/workflow/referrals/')) return response({})
+      if (url.endsWith('/api/hire-reports')) return response([{ _id: 'report1', referralId: 'declined', status: 'not_hired' }])
+      return response(['declined', 'accepted'].map((status, index) => ({ _id: status, status, applicantId: { _id: `a${index}`, email: `${status}@example.com`, profile: { firstName: status === 'declined' ? 'Ana' : 'Juan', lastName: 'Cruz' } }, jobId: { _id: 'j1', title: 'Office Clerk' } })))
+    })
+    render(<ReferralList token="token" employerId="e1" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Show details for Ana Cruz' }))
+    expect(await screen.findByText('Reported to PESO: Not hired')).toBeInTheDocument()
+    expect(screen.getByText('Email: accepted@example.com')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Minimize details for Ana Cruz' }))
+    expect(screen.queryByText('Reported to PESO: Not hired')).not.toBeInTheDocument()
+    expect(screen.getByText('Email: accepted@example.com')).toBeInTheDocument()
   })
 
   it('restores an employer report after reopening the referrals screen', async () => {

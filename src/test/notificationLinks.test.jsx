@@ -26,6 +26,11 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('notification destinations', () => {
+  it('redirects retired applicant employment update links to My applications', () => {
+    expect(notificationDestination({ link: '/employment-reports' }, 'Applicant')).toMatchObject({ view: 'my-applications', href: '?notificationView=my-applications' })
+    expect(notificationViewFromQuery('Applicant', '?notificationView=employment-reports')).toBe('my-applications')
+    expect(notificationViewFromQuery('Employer', '?notificationView=employment-reports')).toBeNull()
+  })
   it('opens the employer applicant view from the link inside notification details', async () => {
     render(<App />)
     fireEvent.click(await screen.findByRole('button', { name: /New application received/ }))
