@@ -1,4 +1,5 @@
 import SkillTagPicker from './components/SkillTagPicker'
+import LandingPage from './components/LandingPage'
 import ProfileDropdown from './components/ProfileDropdown'
 import NsrpImportReview from './components/NsrpImportReview'
 import PageGuide from './components/PageGuide'
@@ -1757,7 +1758,8 @@ const toggleSkill = (selected, skill) => {
   }
 
   if (!isLoggedIn) {
-    return (
+    const AuthHeading = authView === 'login' ? 'h2' : 'h1'
+    const authentication = (
       <div className={`auth-page ${authView === 'login' ? 'auth-page-login' : 'auth-page-signup'}`}>
         {authView === 'login' && <aside className="auth-intro" aria-labelledby="auth-intro-title">
           <p className="auth-intro-eyebrow"><PortalNavIcon name="jobs" /> PESO · ALBAY</p>
@@ -1785,7 +1787,7 @@ const toggleSkill = (selected, skill) => {
             />
           </div>
           <div className="auth-heading">
-            <h1>{authView === 'nsrp-applicant' ? 'Applicant NSRP Form 1' : authView === 'nsrp-employer' ? 'Employer NSRP Form 2' : authView === "signup" ? "Sign Up" : authView === "employer" ? "Employer Sign Up" : "Welcome back"}</h1>
+            <AuthHeading>{authView === 'nsrp-applicant' ? 'Applicant NSRP Form 1' : authView === 'nsrp-employer' ? 'Employer NSRP Form 2' : authView === "signup" ? "Sign Up" : authView === "employer" ? "Employer Sign Up" : "Welcome back"}</AuthHeading>
             <p>{authView.startsWith('nsrp-') ? 'Fill out your form online, preview it, and download a PDF. No account required. Answers are kept only while this form is open.' : authView === "employer" ? "Create your employer account." : "Enter your PESO account credentials to continue."}</p>
           </div>
           {showSignupRestoreNotice && ['signup', 'employer'].includes(authView) && (
@@ -2061,6 +2063,13 @@ const toggleSkill = (selected, skill) => {
         </div>
       </div>
     )
+    const openPublicFlow = view => {
+      setAuthView(view)
+      requestAnimationFrame(() => document.querySelector('.auth-page')?.scrollIntoView?.({ block: 'start' }))
+    }
+    return authView === 'login'
+      ? <LandingPage onApplicantSignup={() => openPublicFlow('signup')} onEmployerSignup={() => openPublicFlow('employer')} onApplicantForm={() => openPublicFlow('nsrp-applicant')} onEmployerForm={() => openPublicFlow('nsrp-employer')}>{authentication}</LandingPage>
+      : authentication
   }
 
   const navItems = navigationByRole[activeRole] || []
