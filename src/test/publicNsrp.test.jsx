@@ -29,7 +29,7 @@ const next = async (heading) => {
 describe('landing page NSRP tools', () => {
   it('allows applicant section jumps but blocks PDF preview when required fields are missing', async () => {
     render(<App />)
-    fireEvent.click(screen.getByRole('button', { name: /Applicant.*Form 1/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Applicant · Form 1', exact: true }))
     fireEvent.click(screen.getByRole('button', { name: /5\. Employment/ }))
     expect(screen.getByRole('heading', { name: 'Employment & preferences' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /3\. Education/ }))
@@ -44,7 +44,7 @@ describe('landing page NSRP tools', () => {
 
   it('allows employer section jumps and validates all sections before generating a PDF', async () => {
     render(<App />)
-    fireEvent.click(screen.getByRole('button', { name: /Employer.*Form 2/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Employer · Form 2', exact: true }))
     fireEvent.click(screen.getByRole('button', { name: /4\. Certification/ }))
     expect(screen.getByRole('heading', { name: 'Certification' })).toBeInTheDocument()
     fill(/^Authorized representative full name/, 'Juan Cruz')

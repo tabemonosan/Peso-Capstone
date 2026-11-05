@@ -4,6 +4,9 @@ import { createApplicationWorkflowRouter } from './routes/applicationWorkflow.js
 import { coveringJobSkill } from '../shared/jobSkills.js'
 import { PHILIPPINE_ID_TYPES } from '../shared/philippineIds.js'
 import { applicantProfileContent } from '../shared/applicantProfile.js'
+import { mergeNsrpIntoProfile } from '../shared/nsrpImport.js'
+import { reviewedImport } from './services/nsrpImport.js'
+import { createNsrpImportRouter } from './routes/nsrpImport.js'
 import { validateJobApplication, RESUME_MAX_BYTES } from '../shared/jobApplication.js'
 import { validateApplicationEmail } from './services/applicationEmail.js'
 import { matchLocation, getEmployerJobAddress as getEmployerAddress, validateApplicantLocation } from '../shared/phLocations.js'
@@ -521,6 +524,8 @@ function authenticateRequest(req) {
     return null
   }
 }
+
+app.use('/api', createNsrpImportRouter({ secret: jwtSecret, authenticate: authenticateRequest, verifyEmailProof, UsedEmailProof, Applicant, loadApplicant: loadApplicantWithCurrentResume, loadDocumentFile }))
 
 function nsrpDownloadName(companyName) {
   const safe = String(companyName || 'employer').replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 80)
@@ -1169,7 +1174,7 @@ app.post('/api/signup', applicantSignupUpload.fields([
     const profileLocation = nsrpMode === 'online'
       ? [answers.addressStreet, answers.addressBarangay, answers.addressCity, answers.addressProvince].filter(Boolean).join(', ')
       : [basicInfo.addressCity, basicInfo.addressProvince].filter(Boolean).join(', ')
-    const profile = nsrpMode === 'online'
+    let profile = nsrpMode === 'online'
       ? (() => {
           const storedAnswers = { ...answers, certified: Boolean(submittedAnswers.certified) }
           delete storedAnswers.signatureDataUrl
@@ -1206,6 +1211,12 @@ app.post('/api/signup', applicantSignupUpload.fields([
           skills: [],
           summary: '',
         }
+    if (nsrpMode === 'upload' && req.body.nsrpImportToken) {
+      try {
+        const imported = reviewedImport(jwtSecret, req.body.nsrpImportToken, `signup:${normalizeEmail(email)}`, fileFor('nsrpFile').buffer)
+        profile = mergeNsrpIntoProfile(profile, imported)
+      } catch (err) { return res.status(409).json({ error: err.message }) }
+    }
     stage = 'create-account'
     const nsrpAutoEnabledAtCreation = await nsrpAutomation.creationEnabled('Applicant')
     let user

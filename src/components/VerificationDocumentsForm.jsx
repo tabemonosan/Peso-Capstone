@@ -29,9 +29,9 @@ async function compressImageIfNeeded(file) {
   }
 }
 
-const labelCls = "block text-sm font-semibold text-[#071c35]"
-const helperCls = "mt-1 text-xs text-[#5c7490]"
-const selectCls = "shared-form-control w-full rounded-[10px] border border-[#c4d4e5] bg-[#f8fbfe] px-3 py-2.5 text-sm text-[#071c35]"
+const labelCls = "block text-sm font-semibold text-[var(--peso-ink)]"
+const helperCls = "mt-1 text-xs text-[var(--peso-muted)]"
+const selectCls = "shared-form-control w-full rounded-[10px] border border-[var(--peso-line-strong)] bg-[var(--peso-canvas)] px-3 py-2.5 text-sm text-[var(--peso-ink)]"
 
 function FileField({ label, hint, required, file, error, onSelect, onRemove, disabled }) {
   const inputRef = useRef(null)
@@ -50,23 +50,23 @@ function FileField({ label, hint, required, file, error, onSelect, onRemove, dis
   return (
     <div>
       <span className={labelCls}>
-        {label} {required ? <span className="text-rose-600">*</span> : <span className="text-xs font-normal text-[#5c7490]">(optional)</span>}
+        {label} {required ? <span className="text-rose-600">*</span> : <span className="text-xs font-normal text-[var(--peso-muted)]">(optional)</span>}
       </span>
       {hint && <p className={helperCls}>{hint}</p>}
 
       {file ? (
-        <div className="mt-1.5 flex flex-wrap items-center gap-3 rounded-[10px] border border-[#c4d4e5] bg-white p-3">
+        <div className="mt-1.5 flex flex-wrap items-center gap-3 rounded-[10px] border border-[var(--peso-line-strong)] bg-white p-3">
           {previewUrl ? (
-            <img src={previewUrl} alt={`${label} preview`} className="h-16 w-16 shrink-0 rounded-lg border border-[#c4d4e5] object-cover" />
+            <img src={previewUrl} alt={`${label} preview`} className="h-16 w-16 shrink-0 rounded-lg border border-[var(--peso-line-strong)] object-cover" />
           ) : (
-            <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg border border-[#c4d4e5] bg-[#f8fbfe] text-xs font-bold text-[#1b4265]">PDF</span>
+            <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg border border-[var(--peso-line-strong)] bg-[var(--peso-canvas)] text-xs font-bold text-[var(--peso-body)]">PDF</span>
           )}
           <div className="min-w-0 flex-1" style={{ minWidth: '120px' }}>
-            <p className="truncate text-sm text-[#071c35]">{file.name}</p>
-            <p className="text-xs text-[#5c7490]">{Math.ceil(file.size / 1024)} KB</p>
+            <p className="truncate text-sm text-[var(--peso-ink)]">{file.name}</p>
+            <p className="text-xs text-[var(--peso-muted)]">{Math.ceil(file.size / 1024)} KB</p>
           </div>
           <div className="flex shrink-0 gap-2">
-            <button type="button" disabled={disabled} onClick={() => inputRef.current?.click()} className="rounded-lg border border-[#c4d4e5] bg-white px-3 py-1.5 text-xs font-semibold text-[#1b4265]">
+            <button type="button" disabled={disabled} onClick={() => inputRef.current?.click()} className="rounded-lg border border-[var(--peso-line-strong)] bg-white px-3 py-1.5 text-xs font-semibold text-[var(--peso-body)]">
               Replace
             </button>
             <button type="button" disabled={disabled} onClick={onRemove} className="rounded-lg border border-rose-300 bg-white px-3 py-1.5 text-xs font-semibold text-rose-600">
@@ -79,7 +79,7 @@ function FileField({ label, hint, required, file, error, onSelect, onRemove, dis
           type="button"
           disabled={disabled}
           onClick={() => inputRef.current?.click()}
-          className="mt-1.5 w-full rounded-[10px] border border-dashed border-[#c4d4e5] bg-[#f8fbfe] px-3 py-4 text-sm text-[#5c7490] hover:border-[#1b6ec2] hover:text-[#1b4265]"
+          className="mt-1.5 w-full rounded-[10px] border border-dashed border-[var(--peso-line-strong)] bg-[var(--peso-canvas)] px-3 py-4 text-sm text-[var(--peso-muted)] hover:border-[var(--peso-primary)] hover:text-[var(--peso-body)]"
         >
           Tap to upload or take a photo
         </button>
@@ -168,8 +168,8 @@ export default function VerificationDocumentsForm({ docs, setDocs, disabled, fie
   const helperText = "Upload clear, uncropped photos or scans (JPG, PNG, or PDF, max 5 MB each). An admin will review your documents before you can browse jobs."
 
   return (
-    <fieldset className="space-y-4 rounded-[10px] border border-[#c4d4e5] bg-[#f8fbfe] p-4">
-      <legend className="px-2 text-sm font-semibold text-[#071c35]">Verification documents</legend>
+    <fieldset className="space-y-4 rounded-[10px] border border-[var(--peso-line-strong)] bg-[var(--peso-canvas)] p-4">
+      <legend className="px-2 text-sm font-semibold text-[var(--peso-ink)]">Verification documents</legend>
       <p className={helperCls}>{helperText}</p>
       <p className={helperCls}>Check your document before you upload: use good light, keep all edges visible, and make the text clear.</p>
       {qualityChoice && <div role="status" className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">This photo may be too dark or have glare. <button type="button" className="rounded border bg-white px-2 py-1" onClick={() => setQualityChoice(null)}>Retake</button> <button type="button" className="rounded border bg-white px-2 py-1" onClick={() => acceptFile(qualityChoice.path, qualityChoice.file)}>Use anyway</button></div>}
@@ -186,7 +186,7 @@ export default function VerificationDocumentsForm({ docs, setDocs, disabled, fie
         onRemove={() => setFile(["birthCertificate"], null)}
       />
 
-      <div className="space-y-3 rounded-[10px] border border-[#c4d4e5] bg-white p-3">
+      <div className="space-y-3 rounded-[10px] border border-[var(--peso-line-strong)] bg-white p-3">
         <p className={labelCls}>Valid ID #1 <span className="text-rose-600">*</span></p>
         {fieldErrors.validId1 && <p role="alert" className="text-xs text-rose-600">{fieldErrors.validId1}</p>}
         <select
@@ -221,8 +221,8 @@ export default function VerificationDocumentsForm({ docs, setDocs, disabled, fie
         />
       </div>
 
-      <div className="space-y-3 rounded-[10px] border border-[#c4d4e5] bg-white p-3">
-        <p className={labelCls}>Valid ID #2 <span className="text-xs font-normal text-[#5c7490]">(optional)</span></p>
+      <div className="space-y-3 rounded-[10px] border border-[var(--peso-line-strong)] bg-white p-3">
+        <p className={labelCls}>Valid ID #2 <span className="text-xs font-normal text-[var(--peso-muted)]">(optional)</span></p>
         {fieldErrors.validId2 && <p role="alert" className="text-xs text-rose-600">{fieldErrors.validId2}</p>}
         <select
           aria-label="Valid ID #2 type"

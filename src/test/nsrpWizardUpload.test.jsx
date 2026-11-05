@@ -166,6 +166,46 @@ describe('NSRP path choice', () => {
 })
 
 describe('upload path end-to-end', () => {
+  it('fills basic details from a reviewed NSRP and sends only its source-bound proof', async () => {
+    const fallback = mockFetch.getMockImplementation()
+    mockFetch.mockImplementation(async (url, options) => url.endsWith('/api/signup/nsrp-import') ? { ok: true, json: async () => ({ answers: { firstName: 'Maria', surname: 'Cruz', dob: '1990-06-11', cellphone: '09171234567', addressCity: 'Manito', addressProvince: 'Albay', skills: ['Gardening'], tin: '987654321' }, warnings: [], importToken: 'reviewed-import-proof' }) } : fallback(url, options))
+    await completeAccountStep()
+    fireEvent.click(screen.getByRole('radio', { name: /I already have a filled NSRP form/i }))
+    fireEvent.change(screen.getByLabelText(/Filled NSRP form/i), { target: { files: [pdfFile('my-nsrp.pdf')] } })
+    fireEvent.click(screen.getByText('Retrieve from NSRP'))
+    await screen.findByText('Maria')
+    fireEvent.click(screen.getByRole('checkbox', { name: /checked these details/i }))
+    fireEvent.click(screen.getByText('Use these details'))
+    fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
+    expect(await screen.findByLabelText(/^First name$/i)).toHaveValue('Maria')
+    expect(screen.getByLabelText(/^Date of birth$/i)).toHaveValue('1990-06-11')
+    expect(screen.getByLabelText(/^City \/ Municipality$/i)).toHaveValue('Manito')
+    fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
+    await fillDocuments()
+    fireEvent.click(await screen.findByRole('button', { name: /Create account/i }))
+    await waitFor(() => expect(mockFetch.mock.calls.some(([url]) => url.endsWith('/api/signup'))).toBe(true))
+    const body = mockFetch.mock.calls.find(([url]) => url.endsWith('/api/signup'))[1].body
+    expect(body.get('nsrpImportToken')).toBe('reviewed-import-proof')
+    expect(body.get('firstName')).toBe('Maria')
+    const stored = JSON.stringify({ ...localStorage, ...sessionStorage })
+    expect(stored).not.toContain('reviewed-import-proof')
+    expect(stored).not.toContain('987654321')
+  })
+
+  it('clears reviewed results when the applicant replaces the PDF', async () => {
+    const fallback = mockFetch.getMockImplementation()
+    mockFetch.mockImplementation(async (url, options) => url.endsWith('/api/signup/nsrp-import') ? { ok: true, json: async () => ({ answers: { firstName: 'Maria' }, warnings: [], importToken: 'old-proof' }) } : fallback(url, options))
+    await completeAccountStep()
+    fireEvent.click(screen.getByRole('radio', { name: /I already have a filled NSRP form/i }))
+    const input = screen.getByLabelText(/Filled NSRP form/i)
+    fireEvent.change(input, { target: { files: [pdfFile('old.pdf')] } })
+    fireEvent.click(screen.getByText('Retrieve from NSRP'))
+    await screen.findByText('Maria')
+    fireEvent.change(input, { target: { files: [pdfFile('replacement.pdf')] } })
+    expect(screen.queryByText('Maria')).not.toBeInTheDocument()
+    expect(screen.queryByText('Use these details')).not.toBeInTheDocument()
+  })
+
   it('submits nsrpMode upload with the file and basic info, no nsrpAnswers, and stores nothing sensitive', async () => {
     await completeAccountStep()
     await chooseUpload()

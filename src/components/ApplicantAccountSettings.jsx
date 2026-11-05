@@ -47,7 +47,7 @@ export default function ApplicantAccountSettings({ token, onMessage }) {
 
   const awaitingReview = ['pending', 'processing'].includes(record?.status)
   return (
-    <section id="account-settings" aria-labelledby="account-settings-title" className="mt-6 rounded-2xl border border-slate-300 bg-white p-6 text-slate-900">
+    <section id="account-settings" tabIndex={-1} aria-labelledby="account-settings-title" className="mt-6 scroll-mt-28 rounded-2xl border border-slate-300 bg-white p-6 text-slate-900">
       <h3 id="account-settings-title" className="text-xl font-semibold">Account settings</h3>
       <p className="mt-2 text-sm text-slate-600">Request account deletion for PESO review. Approval closes this account and ends existing sessions. PESO retains your NSRP registration and employment records separately; this request does not erase those records.</p>
       <p className="mt-2 text-sm text-slate-600">After approval, you can use the same email to register a fresh account. Your old login will stop working. The new account will need new registration and verification and will not inherit your previous documents, applications, or referrals.</p>

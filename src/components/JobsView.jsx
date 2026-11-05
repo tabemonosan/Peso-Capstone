@@ -681,7 +681,7 @@ function JobsView({
                                                     <button
                                                       type="button"
                                                       onClick={() => handleReferApplicantFromJob(job._id, applicant.email, isReferred)}
-                                                      className={`rounded-2xl px-4 py-2 text-sm font-semibold ${isReferred ? 'border border-slate-400 bg-slate-300 text-slate-700' : 'bg-[#56d5ff] text-slate-950'}`}
+                                                      className={`rounded-2xl px-4 py-2 text-sm font-semibold ${isReferred ? 'border border-slate-400 bg-slate-300 text-slate-700' : 'bg-[var(--peso-accent)] text-white'}`}
                                                     >
                                                       {isReferred ? 'Cancel Referral' : 'Refer Applicant'}
                                                     </button>
