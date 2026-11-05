@@ -1,4 +1,4 @@
-import { LOW_TRUST_THRESHOLD, INITIAL_TRUST } from './trustPolicy.js'
+import { readReputation } from './trustPolicy.js'
 import crypto from 'node:crypto'
 import mongoose from 'mongoose'
 
@@ -103,8 +103,8 @@ export function createReferralWorkflow({ Applicant, Employer, JobPosting, JobApp
     const { applicant, employer, job, existing, reapplying, reusableReferral } = await checkEligibility({ email, jobId, manual, sharingConsent })
     await Promise.all([JobApplication.init(), Referral.init()])
     const settings = await getSettings()
-    const privateAccount = !manual && settings.lowTrustRouting ? await Applicant.findById(applicant._id).select('+trustValue').lean() : null
-    const lowTrustReview = !manual && settings.lowTrustRouting && (privateAccount?.trustValue ?? INITIAL_TRUST) < LOW_TRUST_THRESHOLD
+    const reputation = !manual && settings.lowTrustRouting ? await readReputation(Applicant, applicant._id) : null
+    const lowTrustReview = !manual && settings.lowTrustRouting && reputation.points < reputation.settings.atRiskBelow
     const automatic = manual || settings.automaticReferral && !lowTrustReview
     const now = new Date(), by = manual ? adminEmail : 'System'
     const id = existing?._id || new mongoose.Types.ObjectId()

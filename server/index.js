@@ -292,7 +292,7 @@ jobApplicationSchema.index({ applicantId: 1, jobId: 1 }, { unique: true, partial
 const JobApplication = mongoose.model('JobApplication', jobApplicationSchema)
 export const referralWorkflow = createReferralWorkflow({ Applicant, Employer, JobPosting, JobApplication, Referral, HireReport, Notification, notify, notifyAdmins, loadApplicant: loadApplicantWithCurrentResume, loadEmployerVerification, loadNsrpFile: storedApplicationNsrp })
 export const applicationWorkflow = createApplicationWorkflow({ Applicant, Employer, JobPosting, JobApplication, Referral, HireReport, Interview, ApplicationReport, ApplicationAppeal, notify, notifyAdmins, loadEmployerVerification, referralWorkflow })
-app.use('/api/workflow', createApplicationWorkflowRouter({ service: applicationWorkflow, Applicant, Employer, Admin, JobApplication, Interview, ApplicationReport, ApplicationAppeal, HireReport, authenticate: authenticateRequest, notify }))
+app.use('/api/workflow', createApplicationWorkflowRouter({ service: applicationWorkflow, Applicant, Employer, Admin, JobApplication, Interview, ApplicationReport, ApplicationAppeal, HireReport, authenticate: authenticateRequest, notify, notifyAdmins }))
 app.use('/api/admin/referral-workflow', createReferralOversightRouter({ workflow: referralWorkflow, Applicant, Employer, JobPosting, JobApplication, Referral, authenticate: authenticateRequest }))
 app.use('/api/applications', createApplicationHistoryRouter({ Applicant, Employer, JobApplication, Referral, JobPosting, authenticate: authenticateRequest, notify, notifyAdmins, loadEmployerVerification, applicationWorkflow, Interview, HireReport }))
 
