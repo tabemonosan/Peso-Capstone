@@ -72,8 +72,8 @@ export default function LandingPage({ children, onApplicantSignup, onEmployerSig
           <p className="landing-hero-note"><svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m5 12 4 4L19 6" /></svg>For job seekers and employers across Albay.</p>
         </div>
         <figure className="landing-hero-visual">
-          <div className="landing-photo-frame"><img src="/images/peso-workplace.webp" alt="Two Filipino professionals sharing ideas over a notebook in a sunlit workshop" width="1440" height="1080" fetchPriority="high" /></div>
-          <span className="landing-image-corner" aria-hidden="true"><svg width="76" height="76" viewBox="0 0 80 80" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M40 2v76M2 40h76M13 13l54 54M13 67l54-54M25 5l30 70M5 25l70 30M5 55l70-30M25 75l30-70" /></svg></span>
+          <div className="landing-photo-frame"><img src="/images/gus.avif" alt="A man wearing glasses and a blazer holding up a small object in a classroom" width="640" height="639" fetchPriority="high" /></div>
+
           <div className="landing-photo-note"><span className="landing-note-icon" aria-hidden="true">↗</span><span>A little closer to<br /><strong>your next chapter.</strong></span></div>
           <figcaption>Possibility starts with people.</figcaption>
         </figure>
@@ -90,7 +90,7 @@ export default function LandingPage({ children, onApplicantSignup, onEmployerSig
       <section id="for-employers" className="landing-employers landing-container" aria-labelledby="landing-employers-title" data-reveal>
         <div className="landing-profile-preview" aria-label="Illustration of the qualifications employers can review">
           <p className="landing-preview-label"><span className="landing-status-dot" /> THE PERSON BEHIND THE PROFILE</p>
-          <div className="landing-preview-person"><span className="landing-preview-avatar" aria-hidden="true"><svg width="40" height="40" viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="1.3"><circle cx="24" cy="16" r="8" /><path d="M8 43v-5c0-8 7-12 16-12s16 4 16 12v5" /></svg></span><div><strong>More than a name.</strong><span>A fuller picture of every applicant.</span></div><span className="landing-preview-spark" aria-hidden="true">✳</span></div>
+          <div className="landing-preview-person"><span className="landing-preview-avatar" aria-hidden="true"><svg width="40" height="40" viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="1.3"><circle cx="24" cy="16" r="8" /><path d="M8 43v-5c0-8 7-12 16-12s16 4 16 12v5" /></svg></span><div><strong>More than a name.</strong><span>A fuller picture of every applicant.</span></div></div>
           {[['01', 'Skills & experience', 'What they know. What they’ve done.'], ['02', 'Language proficiency', 'The ways they communicate.'], ['03', 'Resume & portfolio', 'Their work, in their own words.']].map(([number, title, text]) => <div className="landing-preview-row" key={number}><span>{number}</span><div><strong>{title}</strong><p>{text}</p></div><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m5 12 4 4L19 6" /></svg></div>)}
           <p className="landing-preview-footnote">An illustration of the applicant profile experience.</p>
         </div>

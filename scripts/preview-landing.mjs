@@ -15,7 +15,7 @@ const server = http.createServer(async (req, res) => {
     const file = path.resolve(root, relative)
     if (!file.startsWith(root + path.sep)) { res.writeHead(403); res.end(); return }
     const data = await fs.readFile(file)
-    res.setHeader('Content-Type', { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.webp': 'image/webp', '.svg': 'image/svg+xml' }[path.extname(file)] || 'application/octet-stream')
+    res.setHeader('Content-Type', { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.webp': 'image/webp', '.avif': 'image/avif', '.svg': 'image/svg+xml' }[path.extname(file)] || 'application/octet-stream')
     res.end(data)
   } catch { res.writeHead(404); res.end() }
 })

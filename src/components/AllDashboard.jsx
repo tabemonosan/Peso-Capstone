@@ -123,8 +123,8 @@ export default function AllDashboard({ token, onNavigate, applicantOverview }) {
                 <XAxis dataKey="date" tickFormatter={shortDate} minTickGap={24} />
                 <YAxis allowDecimals={false} />
                 <Tooltip />
-                <Line type="monotone" dataKey="registrations" stroke="#2457d6" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="applications" stroke="#9682d0" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="registrations" stroke="var(--peso-primary)" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="applications" stroke="#5b887b" strokeWidth={2} dot={false} />
               </LineChart>
             ) : (
               <BarChart data={chartData}>
@@ -132,7 +132,7 @@ export default function AllDashboard({ token, onNavigate, applicantOverview }) {
                 <XAxis dataKey="date" tickFormatter={shortDate} minTickGap={24} />
                 <YAxis allowDecimals={false} />
                 <Tooltip />
-                <Bar dataKey="applications" fill="#2457d6" />
+                <Bar dataKey="applications" fill="var(--peso-primary)" />
               </BarChart>
             )}
           </ResponsiveContainer>
