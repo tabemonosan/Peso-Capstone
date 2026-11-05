@@ -2931,7 +2931,7 @@ const toggleSkill = (selected, skill) => {
           )}
 
           {activeView === "my-applications" && activeRole === "Applicant" && <MyApplicationsPage token={getToken()} onDeclined={() => { fetchJobs(); setActiveView('jobs') }} />}
-          {activeView === 'my-reputation' && activeRole === 'Applicant' && <ApplicantReputationPage token={getToken()} onOpenApplications={() => setActiveView('my-applications')} />}
+          {activeView === 'my-reputation' && activeRole === 'Applicant' && <ApplicantReputationPage token={getToken()} onOpenApplications={applicationId => { const url = new URL(window.location.href); if (applicationId) url.searchParams.set('applicationId', applicationId); else url.searchParams.delete('applicationId'); window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`); setActiveView('my-applications') }} />}
           {activeView === "referrals" && activeRole === "Employer" && (
             <ReferralList
               profileImage={profileData.profileImage}
@@ -3306,6 +3306,7 @@ const toggleSkill = (selected, skill) => {
 
           {activeView === "peso-referrals" && activeRole === "Admin" && (
             <AdminReferralsPage
+              onOpenReviewQueue={() => setActiveView('verification-flagged')}
               token={getToken()}
               adminUsers={adminUsers}
               onLoadApplicants={fetchAdminUsers}

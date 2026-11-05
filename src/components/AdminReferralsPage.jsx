@@ -1,4 +1,5 @@
 import AdminApplicationWorkflow from './AdminApplicationWorkflow'
+import { AdminReputationSettings, AdminReputationReviews } from './AdminReputation'
 import { APPLICATION_STATUS_LABELS } from '../../shared/applicationProgress.js'
 import { mergeApplicationHistory } from '../../shared/employmentReporting.js'
 import { useCallback, useEffect, useState } from 'react'
@@ -28,7 +29,7 @@ export function AutomaticReferralBanner({ token, onOpen }) {
   return <div role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">{state.off ? 'Automatic referral is OFF. New applications wait for PESO referral. ' : 'Automatic referral is ON. '}{state.lowTrust ? 'Low-trust review routing is ON. Flagged applications wait for admin review. ' : 'Low-trust review routing is OFF. '}<button type="button" onClick={onOpen} className="ml-2 font-semibold underline">Open referrals and applications</button></div>
 }
 
-export default function AdminReferralsPage({ token, ...legacyProps }) {
+export default function AdminReferralsPage({ token, onOpenReviewQueue, ...legacyProps }) {
   const [settings, setSettings] = useState(null)
   const [options, setOptions] = useState({ employers: [], jobs: [], applicants: [] })
   const [data, setData] = useState({ items: [], total: 0 })
@@ -76,9 +77,10 @@ export default function AdminReferralsPage({ token, ...legacyProps }) {
   return <div className="space-y-5">
     <section className="rounded-2xl border border-slate-200 bg-white p-6 text-slate-900">
       <h2 className="text-xl font-bold">Referrals and applications</h2>
+      {onOpenReviewQueue && <button type="button" onClick={onOpenReviewQueue} className="mt-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">Open Flagged for review</button>}
       <p className="mt-2 text-sm text-slate-600">Live oversight of applications and referrals. Automatic delivery needs no PESO approval. Refreshes every 10 seconds.</p>
       {settings && <label className="my-4 flex items-center gap-2 rounded-xl border border-cyan-200 bg-cyan-50 p-3 text-sm font-semibold"><input type="checkbox" checked={settings.automaticReferral} disabled={busy} onChange={(event) => settingsChange(event.target.checked)} />Automatic referral {settings.automaticReferral ? 'ON' : 'OFF'}</label>}
-      {settings && <label className="my-3 flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm"><input type="checkbox" checked={settings.lowTrustRouting === true} disabled={busy} onChange={(event) => settingsChange(event.target.checked, 'lowTrustRouting')} />Send applications from applicants with a low trust flag to admin review first</label>}
+      {settings && <label className="my-3 flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm"><input type="checkbox" checked={settings.lowTrustRouting === true} disabled={busy} onChange={(event) => settingsChange(event.target.checked, 'lowTrustRouting')} />Send low-trust applications to admin review first</label>}
       {settings?.automaticReferral === false && <p role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm">Automatic referral is OFF. The manual queue is available below.</p>}
       {error && <p role="alert" className="my-2 text-rose-700">{error}</p>}{notice && <p role="status" className="my-2 text-sm text-cyan-900">{notice}</p>}
       <div className="my-4 grid gap-3 sm:grid-cols-3">
@@ -109,6 +111,8 @@ export default function AdminReferralsPage({ token, ...legacyProps }) {
       </div>
       <div className="mt-3 flex flex-wrap gap-3"><button type="button" disabled={!manual.employerId || busy} onClick={() => { setError(''); setAction({ type: selectedEmployer?.receivingApplicantsSuspendedAt ? 'resume' : 'suspend', id: manual.employerId }) }} className="rounded-full border border-amber-300 bg-amber-50 px-4 py-2 text-sm">{selectedEmployer?.receivingApplicantsSuspendedAt ? 'Resume receiving applicants' : 'Suspend receiving applicants'}</button><button type="button" disabled={!manual.jobId || !manual.applicantId || busy} onClick={() => { setError(''); setAction({ type: 'manual' }) }} className="rounded-full border border-cyan-300 bg-cyan-50 px-4 py-2 text-sm">Create referral</button></div>
     </section>
+    <AdminReputationSettings token={token} />
+    <AdminReputationReviews token={token} />
     <AdminApplicationWorkflow token={token} />
     {settings?.automaticReferral === false && <PesoReferralPanel token={token} {...legacyProps} />}
     {detail && <Modal onClose={() => setDetail(null)} labelledBy="application-timeline-title"><div className="flex justify-between gap-3"><h2 id="application-timeline-title" className="text-xl font-bold">Application timeline</h2><button type="button" onClick={() => setDetail(null)}>Close</button></div><p className="mt-3">{detail.applicant.email} · {detail.job.title} · {statusLabel(detail.status)} · {detail.source}</p><ApplicationTimeline history={detail.history} /></Modal>}

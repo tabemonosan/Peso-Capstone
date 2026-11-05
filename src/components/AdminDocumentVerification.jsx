@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { AdminReputationReviews, AdminNoShowReviews } from './AdminReputation'
 import AdminWaitlistActions from './AdminWaitlistActions'
 import { API_URL } from '../config'
 import { fetchWithTimeout } from '../utils/fetchWithTimeout'
@@ -74,6 +75,8 @@ export default function AdminDocumentVerification({ token, queue = 'flagged' }) 
   const actionButton = (item, action, ruleId) => <button type="button" className={`${control} text-cyan-800`} onClick={() => { setError(''); setChecklist({}); setConfirmation({ item, action, ruleId }) }}>{labels[action]}</button>
   return <section className="rounded-xl border border-slate-200 bg-white p-4 text-slate-900">
     <h1 className="text-xl font-semibold">{queue === 'auto' ? 'Auto-approved' : 'Flagged for review'}</h1>
+    {queue !== 'auto' && <div className="my-4"><AdminReputationReviews token={token} /></div>}
+    {queue !== 'auto' && <AdminNoShowReviews token={token} />}
     <p className="mt-1 text-sm text-slate-600">Checks assess consistency and evidence, not authenticity. Review reasons and notes stay with PESO.</p>
     <div className="my-4 flex flex-wrap gap-3">
       {queue !== 'auto' && <label>Account status<select className={`${control} block`} value={filters.waitlisted} onChange={event => changeFilter('waitlisted', event.target.value)}><option value="">All accounts</option><option value="true">Waitlisted</option></select></label>}
@@ -86,7 +89,7 @@ export default function AdminDocumentVerification({ token, queue = 'flagged' }) 
     </div>
     <p className="text-sm">{data.total} documents. Dates use Asia/Manila.</p>
     {loading && <p role="status">Loading review queue…</p>}
-    {error && !confirmation && <p role="alert" className="text-rose-700">{error}</p>}
+    {error && !confirmation && <p role="alert" aria-label="Document review error" className="text-rose-700">{error}</p>}
     {notice && <p role="status" className="text-green-800">{notice}</p>}
     {!loading && !error && !data.items.length && <p className="my-4">No documents match these filters.</p>}
     {data.items.map(item => <article key={`${item.role}:${item.accountId}:${item.docKey}`} className={`my-3 rounded-xl border p-4 ${queue !== 'auto' && item.overdue ? 'border-amber-400 bg-amber-50' : 'border-slate-200 bg-white'}`}>
