@@ -5,9 +5,10 @@ import jwt from 'jsonwebtoken'
 import { startTestDb, stopTestDb, clearDb, signupUploadRequest, pdfBuffer, validNsrpAnswers } from './helpers.js'
 import { drainVerificationJobs } from '../../services/verificationJobs.js'
 import { documentReviewMessage } from '../../services/applicantReview.js'
+import { loadDocumentFile } from '../../utils/documentFiles.js'
 vi.mock('../../mailer.js', async original => ({ ...await original(), sendEmail: vi.fn(async () => ({ delivered: true })), initMailer: vi.fn() }))
 const { app, nsrpAutomation } = await import('../../index.js')
-const { Applicant, Admin } = await import('../../models/collections.js')
+const { Applicant, Admin, DocumentFile } = await import('../../models/collections.js')
 let account, token
 beforeAll(startTestDb, 180000)
 afterAll(stopTestDb)
@@ -93,10 +94,45 @@ describe('applicant review explanations and pending corrections', () => {
   it('keeps approved documents locked and enforces the five-upload cap for pending documents', async () => {
     await Applicant.updateOne({ _id: account._id }, { $set: { 'verificationDocuments.birthCertificate.versions.0.status': 'approved', 'verificationDocuments.validId1.uploads': 5 } })
     await own(request(app).post('/api/profile/verification-documents/birthCertificate')).field('verificationDetails', JSON.stringify({ copyType: 'PSA copy on security paper' })).attach('document', pdfBuffer(), { filename: 'locked.pdf', contentType: 'application/pdf' }).expect(409)
-    await own(request(app).post('/api/profile/verification-documents/validId1')).field('idType', 'SSS').field('verificationDetails', JSON.stringify({ number: '1234567890' })).attach('document', pdfBuffer(), { filename: 'capped.pdf', contentType: 'application/pdf' }).expect(429)
+    await own(request(app).post('/api/profile/verification-documents/validId1')).field('idType', 'SSS').field('verificationDetails', JSON.stringify({ number: '1234567890' })).attach('document', pdfBuffer(), { filename: 'capped.pdf', contentType: 'application/pdf' }).attach('documentBack', pdfBuffer(), { filename: 'capped-back.pdf', contentType: 'application/pdf' }).expect(429)
     const result = await own(request(app).get('/api/profile/review-status')).expect(200)
     expect(result.body.documents.some(doc => doc.docKey === 'birthCertificate')).toBe(false)
     expect(result.body.documents.find(doc => doc.docKey === 'validId1')).toMatchObject({ canUpdate: false, uploadsRemaining: 0 })
+  })
+  it.each(['validId1', 'validId2'])('stores both sides of %s in one version and exposes front/back views', async docKey => {
+    await nsrpAutomation.updateSettings({ imageChecks: false }, 'test-admin')
+    const before = await Applicant.findById(account._id)
+    const previousUploads = before.verificationDocuments?.[docKey]?.uploads || 0
+    const front = pdfBuffer(1100), back = pdfBuffer(1200)
+    const response = await own(request(app).post(`/api/profile/verification-documents/${docKey}`))
+      .field('idType', 'SSS').field('verificationDetails', JSON.stringify({ number: '1234567890' }))
+      .attach('document', front, { filename: 'front.pdf', contentType: 'application/pdf' })
+      .attach('documentBack', back, { filename: 'back.pdf', contentType: 'application/pdf' }).expect(200)
+    await drainVerificationJobs()
+    const saved = await Applicant.findById(account._id)
+    const slot = saved.verificationDocuments[docKey]
+    expect(slot.uploads).toBe(previousUploads + 1)
+    const latest = slot.versions.at(-1)
+    expect(latest.originalName).toBe('front.pdf')
+    expect(latest.back.originalName).toBe('back.pdf')
+    expect((await loadDocumentFile(account._id, docKey, response.body.version, 'front')).data).toEqual(front)
+    expect((await loadDocumentFile(account._id, docKey, response.body.version, 'back')).data).toEqual(back)
+    const documents = await own(request(app).get(`/api/applicants/${account._id}/verification-documents`)).expect(200)
+    const uploaded = documents.body.documents.find(doc => doc.docKey === docKey)
+    expect(uploaded.latest.url).toBeTruthy()
+    expect(uploaded.latest.back.url).toBeTruthy()
+  })
+  it('rejects missing or invalid ID backs without consuming uploads or storing files', async () => {
+    const count = await DocumentFile.countDocuments()
+    const uploads = account.verificationDocuments.validId1.uploads
+    const missing = await own(request(app).post('/api/profile/verification-documents/validId1'))
+      .field('idType', 'SSS').attach('document', pdfBuffer(), { filename: 'front.pdf', contentType: 'application/pdf' }).expect(400)
+    expect(missing.body.error).toMatch(/front and back/)
+    await own(request(app).post('/api/profile/verification-documents/validId1'))
+      .field('idType', 'SSS').attach('document', pdfBuffer(), { filename: 'front.pdf', contentType: 'application/pdf' })
+      .attach('documentBack', Buffer.from('invalid image'), { filename: 'back.png', contentType: 'image/png' }).expect(400)
+    expect((await Applicant.findById(account._id)).verificationDocuments.validId1.uploads).toBe(uploads)
+    expect(await DocumentFile.countDocuments()).toBe(count)
   })
   it('keeps review reasons owner-scoped and accessible to waitlisted applicants without enabling employment access', async () => {
     await request(app).get('/api/profile/review-status').expect(403)
@@ -106,7 +142,26 @@ describe('applicant review explanations and pending corrections', () => {
     expect((await own(request(app).get('/api/profile/review-status?email=another@example.test')).expect(200)).body.status).toBe('waitlisted')
     expect((await own(request(app).get('/api/jobs')).expect(403)).body.code).toBe('APPLICANT_WAITLISTED')
   })
+  it('allows replacing an unrelated pending document while another document has exhausted correction chances', async () => {
+    await Applicant.updateOne({ _id: account._id }, { $set: { verificationStatus: 'waitlisted', consistencyState: { token: 'id-only-mismatch', status: 'finished', used: { validId1: 5 }, issues: [{ docKey: 'validId1', reasonCode: 'cross_check_mismatch', fieldGroup: 'ID number' }] } } })
+    const documents = await own(request(app).get(`/api/applicants/${account._id}/verification-documents`)).expect(200)
+    expect(documents.body.review.documents.find(doc => doc.docKey === 'birthCertificate').canUpdate).toBe(true)
+    expect(documents.body.review.documents.find(doc => doc.docKey === 'validId1').canUpdate).toBe(false)
+    const uploads = account.verificationDocuments.birthCertificate.uploads
+    await own(request(app).post('/api/profile/verification-documents/birthCertificate'))
+      .field('verificationDetails', JSON.stringify({ copyType: 'PSA copy on security paper' }))
+      .attach('document', pdfBuffer(), { filename: 'clearer.pdf', contentType: 'application/pdf' }).expect(200)
+    const saved = await Applicant.findById(account._id).select('+consistencyState')
+    expect(saved.verificationDocuments.birthCertificate.uploads).toBe(uploads + 1)
+    expect(saved.consistencyState.used.validId1).toBe(5)
+  })
   it.each(['Could not be read', 'Not independent', 'Quality warning', 'Retake requested'])('gives actionable clearer-copy guidance for %s', reason => {
     expect(documentReviewMessage('validId1', { status: 'pending', reviewReasons: [reason] })).toMatch(/clearer copy/)
+  })
+  it('explains an ID-number mismatch without exposing private extracted values', () => {
+    const message = documentReviewMessage('validId1', { status: 'pending', reviewReasons: ['Flagged'], findings: [{ ruleId: 'cross_id_nsrp_idNumber', severity: 'critical', status: 'open' }] })
+    expect(message).toMatch(/ID number.*does not match/)
+    expect(message).toMatch(/Check the ID type and number/)
+    expect(message).not.toContain('cross_id_nsrp_idNumber')
   })
 })

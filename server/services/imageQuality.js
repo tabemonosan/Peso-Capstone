@@ -21,7 +21,11 @@ export async function inspectDocument(file) {
     const warnings = []
     if (mean < IMAGE_LIMITS.darkMean) warnings.push('dark')
     if (mean > IMAGE_LIMITS.glareMean) warnings.push('glare')
-    const edgePixels = await image.clone().resize({ width: 600 }).greyscale().convolve({ width: 3, height: 3, kernel: [0, 1, 0, 1, -4, 1, 0, 1, 0] }).raw().toBuffer({ resolveWithObject: true })
+    // Convolving RGBA also convolves alpha. A zero-sum edge kernel makes
+    // constant alpha zero, erasing visible edges in otherwise clear PNGs.
+    // Materialize opaque grayscale pixels before calculating edge contrast.
+    const grayscale = await image.clone().flatten({ background: '#ffffff' }).removeAlpha().resize({ width: 600 }).greyscale().raw().toBuffer({ resolveWithObject: true })
+    const edgePixels = await sharp(grayscale.data, { raw: grayscale.info }).convolve({ width: 3, height: 3, kernel: [0, 1, 0, 1, -4, 1, 0, 1, 0], scale: 1 }).raw().toBuffer({ resolveWithObject: true })
     const edges = await sharp(edgePixels.data, { raw: edgePixels.info }).stats()
     if (edges.channels[0].stdev < IMAGE_LIMITS.blurDeviation) warnings.push('blur')
     if (info.width / info.height > 5 || info.height / info.width > 5) warnings.push('crop')

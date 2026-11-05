@@ -42,6 +42,27 @@ it('does not send an unflagged applicant document to admin review for random sam
  expect((await saved(user)).status).toBe('approved')
  expect((await automation.decisions().findOne({ accountId: user._id })).sampleDraw).toBeUndefined()
 })
+it('keeps an ID mismatch on the ID without copying it onto the birth certificate', async () => {
+ const mismatch = { ruleId: 'cross_id_nsrp_idNumber', severity: 'critical', fieldGroup: 'ID number', evidence: 'independent', status: 'open', approvalBlocking: true }
+ const user = await account({}, 'birthCertificate', { verificationDocuments: {
+  // Include contamination from an older engine decision on the birth record.
+  birthCertificate: { versions: [version({ findings: [mismatch] })] },
+  validId1: { versions: [version({ findings: [mismatch] })] },
+ } })
+ await run(user)
+ expect((await saved(user)).status).toBe('approved')
+ expect((await saved(user)).findings).toEqual([])
+ await run(user, 'validId1')
+ expect(await saved(user, 'validId1')).toMatchObject({ status: 'pending', reviewReasons: ['Flagged'] })
+})
+it('retains account-wide duplicate identity guards when checking another document', async () => {
+ const duplicate = { ruleId: 'duplicate_sss', severity: 'critical', fieldGroup: 'identifiers', status: 'open' }
+ const user = await account({}, 'birthCertificate', { verificationDocuments: {
+  birthCertificate: { versions: [version()] }, validId1: { versions: [version({ findings: [duplicate] })] },
+ } })
+ await run(user)
+ expect(await saved(user)).toMatchObject({ status: 'pending', reviewReasons: ['Flagged'] })
+})
 it('enforces the shared rolling IP/mobile quota', async () => {
  const users = await Promise.all(Array.from({ length: 6 }, () => account()))
  await Promise.all(users.map(user => run(user)))

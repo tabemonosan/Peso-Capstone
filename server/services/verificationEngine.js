@@ -10,6 +10,15 @@ import { loadDocumentFile } from '../utils/documentFiles.js'
 import { clearAuthorization } from './documentUpload.js'
 const advisory = new Set(['education_age', 'work_start_age', 'experience_age', 'married_under_18', 'location_pair', 'employer_location_pair'])
 const safeFinding = f => ({ ruleId: String(f.ruleId || f.code || 'provider_inconclusive').slice(0, 100), severity: ['info', 'warning', 'critical'].includes(f.severity) ? f.severity : 'info', fieldGroup: String(f.fieldGroup || 'document').slice(0, 60), evidence: f.evidence === 'independent' ? 'independent' : 'self-declared', status: f.status === 'dismissed' ? 'dismissed' : 'open', approvalBlocking: advisory.has(f.ruleId || f.code) ? false : f.approvalBlocking !== false })
+function findingsForDocument(account, docKey, document) {
+  // Older decisions copied sibling findings into this document. Discard those
+  // comparison rules as well as avoiding new copies on subsequent checks.
+  const siblingPrefix = docKey === 'birthCertificate' ? 'cross_id_' : docKey.startsWith('validId') ? 'cross_birth_' : null
+  const own = (document.findings || []).filter(f => !siblingPrefix || !String(f.ruleId || f.code || '').startsWith(siblingPrefix))
+  // Duplicate identity claims remain an account-wide approval guard.
+  const duplicates = Object.values(account.verificationDocuments || {}).flatMap(slot => slot.versions?.at(-1)?.findings || []).filter(f => /duplicate|cross_account/.test(f.ruleId || f.code || ''))
+  return [...own, ...duplicates]
+}
 export function createVerificationEngine({ Applicant, Employer, EmployerRequest, automation, notify, notifyAdmins, recomputeApplicant, random = () => crypto.randomInt(1000000) / 1000000, providers, beforeApproval } = {}) {
   const decisions = () => automation.decisions()
   async function process({ role, accountId, docKey, ip, checkToken }) {
@@ -39,9 +48,9 @@ export function createVerificationEngine({ Applicant, Employer, EmployerRequest,
       const nsrp = account.profile?.nsrp || { firstName: account.profile?.firstName, surname: account.profile?.lastName, dob: account.profile?.dob }
       const oldDecision = await decisions().findOne({ _id: decisionKey })
       const report = nsrpDocument ? oldDecision.report || (role === 'Applicant' ? checkNsrp(nsrp) : checkNsrp2(record)) : null
-      const currentDocument = { ...document, quality: nsrpDocument && document.sourceType === 'generated' ? { passed: true, warnings: [] } : document.quality }
+      const currentDocument = { ...document, ...(role === 'Applicant' ? { findings: findingsForDocument(account, docKey, document) } : {}), quality: nsrpDocument && document.sourceType === 'generated' ? { passed: true, warnings: [] } : document.quality }
       const allVersions = role === 'Applicant' ? Object.values(account.verificationDocuments || {}).map(slot => slot.versions?.at(-1)).filter(Boolean) : [document]
-      let findings = [...allVersions.flatMap(v => v.findings || []), ...(report?.findings || [])].map(safeFinding)
+      let findings = [...(role === 'Applicant' ? findingsForDocument(account, docKey, document) : allVersions.flatMap(v => v.findings || [])), ...(report?.findings || [])].map(safeFinding)
       let comparisons = [...(document.imageComparisons || [])], verifiedQr = false
       if (docKey === 'nsrpForm') comparisons = allVersions.flatMap(v => v.imageComparisons || [])
       let selectedProvider = new LocalChecksProvider(), providerResult = await selectedProvider.verify(currentDocument, { nsrp })
@@ -93,7 +102,8 @@ export function createVerificationEngine({ Applicant, Employer, EmployerRequest,
           if (beforeApproval) await beforeApproval()
           const freshSettings = await automation.getSettings(), freshAccount = await accountModel.findById(accountId).select('+holdAutoApproval').lean()
           const freshVersions = role === 'Applicant' ? Object.values(freshAccount.verificationDocuments || {}).map(slot => slot.versions?.at(-1)).filter(Boolean) : allVersions
-          reason = decisionReason({ ...context, settings: freshSettings, account: { ...freshAccount, employerType: record.registrationDetails?.employerType }, findings: [...findings, ...freshVersions.flatMap(v => v.findings || []).map(safeFinding)], pendingExplanation: freshVersions.some(v => ['requested', 'submitted'].includes(v.explanation?.status)) })
+          const freshFindings = role === 'Applicant' ? findingsForDocument(freshAccount, docKey, freshAccount.verificationDocuments?.[docKey]?.versions?.at(-1) || {}) : freshVersions.flatMap(v => v.findings || [])
+          reason = decisionReason({ ...context, settings: freshSettings, account: { ...freshAccount, employerType: record.registrationDetails?.employerType }, findings: [...findings, ...freshFindings.map(safeFinding)], pendingExplanation: freshVersions.some(v => ['requested', 'submitted'].includes(v.explanation?.status)) })
           if (role === 'Applicant' && (account.verificationDocuments?.nsrpForm?.versions?.length || 0) !== (freshAccount.verificationDocuments?.nsrpForm?.versions?.length || 0)) reason = 'Registration reference changed'
         }
         if (!reason) {
@@ -102,6 +112,7 @@ export function createVerificationEngine({ Applicant, Employer, EmployerRequest,
           if (role === 'Applicant' && account.verificationDocuments?.nsrpForm?.versions?.length) match['verificationDocuments.nsrpForm.versions'] = { $size: account.verificationDocuments.nsrpForm.versions.length }
           if (checkToken) Object.assign(match, { 'consistencyState.token': checkToken, 'consistencyState.status': 'checking' })
           const set = { [`${base}.status`]: 'approved', [`${base}.autoApproved`]: true, [`${base}.approvedBy`]: 'system', [`${base}.reviewedBy`]: REVIEWER_LABELS.system, [`${base}.reviewedAt`]: at, [`${base}.provider`]: providerResult.provider, [`${base}.assurance`]: providerResult.assurance, [`${base}.rulesVersion`]: DECISION_RULES_VERSION, [`${base}.autoApprovalSummary`]: [{ ruleId: settings.minimumEvidence === 'none' ? 'typed-only-override' : verifiedQr ? 'verified-qr' : 'eligible-evidence', level: 'clear' }], [`${base}.reviewReasons`]: [] }
+          if (role === 'Applicant') set[`${base}.findings`] = findings
           if (role === 'Employer') set['requirementsFile.status'] = 'approved'
           const historyPath = role === 'Applicant' ? `verificationDocuments.${docKey}.history` : 'reviewHistory'
           const event = role === 'Applicant' ? { action: 'auto-approved', by: REVIEWER_LABELS.system, at, reason: DECISION_RULES_VERSION } : { decision: 'approved', by: REVIEWER_LABELS.system, at, reason: 'Document auto-approved: ' + DECISION_RULES_VERSION }

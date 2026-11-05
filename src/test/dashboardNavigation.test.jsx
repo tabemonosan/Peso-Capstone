@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../App'
 vi.mock('recharts', () => {
@@ -10,9 +10,14 @@ afterEach(() => vi.unstubAllGlobals())
 const dashboard = (role) => ({ role, stats: { applicants: 4, employers: 2, jobs: { pending: 3, approved: 2, declined: 1 }, documentsAwaitingReview: 1, hires: 2, referrals: { total: 3 }, applications: 5, verificationStatus: 'approved' }, charts: { applications: [], registrations: [] }, activity: [] })
 function mockRole(role, overrides = {}) {
   const user = { id: 'user-1', role, email: 'user@example.com', emailVerified: true, verificationStatus: 'approved', registration: { complete: true }, companyName: 'Example Works', profile: {}, ...overrides }
-  vi.stubGlobal('fetch', vi.fn(async (url) => {
+  vi.stubGlobal('fetch', vi.fn(async (url, options) => {
     let data = []
-    if (url.endsWith('/api/login')) data = { token: 'token', user }
+    if (url.endsWith('/api/profile/page-guides')) {
+      const body = JSON.parse(options.body)
+      user.pageGuides = { ...user.pageGuides, ...(body.dismissAll ? { dismissedAll: true } : { seenPages: [...new Set([...(user.pageGuides?.seenPages || []), body.page])] }) }
+      data = { pageGuides: user.pageGuides }
+    }
+    else if (url.endsWith('/api/login')) data = { token: 'token', user }
     else if (url.endsWith('/api/profile')) data = user
     else if (url.endsWith('/api/profile/review-status')) data = overrides.reviewDetails || { status: user.verificationStatus, checking: false, message: 'Your registration is awaiting PESO review.', documents: [] }
     else if (url.includes('/verification-documents')) data = overrides.documentInfo || { verificationStatus: user.verificationStatus, documents: [] }
@@ -25,6 +30,23 @@ function mockRole(role, overrides = {}) {
   }))
 }
 describe('one dashboard per role', () => {
+  it('shows first-visit guides on each page and remembers dismissals after reload', async () => {
+    mockRole('Applicant', { pageGuides: { seenPages: [], dismissedAll: false } })
+    localStorage.setItem('peso-token', 'token')
+    localStorage.setItem('peso-active-role', 'Applicant')
+    const app = render(<App />)
+    expect(await screen.findByRole('complementary', { name: 'Welcome to your workspace' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Got it' }))
+    await waitFor(() => expect(screen.queryByText('Quick guide')).not.toBeInTheDocument())
+    const nav = screen.getByRole('navigation', { name: 'Applicant navigation' })
+    fireEvent.click(within(nav).getByRole('button', { name: 'My reputation', exact: true }))
+    expect(await screen.findByRole('complementary', { name: 'Understand your reputation' })).toBeInTheDocument()
+    app.unmount()
+    render(<App />)
+    const restoredNav = await screen.findByRole('navigation', { name: 'Applicant navigation' })
+    fireEvent.click(within(restoredNav).getByRole('button', { name: 'Home', exact: true }))
+    expect(screen.queryByText('Quick guide')).not.toBeInTheDocument()
+  })
   it('shows why an applicant is under review on Home and opens pending NSRP corrections directly', async () => {
     mockRole('Applicant', { verificationStatus: 'under_review', reviewDetails: { status: 'under_review', documents: [{ docKey: 'validId1', label: 'Valid ID #1', reason: 'Your ID is waiting for comparison with your NSRP details.', canUpdate: true, uploadsRemaining: 4 }] }, documentInfo: { verificationStatus: 'under_review', nsrpData: { firstName: 'Sample', surname: 'Example' }, documents: [{ docKey: 'nsrpForm', label: 'NSRP Registration Form', status: 'pending', referenceOnly: true, locked: false, sourceType: 'generated', uploadsRemaining: 4, latest: { version: 1 } }] } })
     localStorage.setItem('peso-token', 'token')
@@ -34,7 +56,7 @@ describe('one dashboard per role', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Review and update documents' }))
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByText('Registration reference')).toBeInTheDocument()
-    expect(within(dialog).getByText(/No separate NSRP approval is needed/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/Registration reference for your birth certificate and ID checks/)).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: 'Update NSRP' })).toBeEnabled()
   })
 

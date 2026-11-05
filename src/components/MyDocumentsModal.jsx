@@ -8,12 +8,22 @@ import { NSRP_SOURCE_LABELS } from "../../shared/verificationDocs.js"
 import DeclaredDocumentFields from './DeclaredDocumentFields'
 import DocumentExplanationForm from './DocumentExplanationForm'
 import ConsistencyWaitlistCard from './ConsistencyWaitlistCard'
+import PageGuide from './PageGuide'
+
+function DocumentFilePicker({ label, file, accept, disabled, onChange }) {
+  return <label className="flex min-h-11 min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-lg border border-slate-300 bg-white px-3 py-2 focus-within:ring-2 focus-within:ring-blue-500">
+    <input type="file" aria-label={label} accept={accept} disabled={disabled} onChange={event => onChange(event.target.files?.[0] || null)} className="sr-only" />
+    <span className="shrink-0 text-sm font-semibold text-blue-700">Choose file</span>
+    <span title={file?.name} className="min-w-0 truncate text-sm text-slate-500">{file?.name || 'No file selected'}</span>
+  </label>
+}
 
 // Applicant-facing documents modal: one card per requirement with a status
 // badge, file details, View (signed expiring URL), and Replace/Upload for
 // documents that still need attention. Approved documents are locked.
-export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
+export default function MyDocumentsModal({ info, token, onClose, onUpdated, guideState, onGuidesSaved }) {
   const [pendingFile, setPendingFile] = useState({})
+  const [pendingBackFile, setPendingBackFile] = useState({})
   const [pendingIdType, setPendingIdType] = useState({})
   const [declared, setDeclared] = useState({})
   const [uploading, setUploading] = useState(null)
@@ -38,26 +48,31 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
     window.open(`${API_URL}${url}`, "_blank")
   }
 
-  const pickFile = (docKey, file) => {
+  const pickFile = (docKey, file, side = 'front') => {
     setError("")
-    if (!file) return setPendingFile((current) => ({ ...current, [docKey]: null }))
+    const setFile = side === 'back' ? setPendingBackFile : setPendingFile
+    setFile(current => ({ ...current, [docKey]: null }))
+    if (!file) return
     if (docKey === 'nsrpForm' && (file.type !== 'application/pdf' || !/\.pdf$/i.test(file.name))) return setError('The NSRP form must be a PDF file.')
     const acceptedTypes = ["image/jpeg", "image/png", "application/pdf"]
     if (!acceptedTypes.includes(file.type)) return setError("Only JPG, PNG, or PDF files are accepted.")
     if (file.size > 5 * 1024 * 1024) return setError(`"${file.name}" is too large. Maximum is 5 MB.`)
-    setPendingFile((current) => ({ ...current, [docKey]: file }))
+    setFile((current) => ({ ...current, [docKey]: file }))
   }
 
   const replaceDoc = async (docKey) => {
     const file = pendingFile[docKey]
     if (!file) return
+    if (docKey.startsWith('validId') && !pendingBackFile[docKey]) return setError('Choose both the front and back of your ID.')
     setUploading(docKey)
     setError("")
     try {
       const payload = new FormData()
       payload.append("document", file)
+      if (docKey.startsWith('validId')) payload.append('documentBack', pendingBackFile[docKey])
       payload.append('verificationDetails', JSON.stringify(declared[docKey] || {}))
-      if (docKey.startsWith("validId") && pendingIdType[docKey]) payload.append("idType", pendingIdType[docKey])
+      const idType = pendingIdType[docKey] || documents.find(doc => doc.docKey === docKey)?.idType
+      if (docKey.startsWith("validId") && idType) payload.append("idType", idType)
       const response = await fetch(`${API_URL}/api/profile/verification-documents/${docKey}`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
@@ -66,6 +81,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
       const data = await response.json().catch(() => null)
       if (!response.ok || data?.error) throw new Error(data?.error || "Upload failed")
       setPendingFile((current) => ({ ...current, [docKey]: null }))
+      setPendingBackFile((current) => ({ ...current, [docKey]: null }))
       await onUpdated?.()
     } catch (err) {
       setError(err?.message || "Upload failed")
@@ -135,9 +151,8 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 id="my-documents-title" className="text-xl font-bold">Verification documents</h2>
-          <p className="mt-1 text-sm font-semibold text-cyan-800">Submitted to PESO</p>
-          <p id="my-documents-description" className="mt-1 text-sm text-slate-600">
-            Your NSRP supplies the registration reference for birth certificate and ID checks and needs no separate approval. These documents are not shared with employers. Documents that pass automatic verification need no admin review. Only flagged documents need PESO review or correction.
+          <p id="my-documents-description" className="mt-2 text-sm text-slate-600">
+            Upload clear copies that match your NSRP. Only flagged documents need PESO review.
           </p>
           {info.verificationStatus && (
             <p className="mt-1 text-sm text-slate-600">
@@ -145,7 +160,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
             </p>
           )}
         </div>
-        <button type="button" onClick={onClose} aria-label="Close verification documents" className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold">
+        <button type="button" onClick={onClose} aria-label="Close verification documents" className="shrink-0 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold">
           Close
         </button>
       </div>
@@ -157,6 +172,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
       {success && <p role="status" className="mt-3 text-sm text-green-700">{success}</p>}
 
       <ConsistencyWaitlistCard state={info.consistency} />
+      {guideState && <div className="mt-4"><PageGuide role="Applicant" view="documents" state={guideState} token={token} onSaved={onGuidesSaved} /></div>}
       <ul className="mt-5 space-y-3">
         {documents.map((doc) => {
           const relevant = (info.consistency?.issues || []).filter(issue => issue.chancesLeft !== null && (issue.document === doc.docKey || doc.docKey === 'nsrpForm'))
@@ -164,11 +180,13 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
           const review = info.review?.documents?.find(item => item.docKey === doc.docKey)
           const needsReview = flagged || review?.needsReview === true || ['rejected', 'needs_resubmission'].includes(doc.status)
           const hasChances = !flagged || relevant.every(issue => issue.chancesLeft > 0)
-          const pendingEditable = info.verificationStatus === 'under_review' && (doc.status === 'pending' || doc.referenceOnly)
+          const staffReviewOnly = (info.consistency?.issues || []).some(issue => issue.document === doc.docKey && issue.chancesLeft === null)
+          const pendingEditable = ['under_review', 'waitlisted'].includes(info.verificationStatus) && !staffReviewOnly && (doc.status === 'pending' || doc.referenceOnly)
           const locked = (doc.referenceOnly ? doc.locked : doc.status === "approved") && !flagged
           const canReplace = !locked && (["rejected", "needs_resubmission", "missing"].includes(doc.status) || flagged || pendingEditable) && doc.uploadsRemaining !== 0 && hasChances
+          const idType = pendingIdType[doc.docKey] ?? doc.idType ?? ''
           return (
-            <li key={doc.docKey} className="rounded-xl bg-slate-50 p-3 text-sm">
+            <li key={doc.docKey} className="min-w-0 rounded-xl border border-slate-200 bg-white p-4 text-sm sm:p-5">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-semibold text-slate-900">
                   {doc.label}{doc.idType ? ` — ${doc.idType}` : ""}
@@ -176,7 +194,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
                 {chip(doc.referenceOnly && doc.latest ? 'Registration reference' : doc.status === 'pending' && !needsReview ? 'checking' : doc.status)}
                 {doc.required && <span className="text-xs text-slate-500">required</span>}
                 {!doc.required && <span className="text-xs text-slate-500">optional</span>}
-                <p className="w-full text-xs text-slate-600">{{ nsrpForm: 'Your NSRP is the reference used to check your birth certificate and IDs. No separate NSRP approval is needed.', birthCertificate: 'Compared with your NSRP to verify your identity.', validId1: 'Compared with your NSRP to verify your identity.', validId2: 'Optional supporting identification.' }[doc.docKey]}</p>
+                {doc.docKey === 'nsrpForm' && <p className="w-full text-xs text-slate-600">Registration reference for your birth certificate and ID checks.</p>}
                 {doc.docKey === "nsrpForm" && doc.sourceType && <span className="text-xs text-slate-500">{NSRP_SOURCE_LABELS[doc.sourceType]}</span>}
                 {doc.docKey.startsWith("validId") ? (
                   (doc.latest?.url || doc.latest?.back?.url) && (
@@ -203,7 +221,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
               </div>
 
               {doc.latest ? (
-                <p className="mt-1 text-xs text-slate-500">
+                <p className="mt-2 break-words text-xs text-slate-500">
                   v{doc.latest.version} • {doc.latest.originalName} • {doc.latest.size ? `${Math.ceil(doc.latest.size / 1024)} KB` : ""}
                   {doc.latest.uploadedAt ? ` • uploaded ${new Date(doc.latest.uploadedAt).toLocaleDateString()}` : ""}
                 </p>
@@ -216,10 +234,9 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
                   PESO feedback: {doc.latest.reviewReason}
                 </p>
               )}
-              {!doc.referenceOnly && doc.status === 'pending' && <p className="mt-2 text-xs text-amber-800">{needsReview ? 'Flagged for PESO review. You can correct your NSRP, submit an updated copy, or explain a difference.' : 'Automatic verification is in progress. Admin review is only needed if a check flags this document.'}</p>}
-              {info.review?.documents?.find(item => item.docKey === doc.docKey)?.reason && <p className="mt-2 text-xs text-slate-700">{info.review.documents.find(item => item.docKey === doc.docKey).reason}</p>}
+              {!doc.referenceOnly && (needsReview || review?.reason || doc.status === 'pending') && <p className={`mt-3 rounded-lg px-3 py-2 text-xs leading-relaxed ${needsReview ? 'bg-amber-50 text-amber-900' : 'bg-slate-50 text-slate-600'}`}>{review?.reason || (needsReview ? 'PESO will review this document. You can upload a clearer copy or explain a difference.' : 'Your document is being checked.')}</p>}
               {needsReview && ['nsrpForm', 'birthCertificate', 'validId1', 'validId2'].includes(doc.docKey) && doc.latest && <button type="button" onClick={() => setExplanationDoc(doc.docKey)} className="mt-2 rounded border border-slate-300 bg-white px-3 py-1 text-xs text-cyan-800">Explain a difference</button>}
-              {locked && <p className="mt-2 text-xs text-green-700">{doc.referenceOnly ? 'Your account is verified. Request a correction before changing the NSRP reference; identity documents will need to be checked again.' : 'Verified. No admin review is needed. You can view this document or request a correction if information changes.'}</p>}
+              {locked && <p className="mt-2 text-xs text-green-700">{doc.referenceOnly ? 'Request a correction to update your NSRP. Your identity documents will be checked again.' : 'Request a correction if your information changes.'}</p>}
               {doc.correctionRequest && <p className="mt-2 rounded-lg border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">Correction requested: {doc.correctionRequest.reason}. Waiting for PESO review.</p>}
               {locked && !doc.correctionRequest && <button type="button" onClick={() => { setCorrectionDoc(doc.docKey); setCorrectionReason(''); setError(''); setSuccess('') }} className="mt-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold">Request correction</button>}
               {correctionDoc === doc.docKey && <form onSubmit={requestCorrection} className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
@@ -234,63 +251,75 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated }) {
               {['missing', 'rejected'].includes(doc.status) && doc.uploadsRemaining === 0 && <p className="mt-2 text-xs text-rose-700">Upload limit reached. Contact PESO for help.</p>}
 
               {canReplace && (
-                <div className="mt-3 flex flex-wrap items-center gap-2">
+                <div className="mt-4 space-y-4 border-t border-slate-100 pt-4">
                   {doc.docKey === "nsrpForm" ? (
-                    <>
+                    <div className="space-y-3">
                       <button type="button" onClick={() => setEditingNsrp(true)} className="rounded-xl bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-white">
                         {info.nsrpData ? "Update NSRP" : "Fill out online instead"}
                       </button>
                       {doc.sourceType !== "generated" && (
-                        <>
-                          <input
-                            type="file"
-                            aria-label="Replace NSRP file"
-                            accept="application/pdf,.pdf"
-                            onChange={(e) => pickFile(doc.docKey, e.target.files?.[0] || null)}
-                            className="text-xs text-slate-700 file:mr-2 file:rounded-lg file:border-0 file:bg-slate-200 file:px-2 file:py-1 file:text-xs file:font-semibold file:text-slate-900"
-                          />
+                        <div className="space-y-2">
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                          <DocumentFilePicker label="Replace NSRP file" file={pendingFile[doc.docKey]} accept="application/pdf,.pdf" disabled={uploading === doc.docKey} onChange={file => pickFile(doc.docKey, file)} />
                           <button
                             type="button"
                             disabled={!pendingFile[doc.docKey] || uploading === doc.docKey}
                             onClick={() => replaceDoc(doc.docKey)}
-                            className="rounded-xl border border-cyan-700 px-3 py-1.5 text-xs font-semibold text-cyan-800 disabled:cursor-not-allowed disabled:opacity-40"
+                            className="h-11 shrink-0 rounded-lg border border-cyan-700 px-4 text-sm font-semibold text-cyan-800 disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             {uploading === doc.docKey ? "Uploading…" : doc.status === 'rejected' ? 'Resubmit file' : 'Upload file'}
                           </button>
-                          <span className="text-xs text-slate-500">{doc.uploadsRemaining} of 5 uploads left</span>
-                        </>
+                          </div>
+                          <p className="text-xs text-slate-500">PDF up to 5 MB · {doc.uploadsRemaining} of 5 uploads left</p>
+                        </div>
                       )}
-                    </>
+                    </div>
                   ) : (
                     <>
-                  {doc.docKey !== 'nsrpForm' && <DeclaredDocumentFields docKey={doc.docKey} idType={pendingIdType[doc.docKey] || doc.idType} value={declared[doc.docKey]} onChange={value => setDeclared(current => ({ ...current, [doc.docKey]: value }))} />}
+                  <div className="grid gap-3 sm:grid-cols-2">
                   {doc.docKey.startsWith("validId") && (
+                    <label className="block min-w-0 text-sm font-medium text-slate-700 sm:col-span-2">ID type
                     <select
-                      value={pendingIdType[doc.docKey] || ""}
-                      onChange={(e) => setPendingIdType((current) => ({ ...current, [doc.docKey]: e.target.value }))}
-                      className="rounded-xl border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900"
+                      value={idType}
+                      disabled={uploading === doc.docKey}
+                      onChange={(e) => { setPendingIdType((current) => ({ ...current, [doc.docKey]: e.target.value })); setDeclared(current => ({ ...current, [doc.docKey]: {} })) }}
+                      className="shared-form-control mt-1 block h-11 min-w-0 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
                     >
                       <option value="">ID type…</option>
                       {ID_TYPE_OPTIONS.map((option) => (
                         <option key={option} value={option}>{option}</option>
                       ))}
                     </select>
+                    </label>
                   )}
-                  <input
-                    type="file"
-                    accept="image/jpeg,image/png,application/pdf"
-                    onChange={(e) => pickFile(doc.docKey, e.target.files?.[0] || null)}
-                    className="text-xs text-slate-700 file:mr-2 file:rounded-lg file:border-0 file:bg-slate-200 file:px-2 file:py-1 file:text-xs file:font-semibold file:text-slate-900"
-                  />
+                  <DeclaredDocumentFields className="contents" docKey={doc.docKey} idType={idType} value={declared[doc.docKey]} disabled={uploading === doc.docKey} onChange={value => setDeclared(current => ({ ...current, [doc.docKey]: value }))} />
+                  </div>
+                  <div className="space-y-2">
+                  {doc.docKey.startsWith('validId') ? (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="min-w-0 space-y-1.5">
+                        <p className="text-sm font-medium text-slate-700">Front of ID (required)</p>
+                        <DocumentFilePicker label={`Choose ${doc.label} front file`} file={pendingFile[doc.docKey]} accept="image/jpeg,image/png,application/pdf" disabled={uploading === doc.docKey} onChange={file => pickFile(doc.docKey, file)} />
+                      </div>
+                      <div className="min-w-0 space-y-1.5">
+                        <p className="text-sm font-medium text-slate-700">Back of ID (required)</p>
+                        <DocumentFilePicker label={`Choose ${doc.label} back file`} file={pendingBackFile[doc.docKey]} accept="image/jpeg,image/png,application/pdf" disabled={uploading === doc.docKey} onChange={file => pickFile(doc.docKey, file, 'back')} />
+                      </div>
+                    </div>
+                  ) : null}
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  {!doc.docKey.startsWith('validId') && <DocumentFilePicker label={`Choose ${doc.label} file`} file={pendingFile[doc.docKey]} accept="image/jpeg,image/png,application/pdf" disabled={uploading === doc.docKey} onChange={file => pickFile(doc.docKey, file)} />}
                   <button
                     type="button"
-                    disabled={!pendingFile[doc.docKey] || uploading === doc.docKey || (doc.docKey.startsWith("validId") && !pendingIdType[doc.docKey])}
+                    disabled={!pendingFile[doc.docKey] || uploading === doc.docKey || (doc.docKey.startsWith("validId") && (!idType || !pendingBackFile[doc.docKey]))}
                     onClick={() => replaceDoc(doc.docKey)}
-                    className="rounded-xl bg-cyan-500 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+                    className="h-11 shrink-0 rounded-lg bg-cyan-500 px-5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     {uploading === doc.docKey ? "Uploading…" : doc.status === 'rejected' ? "Resubmit" : "Upload"}
                   </button>
-                  <span className="text-xs text-slate-500">{doc.uploadsRemaining} of 5 uploads left</span>
+                  </div>
+                  <p className="text-xs text-slate-500">JPG, PNG or PDF up to 5 MB{doc.docKey.startsWith('validId') ? ' per side' : ''} · {doc.uploadsRemaining} of 5 uploads left</p>
+                  </div>
                     </>
                   )}
                 </div>

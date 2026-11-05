@@ -8,6 +8,7 @@ import { validateJobApplication, RESUME_MAX_BYTES } from '../shared/jobApplicati
 import { validateApplicationEmail } from './services/applicationEmail.js'
 import { matchLocation, getEmployerJobAddress as getEmployerAddress, validateApplicantLocation } from '../shared/phLocations.js'
 import 'dotenv/config'
+import { pageGuide } from '../shared/pageGuides.js'
 import express from 'express'
 import mongoose from 'mongoose'
 import bcrypt from 'bcryptjs'
@@ -1210,6 +1211,7 @@ app.post('/api/signup', applicantSignupUpload.fields([
     let user
     try {
       user = await createUserInRole('Applicant', {
+        pageGuides: { seenPages: [], dismissedAll: false },
         nsrpAutoEnabledAtCreation,
         sessionVersion: 1,
         email: email.trim(),
@@ -1267,7 +1269,7 @@ app.post('/api/signup', applicantSignupUpload.fields([
       metadata: { applicantId: String(user._id) },
     })
 
-    const safe = { id: String(user._id), email: user.email, role: 'Applicant', emailVerified: true, registration: registrationProgress(user, 'Applicant'), profile: user.profile, verificationDocuments: summarizeVerificationDocuments(user), attentionCount: attentionCount(user) }
+    const safe = { id: String(user._id), pageGuides: user.pageGuides, email: user.email, role: 'Applicant', emailVerified: true, registration: registrationProgress(user, 'Applicant'), profile: user.profile, verificationDocuments: summarizeVerificationDocuments(user), attentionCount: attentionCount(user) }
     const token = jwt.sign({ sub: String(user._id), sessionVersion: user.sessionVersion, email: user.email, role: 'Applicant' }, jwtSecret, { expiresIn: '7d' })
     res.json({ user: safe, token })
   } catch (err) {
@@ -1365,7 +1367,7 @@ app.post('/api/login', async (req, res) => {
 
     if (type === 'Employer') await hydrateEmployerAddress(user, requirements)
     const registration = ['Applicant', 'Employer'].includes(type) ? registrationProgress(user, type, { requirementsFile: requirements?.requirementsFile, requestLocation: requirements?.location }) : undefined
-    const safe = { id: String(user._id), email: user.email, role: type, emailVerified: ['Applicant', 'Employer'].includes(type) ? Boolean(user.emailVerified) : undefined, needsNameConfirmation: type === 'Applicant' ? Boolean(user.needsNameConfirmation) : undefined, registration, verificationDocuments: type === 'Applicant' ? summarizeVerificationDocuments(user) : undefined, attentionCount: type === 'Applicant' ? attentionCount(user) : undefined, establishmentAddress: type === 'Employer' ? user.establishmentAddress : undefined, companyName: type === 'Employer' ? (user.companyName || requirements?.companyName) : undefined, contactName: type === 'Employer' ? (user.contactName || requirements?.contactName) : undefined, phone: type === 'Employer' ? (user.phone || requirements?.phone) : undefined, profile: user.profile, verificationStatus: type === 'Employer' ? employerVerification.status : type === 'Applicant' ? (user.verificationStatus || 'approved') : undefined, verificationReason: type === 'Employer' ? employerVerification.reason : type === 'Applicant' ? user.verificationReason : undefined, approvalNoticePending: type === 'Employer' ? Boolean(user.approvalNoticePending) : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size, status: requirements.requirementsFile.status, sourceType: requirements.requirementsFile.sourceType, version: requirements.requirementsFile.version } : undefined, requirementsSubmittedAt: type === 'Employer' ? (requirements?.requirementsSubmittedAt || user.requirementsSubmittedAt) : undefined, nsrpVerificationFile: type === 'Applicant' && user.nsrpVerificationFile?.originalName ? { originalName: user.nsrpVerificationFile.originalName, size: user.nsrpVerificationFile.size, uploadedAt: user.nsrpVerificationFile.uploadedAt } : undefined }
+    const safe = { id: String(user._id), pageGuides: user.pageGuides, email: user.email, role: type, emailVerified: ['Applicant', 'Employer'].includes(type) ? Boolean(user.emailVerified) : undefined, needsNameConfirmation: type === 'Applicant' ? Boolean(user.needsNameConfirmation) : undefined, registration, verificationDocuments: type === 'Applicant' ? summarizeVerificationDocuments(user) : undefined, attentionCount: type === 'Applicant' ? attentionCount(user) : undefined, establishmentAddress: type === 'Employer' ? user.establishmentAddress : undefined, companyName: type === 'Employer' ? (user.companyName || requirements?.companyName) : undefined, contactName: type === 'Employer' ? (user.contactName || requirements?.contactName) : undefined, phone: type === 'Employer' ? (user.phone || requirements?.phone) : undefined, profile: user.profile, verificationStatus: type === 'Employer' ? employerVerification.status : type === 'Applicant' ? (user.verificationStatus || 'approved') : undefined, verificationReason: type === 'Employer' ? employerVerification.reason : type === 'Applicant' ? user.verificationReason : undefined, approvalNoticePending: type === 'Employer' ? Boolean(user.approvalNoticePending) : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size, status: requirements.requirementsFile.status, sourceType: requirements.requirementsFile.sourceType, version: requirements.requirementsFile.version } : undefined, requirementsSubmittedAt: type === 'Employer' ? (requirements?.requirementsSubmittedAt || user.requirementsSubmittedAt) : undefined, nsrpVerificationFile: type === 'Applicant' && user.nsrpVerificationFile?.originalName ? { originalName: user.nsrpVerificationFile.originalName, size: user.nsrpVerificationFile.size, uploadedAt: user.nsrpVerificationFile.uploadedAt } : undefined }
     const token = jwt.sign({ email: user.email, role: type, ...(type === 'Applicant' ? { sub: String(user._id), sessionVersion: user.sessionVersion || 0 } : {}) }, jwtSecret, { expiresIn: '7d' })
     res.json({ user: safe, token })
   } catch (err) {
@@ -1389,18 +1391,34 @@ app.get('/api/profile', async (req, res) => {
     if (type === 'Employer') await hydrateEmployerAddress(user, requirements)
     const employerVerification = type === 'Employer' ? await loadEmployerVerification(user.email) : null
     const registration = ['Applicant', 'Employer'].includes(type) ? registrationProgress(user, type, { requirementsFile: requirements?.requirementsFile, requestLocation: requirements?.location }) : undefined
-    res.json({ id: String(user._id), email: user.email, role: type, emailVerified: ['Applicant', 'Employer'].includes(type) ? Boolean(user.emailVerified) : undefined, needsNameConfirmation: type === 'Applicant' ? Boolean(user.needsNameConfirmation) : undefined, registration, establishmentAddress: type === 'Employer' ? user.establishmentAddress : undefined, companyName: type === 'Employer' ? (user.companyName || requirements?.companyName) : undefined, contactName: type === 'Employer' ? (user.contactName || requirements?.contactName) : undefined, phone: type === 'Employer' ? (user.phone || requirements?.phone) : undefined, profile: user.profile, verificationStatus: type === 'Employer' ? employerVerification.status : type === 'Applicant' ? (user.verificationStatus || 'approved') : undefined, verificationReason: type === 'Employer' ? employerVerification.reason : type === 'Applicant' ? user.verificationReason : undefined, approvalNoticePending: type === 'Employer' ? Boolean(user.approvalNoticePending) : undefined, verificationDocuments: type === 'Applicant' ? summarizeVerificationDocuments(user) : undefined, attentionCount: type === 'Applicant' ? attentionCount(user) : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size, status: requirements.requirementsFile.status, sourceType: requirements.requirementsFile.sourceType, version: requirements.requirementsFile.version } : undefined, requirementsSubmittedAt: type === 'Employer' ? (requirements?.requirementsSubmittedAt || user.requirementsSubmittedAt) : undefined, nsrpVerificationFile: type === 'Applicant' && user.nsrpVerificationFile?.originalName ? { originalName: user.nsrpVerificationFile.originalName, size: user.nsrpVerificationFile.size, uploadedAt: user.nsrpVerificationFile.uploadedAt } : undefined })
+    res.json({ id: String(user._id), pageGuides: user.pageGuides, email: user.email, role: type, emailVerified: ['Applicant', 'Employer'].includes(type) ? Boolean(user.emailVerified) : undefined, needsNameConfirmation: type === 'Applicant' ? Boolean(user.needsNameConfirmation) : undefined, registration, establishmentAddress: type === 'Employer' ? user.establishmentAddress : undefined, companyName: type === 'Employer' ? (user.companyName || requirements?.companyName) : undefined, contactName: type === 'Employer' ? (user.contactName || requirements?.contactName) : undefined, phone: type === 'Employer' ? (user.phone || requirements?.phone) : undefined, profile: user.profile, verificationStatus: type === 'Employer' ? employerVerification.status : type === 'Applicant' ? (user.verificationStatus || 'approved') : undefined, verificationReason: type === 'Employer' ? employerVerification.reason : type === 'Applicant' ? user.verificationReason : undefined, approvalNoticePending: type === 'Employer' ? Boolean(user.approvalNoticePending) : undefined, verificationDocuments: type === 'Applicant' ? summarizeVerificationDocuments(user) : undefined, attentionCount: type === 'Applicant' ? attentionCount(user) : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size, status: requirements.requirementsFile.status, sourceType: requirements.requirementsFile.sourceType, version: requirements.requirementsFile.version } : undefined, requirementsSubmittedAt: type === 'Employer' ? (requirements?.requirementsSubmittedAt || user.requirementsSubmittedAt) : undefined, nsrpVerificationFile: type === 'Applicant' && user.nsrpVerificationFile?.originalName ? { originalName: user.nsrpVerificationFile.originalName, size: user.nsrpVerificationFile.size, uploadedAt: user.nsrpVerificationFile.uploadedAt } : undefined })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Server error' })
   }
 })
 
+app.patch('/api/profile/page-guides', async (req, res) => {
+  try {
+    const actor = authenticateRequest(req)
+    if (!actor) return res.status(401).json({ error: 'Sign in to save your guide preferences.' })
+    const Model = { Applicant, Employer }[actor.role]
+    if (!Model) return res.status(403).json({ error: 'Guide preferences are unavailable for this account.' })
+    const { page, dismissAll } = req.body || {}
+    const guide = typeof page === 'string' ? pageGuide(actor.role, page) : null
+    if (dismissAll !== true && !guide) return res.status(400).json({ error: 'Choose a valid page guide.' })
+    const update = dismissAll === true ? { $set: { 'pageGuides.dismissedAll': true } } : { $addToSet: { 'pageGuides.seenPages': guide.key } }
+    const account = await Model.findOneAndUpdate({ email: actor.email, pageGuides: { $exists: true }, ...(actor.role === 'Applicant' ? { deletedAt: null } : {}) }, update, { returnDocument: 'after' }).select('pageGuides')
+    if (!account) return res.status(404).json({ error: 'Guide preferences are unavailable for this account.' })
+    res.json({ pageGuides: account.pageGuides })
+  } catch { res.status(503).json({ error: 'Could not save your guide preferences. Please try again.' }) }
+})
+
 // Adds a new pending version to a document slot. The file bytes are stored in
 // the document_files collection (see utils/documentFiles.js); only metadata is
 // embedded. Returns a `cleanup` that removes the stored bytes if the caller's
 // save fails, so a failed write never leaves orphaned files behind.
-async function appendVerificationVersion(applicant, docKey, file, idType = '', sourceType) {
+async function appendVerificationVersion(applicant, docKey, file, idType = '', sourceType, backFile) {
   if (docKey !== 'supportingExplanation' && applicant._id) await consistencyWaitlist.assertSubmission(applicant._id, docKey)
   applicant.verificationDocuments = applicant.verificationDocuments || {}
   const slot = applicant.verificationDocuments[docKey] || { uploads: 0, versions: [] }
@@ -1418,12 +1436,14 @@ async function appendVerificationVersion(applicant, docKey, file, idType = '', s
   const versionNumber = (slot.versions?.length || 0) + 1
   const reservation = docKey === 'supportingExplanation' ? null : await consistencyWaitlist.reserveSubmission(applicant._id, docKey)
   applicant.$locals.consistencyReservation = reservation
-  try { await storeDocumentFile(applicant._id, docKey, versionNumber, 'front', file) }
-  catch (error) { await consistencyWaitlist.cancelReservation(applicant._id, reservation); throw error }
   const cleanup = async () => {
-    await DocumentFile.deleteOne({ applicant: applicant._id, slot: docKey, version: versionNumber, side: 'front' }).catch(() => {})
+    await DocumentFile.deleteMany({ applicant: applicant._id, slot: docKey, version: versionNumber, side: { $in: ['front', 'back'] } }).catch(() => {})
     await consistencyWaitlist.cancelReservation(applicant._id, reservation)
   }
+  try {
+    await storeDocumentFile(applicant._id, docKey, versionNumber, 'front', file)
+    if (backFile) await storeDocumentFile(applicant._id, docKey, versionNumber, 'back', backFile)
+  } catch (error) { await cleanup(); throw error }
   if (docKey === 'nsrpForm') reopenIdentityDocuments(applicant, 'Applicant')
   if (current && (['pending', 'rejected', 'needs_resubmission'].includes(current.status) || ['supportingExplanation', 'nsrpForm'].includes(docKey))) current.status = 'superseded'
   const version = {
@@ -1435,6 +1455,13 @@ async function appendVerificationVersion(applicant, docKey, file, idType = '', s
     version: versionNumber,
     status: 'pending',
     sourceType,
+    ...(backFile ? { back: {
+      originalName: backFile.originalname,
+      storedName: crypto.randomBytes(16).toString('hex'),
+      mimetype: backFile.mimetype,
+      size: backFile.size,
+      uploadedAt: new Date(),
+    } } : {}),
     ...(file.verificationReview || {}),
   }
   slot.uploads = (slot.uploads || 0) + 1
@@ -1543,16 +1570,20 @@ app.get('/api/applicants/:id/nsrp-signature', async (req, res) => {
 })
 
 // Upload one verification document (nsrpForm | birthCertificate | validId1 | validId2)
-app.post('/api/profile/verification-documents/:docKey', verificationUpload.single('document'), async (req, res) => {
+app.post('/api/profile/verification-documents/:docKey', verificationUpload.fields([{ name: 'document', maxCount: 1 }, { name: 'documentBack', maxCount: 1 }]), async (req, res) => {
   try {
     const decoded = authenticateRequest(req)
     if (!decoded) return res.status(401).json({ error: 'Missing token' })
     if (decoded.role !== 'Applicant') return res.status(403).json({ error: 'Only applicants can upload verification documents' })
     const { docKey } = req.params
+    const file = req.files?.document?.[0]
+    const backFile = req.files?.documentBack?.[0]
     if (!VERIFICATION_DOC_KEYS.includes(docKey)) return res.status(400).json({ error: 'Unknown document type' })
-    if (docKey === 'nsrpForm' && (!req.file || req.file.mimetype !== 'application/pdf' || !fileMatchesDeclaredType(req.file))) return res.status(400).json({ error: 'The NSRP form must be a PDF file.' })
-    if (!req.file) return res.status(400).json({ error: 'A JPG, PNG, or PDF file is required' })
-    if (!VERIFICATION_DOC_TYPES.includes(req.file.mimetype) || !fileMatchesDeclaredType(req.file)) {
+    if (docKey === 'nsrpForm' && (!file || file.mimetype !== 'application/pdf' || !fileMatchesDeclaredType(file))) return res.status(400).json({ error: 'The NSRP form must be a PDF file.' })
+    if (!file) return res.status(400).json({ error: 'A JPG, PNG, or PDF file is required' })
+    if (docKey.startsWith('validId') && !backFile) return res.status(400).json({ error: 'Upload both the front and back of your ID.' })
+    if (!docKey.startsWith('validId') && backFile) return res.status(400).json({ error: 'A back file is only accepted for valid IDs.' })
+    if ([file, backFile].filter(Boolean).some(side => !VERIFICATION_DOC_TYPES.includes(side.mimetype) || !fileMatchesDeclaredType(side))) {
       return res.status(400).json({ error: 'Upload a genuine JPG, PNG, or PDF document' })
     }
 
@@ -1568,9 +1599,12 @@ app.post('/api/profile/verification-documents/:docKey', verificationUpload.singl
 
     const declared = parseDocumentDetails(req.body?.verificationDetails)
     if (docKey === 'birthCertificate' && !BIRTH_COPY_TYPES.includes(declared.copyType)) return res.status(422).json({ error: 'Select the birth certificate copy type.' })
-    if (docKey !== 'nsrpForm' && (await nsrpAutomation.getSettings()).imageChecks) req.file.verificationReview = docKey === 'supportingExplanation' ? { quality: await inspectDocument(req.file) } : await prepareDocument(req.file, docKey, idType, declared, applicant.verificationDocuments?.[docKey === 'validId1' ? 'validId2' : 'validId1']?.versions?.at(-1)?.declaredDetails?.number, applicant.profile?.nsrp)
+    if (docKey !== 'nsrpForm' && (await nsrpAutomation.getSettings()).imageChecks) {
+      file.verificationReview = docKey === 'supportingExplanation' ? { quality: await inspectDocument(file) } : await prepareDocument(file, docKey, idType, declared, applicant.verificationDocuments?.[docKey === 'validId1' ? 'validId2' : 'validId1']?.versions?.at(-1)?.declaredDetails?.number, applicant.profile?.nsrp)
+      if (backFile) file.verificationReview.quality.warnings.push(...(await inspectDocument(backFile)).warnings)
+    }
 
-    const { slot, version, cleanup } = await appendVerificationVersion(applicant, docKey, req.file, idType, docKey === 'nsrpForm' ? 'uploaded' : undefined)
+    const { slot, version, cleanup } = await appendVerificationVersion(applicant, docKey, file, idType, docKey === 'nsrpForm' ? 'uploaded' : undefined, backFile)
     try {
       await applicant.save()
     } catch (err) {
@@ -3714,6 +3748,7 @@ app.post('/api/employer-requests', requirementsUpload.single('requirements'), as
     const nsrpAutoEnabledAtCreation = await nsrpAutomation.creationEnabled('Employer')
     try {
       createdEmployer = await createUserInRole('Employer', {
+        pageGuides: { seenPages: [], dismissedAll: false },
         email: email.trim(),
         passwordHash,
         emailVerified: true,

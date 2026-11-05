@@ -6,6 +6,8 @@ import { EMPLOYER_VERIFICATION_STATUSES, EMPLOYER_VERIFICATION_STATUS } from '..
 import { verificationVersionFields, verificationAccountFields } from './verification.js'
 
 const { Schema } = mongoose
+// Only new registrations receive this subdocument. Legacy accounts stay quiet.
+const pageGuidesSchema = new Schema({ seenPages: { type: [String], default: [] }, dismissedAll: { type: Boolean, default: false } }, { _id: false })
 
 // Shared email-verification fields (applicants and employers only; admins are provisioned)
 const emailVerificationFields = {
@@ -79,6 +81,7 @@ const nsrpWorkExperienceSchema = new Schema({
 }, { _id: false })
 
 const applicantSchema = new Schema({
+  pageGuides: { type: pageGuidesSchema, default: undefined },
   ...verificationAccountFields,
   nsrpAutoEnabledAtCreation: { type: Boolean, select: false },
   sessionVersion: { type: Number, default: 0 },
@@ -181,6 +184,7 @@ export function applicantDisplayName(applicant) {
 }
 
 const employerSchema = new Schema({
+  pageGuides: { type: pageGuidesSchema, default: undefined },
   ...verificationAccountFields,
   receivingApplicantsSuspendedAt: Date,
   receivingApplicantsSuspensionReason: String,
