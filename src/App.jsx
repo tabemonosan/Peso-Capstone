@@ -1,4 +1,5 @@
 import SkillTagPicker from './components/SkillTagPicker'
+import ProfileDropdown from './components/ProfileDropdown'
 import NsrpImportReview from './components/NsrpImportReview'
 import PageGuide from './components/PageGuide'
 import MyApplicationsPage from './components/MyApplicationsPage'
@@ -2113,10 +2114,17 @@ const toggleSkill = (selected, skill) => {
               )}
             </button>
             {showProfileTab && (
-              <button
-                type="button"
-                aria-label="Profile"
-                onClick={() => { setShowProfileDocuments(false); setActiveView("profile") }}
+              <ProfileDropdown
+                onProfile={() => { setShowProfileDocuments(false); setActiveView("profile") }}
+                onSettings={activeRole === 'Applicant' ? () => {
+                  setShowProfileDocuments(false)
+                  setActiveView('profile')
+                  requestAnimationFrame(() => {
+                    const settings = document.getElementById('account-settings')
+                    settings?.scrollIntoView?.({ block: 'start', behavior: 'smooth' })
+                    settings?.focus({ preventScroll: true })
+                  })
+                } : undefined}
                 className={`portal-profile-button inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-medium transition-colors ${
                   activeView === "profile" ? "bg-cyan-500 text-slate-950" : "text-slate-200"
                 }`}
@@ -2129,7 +2137,7 @@ const toggleSkill = (selected, skill) => {
                   )}
                 </span>
                 <span>Profile</span>
-              </button>
+              </ProfileDropdown>
             )}
             <button
               type="button"

@@ -833,6 +833,41 @@
   font-size: 16px !important;
 }
 
+.portal-profile-dropdown {
+  position: relative;
+}
+
+.portal-profile-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  width: 190px;
+  padding: 6px;
+  border: 1px solid #d9e3f2;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 8px 24px #17365d1a;
+}
+
+.portal-profile-menu button {
+  display: block;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: transparent;
+  color: #15345d;
+  text-align: left;
+  font-size: 14px;
+}
+
+.portal-profile-menu button:hover,
+.portal-profile-menu button:focus-visible {
+  background: #edf4ff;
+  outline: 2px solid #b9d0ff;
+  outline-offset: -2px;
+}
+
 .portal-shell-admin .portal-content {
   background: transparent !important;
 }
