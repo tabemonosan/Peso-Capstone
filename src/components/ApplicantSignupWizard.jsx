@@ -6,6 +6,8 @@ import NsrpPdfPreview from "./NsrpPdfPreview"
 import NsrpWarningPanel from "./NsrpWarningPanel"
 import NsrpDoubleCheckPanel from './NsrpDoubleCheckPanel'
 import NsrpSignatureInput from "./NsrpSignatureInput"
+import NsrpImportReview from './NsrpImportReview'
+import { nsrpImportBasic } from '../../shared/nsrpImport.js'
 import VerificationDocumentsForm, { emptyVerificationDocs, validateVerificationDocs } from "./VerificationDocumentsForm"
 import PasswordChecklist from "./PasswordChecklist"
 import { BIRTH_COPY_TYPES } from '../../shared/documentImage.js'
@@ -197,6 +199,8 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
   const [nsrpMode, setNsrpMode] = useState(isUpdate ? "online" : saved.nsrpMode)
   const [basicInfo, setBasicInfo] = useState(saved.basicInfo || {})
   const [nsrpUpload, setNsrpUpload] = useState(null)
+  const [nsrpImportToken, setNsrpImportToken] = useState('')
+  const [nsrpFileRevision, setNsrpFileRevision] = useState(0)
   const [fieldErrors, setFieldErrors] = useState({})
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
@@ -637,6 +641,7 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
         if (nsrpMode === "upload") {
           // Upload path: the file plus basic information; answers are not sent.
           payload.append("nsrpFile", nsrpUpload)
+          if (nsrpImportToken) payload.append('nsrpImportToken', nsrpImportToken)
           for (const key of ["firstName", "middleName", "lastName", "suffix", "dob", "cellphone", "addressCity", "addressProvince"]) {
             payload.append(key, basicInfo[key] || "")
           }
@@ -844,6 +849,8 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
                   onChange={(event) => {
                     const file = event.target.files?.[0] || null
                     setNsrpUpload(file)
+                    setNsrpImportToken('')
+                    setNsrpFileRevision(value => value + 1)
                     setFieldErrors((current) => ({ ...current, nsrpFile: undefined }))
                     markStepInvalid()
                   }}
@@ -853,6 +860,11 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
                 />
               </label>
               {nsrpUpload && <p className="mt-1 text-xs text-slate-500">{nsrpUpload.name} • {Math.ceil(nsrpUpload.size / 1024)} KB</p>}
+              {nsrpUpload && <NsrpImportReview key={`${nsrpFileRevision}:${emailProof}`} file={nsrpUpload} emailProof={emailProof} onUse={result => {
+                setBasicInfo(current => ({ ...current, ...nsrpImportBasic(result.answers), noMiddleName: false }))
+                setNsrpImportToken(result.importToken)
+                markStepInvalid()
+              }} />}
               {fieldErrors.nsrpFile && <p id="error-nsrpFile" role="alert" className="mt-1 text-xs text-rose-600">{fieldErrors.nsrpFile}</p>}
             </div>
           )}

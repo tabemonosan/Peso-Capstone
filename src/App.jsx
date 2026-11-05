@@ -1,4 +1,5 @@
 import SkillTagPicker from './components/SkillTagPicker'
+import NsrpImportReview from './components/NsrpImportReview'
 import PageGuide from './components/PageGuide'
 import MyApplicationsPage from './components/MyApplicationsPage'
 import ApplicantReputationPage from './components/ApplicantReputationPage'
@@ -2523,6 +2524,10 @@ const toggleSkill = (selected, skill) => {
                 <>
                   <h2 className="text-xl font-semibold text-white">Applicant Profile</h2>
                   <p className="mt-3 text-slate-400">Update your traits and personal information.</p>
+                  {currentUser?.verificationDocuments?.some(doc => doc.docKey === 'nsrpForm' && doc.sourceType === 'uploaded') && <NsrpImportReview key={currentUser.id} token={getToken()} disabled={isEditingProfile || profileSaving} onUse={({ profile }) => {
+                    setCurrentUser(current => ({ ...current, profile }))
+                    setProfileData(normalizeProfile({ ...currentUser, profile }, 'Applicant'))
+                  }} />}
 
                   <EditableProfileCover name={formatFullName(profileData) || profileData.name || 'Your name'} initials={applicantProfileInitials} photo={profileData.profileImage} banner={profileData.bannerImage} editing={isEditingProfile} saving={profileSaving} onEdit={() => setIsEditingProfile(true)} onSave={saveProfileEdits} onCancel={cancelProfileEdits} onImage={handleImageFile} photoInputRef={profilePhotoInputRef} />
 
