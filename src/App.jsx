@@ -464,7 +464,7 @@ const toggleSkill = (selected, skill) => {
     currentUser?.token || (typeof window !== "undefined" ? localStorage.getItem('peso-token') : null)
   const openApplicantDocuments = () => {
     setShowProfileDocuments(true)
-    setActiveView('documents')
+    setActiveView('account-settings')
   }
 
   const updateRegistrationUser = useCallback((data) => {
@@ -1700,7 +1700,8 @@ const toggleSkill = (selected, skill) => {
 
   useEffect(() => {
     if (activeView === 'all-dashboard') setActiveView('dashboard')
-  }, [activeView])
+    if (activeRole === 'Applicant' && ['documents', 'nsrp-import'].includes(activeView)) setActiveView('account-settings')
+  }, [activeView, activeRole])
 
   useEffect(() => {
     if (activeRole !== 'Applicant' || !['account-settings', 'documents', 'nsrp-import'].includes(activeView)) return
@@ -1725,7 +1726,7 @@ const toggleSkill = (selected, skill) => {
     if (window.location.pathname === '/documents' || params.get('documents') === '1' || params.get('editNsrp') === '1') {
       documentLinkHandled.current = true
       setShowProfileDocuments(true)
-      setActiveView('documents')
+      setActiveView('account-settings')
     }
   }, [isLoggedIn, activeRole])
 
@@ -2121,8 +2122,6 @@ const toggleSkill = (selected, skill) => {
                   setShowProfileDocuments(false)
                   setActiveView('account-settings')
                 } : undefined}
-                onDocuments={activeRole === 'Applicant' ? () => { setShowProfileDocuments(false); setActiveView('documents') } : undefined}
-                onNsrp={activeRole === 'Applicant' && currentUser?.verificationDocuments?.some(doc => doc.docKey === 'nsrpForm' && doc.sourceType === 'uploaded') ? () => { setShowProfileDocuments(false); setActiveView('nsrp-import') } : undefined}
                 className={`portal-profile-button inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-medium transition-colors ${
                   activeView === "profile" ? "bg-cyan-500 text-slate-950" : "text-slate-200"
                 }`}
@@ -2525,14 +2524,11 @@ const toggleSkill = (selected, skill) => {
           {activeRole === 'Admin' && clientFeedbackOpen && <AdminCsmFeedbackModal token={getToken()} onClose={() => setClientFeedbackOpen(false)} />}
           {jobSubmittedOpen && <Modal onClose={() => setJobSubmittedOpen(false)} labelledBy="job-submitted-title" maxWidth="max-w-md"><h2 id="job-submitted-title" className="text-xl font-bold text-slate-900">{jobSubmittedOpen.status === 'approved' ? 'Job posting published' : 'Job request submitted for review'}</h2><p className="mt-3 text-sm text-slate-600">{jobSubmittedOpen.status === 'approved' ? 'Your job posting passed automatic safety screening and is now visible to applicants.' : 'PESO will review your job posting. You can track its status in Job Postings.'}</p><JobScreeningSummary moderation={jobSubmittedOpen.moderation} /><button type="button" onClick={() => setJobSubmittedOpen(false)} className="mt-5 rounded-full bg-blue-600 px-5 py-2 text-sm font-semibold text-white">Done</button></Modal>}
 
-          {activeRole === 'Applicant' && activeView === 'nsrp-import' && <section data-applicant-window tabIndex={-1} className="scroll-mt-28" aria-label="Use your completed NSRP">
+          {activeRole === 'Applicant' && activeView === 'account-settings' && <section data-applicant-window tabIndex={-1} className="scroll-mt-28 space-y-6" aria-label="Account settings window">
                   {currentUser?.verificationDocuments?.some(doc => doc.docKey === 'nsrpForm' && doc.sourceType === 'uploaded') && <NsrpImportReview key={currentUser.id} token={getToken()} disabled={isEditingProfile || profileSaving} onUse={({ profile }) => {
                     setCurrentUser(current => ({ ...current, profile }))
                     setProfileData(normalizeProfile({ ...currentUser, profile }, 'Applicant'))
                   }} />}
-                  {!currentUser?.verificationDocuments?.some(doc => doc.docKey === 'nsrpForm' && doc.sourceType === 'uploaded') && <p className="rounded-xl border border-slate-200 bg-white p-6 text-slate-700">No uploaded NSRP is available. You can manage your NSRP in Documents submitted to PESO.</p>}
-          </section>}
-          {activeRole === 'Applicant' && activeView === 'documents' && <section data-applicant-window tabIndex={-1} className="scroll-mt-28" aria-label="Documents submitted to PESO">
                   <div id="profile-documents">
                     <MyDocumentsPage
                       guideState={currentUser?.pageGuides}
@@ -2551,8 +2547,6 @@ const toggleSkill = (selected, skill) => {
                     />
                   </div>
 
-          </section>}
-          {activeRole === 'Applicant' && activeView === 'account-settings' && <section data-applicant-window tabIndex={-1} className="scroll-mt-28" aria-label="Account settings window">
                   <ApplicantAccountSettings token={getToken()} onMessage={(text) => setAppMessage({ type: 'success', text })} />
           </section>}
 

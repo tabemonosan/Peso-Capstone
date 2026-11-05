@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 
-export default function ProfileDropdown({ children, className, onProfile, onSettings, onDocuments, onNsrp }) {
+export default function ProfileDropdown({ children, className, onProfile, onSettings }) {
   const [open, setOpen] = useState(false)
   const root = useRef(null)
   const trigger = useRef(null)
@@ -34,8 +34,6 @@ export default function ProfileDropdown({ children, className, onProfile, onSett
     {open && <div id={menuId} role="menu" aria-label="Profile options" className="portal-profile-menu">
       <button type="button" role="menuitem" onClick={() => choose(onProfile)}>View Profile</button>
       <button type="button" role="menuitem" onClick={() => choose(onSettings)}>Account Settings</button>
-      {onNsrp && <button type="button" role="menuitem" onClick={() => choose(onNsrp)}>Use your completed NSRP</button>}
-      {onDocuments && <button type="button" role="menuitem" onClick={() => choose(onDocuments)}>Documents submitted to PESO</button>}
     </div>}
   </div>
 }
