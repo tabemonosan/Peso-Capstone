@@ -152,7 +152,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated, guid
         <div>
           <h2 id="my-documents-title" className="text-xl font-bold">Verification documents</h2>
           <p id="my-documents-description" className="mt-2 text-sm text-slate-600">
-            Upload clear copies that match your NSRP. Only flagged documents need PESO review.
+            Uploaded files are scanned and compared with your NSRP automatically. Matching documents can be verified without PESO review; unresolved flags still need staff review.
           </p>
           {info.verificationStatus && (
             <p className="mt-1 text-sm text-slate-600">
@@ -170,6 +170,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated, guid
       )}
       {error && <p role="alert" className="mt-3 text-sm font-medium text-rose-600">{error}</p>}
       {success && <p role="status" className="mt-3 text-sm text-green-700">{success}</p>}
+      {info.consistency?.checking && <p role="status" className="mt-3 rounded-xl border border-cyan-200 bg-cyan-50 p-3 text-sm text-cyan-900">Scanning your documents. Keep this window open to see the results update automatically.</p>}
 
       <ConsistencyWaitlistCard state={info.consistency} />
       {guideState && <div className="mt-4"><PageGuide role="Applicant" view="documents" state={guideState} token={token} onSaved={onGuidesSaved} /></div>}
@@ -178,7 +179,8 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated, guid
           const relevant = (info.consistency?.issues || []).filter(issue => issue.chancesLeft !== null && (issue.document === doc.docKey || doc.docKey === 'nsrpForm'))
           const flagged = info.consistency?.waitlisted && relevant.length > 0
           const review = info.review?.documents?.find(item => item.docKey === doc.docKey)
-          const needsReview = flagged || review?.needsReview === true || ['rejected', 'needs_resubmission'].includes(doc.status)
+          const scanning = info.consistency?.checking && doc.status === 'pending'
+          const needsReview = !scanning && (flagged || review?.needsReview === true || ['rejected', 'needs_resubmission'].includes(doc.status))
           const hasChances = !flagged || relevant.every(issue => issue.chancesLeft > 0)
           const staffReviewOnly = (info.consistency?.issues || []).some(issue => issue.document === doc.docKey && issue.chancesLeft === null)
           const pendingEditable = ['under_review', 'waitlisted'].includes(info.verificationStatus) && !staffReviewOnly && (doc.status === 'pending' || doc.referenceOnly)
@@ -234,7 +236,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated, guid
                   PESO feedback: {doc.latest.reviewReason}
                 </p>
               )}
-              {!doc.referenceOnly && (needsReview || review?.reason || doc.status === 'pending') && <p className={`mt-3 rounded-lg px-3 py-2 text-xs leading-relaxed ${needsReview ? 'bg-amber-50 text-amber-900' : 'bg-slate-50 text-slate-600'}`}>{review?.reason || (needsReview ? 'PESO will review this document. You can upload a clearer copy or explain a difference.' : 'Your document is being checked.')}</p>}
+              {!doc.referenceOnly && (needsReview || review?.reason || doc.status === 'pending') && <p className={`mt-3 rounded-lg px-3 py-2 text-xs leading-relaxed ${needsReview ? 'bg-amber-50 text-amber-900' : 'bg-slate-50 text-slate-600'}`}>{scanning ? 'Scanning your upload and comparing it with your NSRP. Results update automatically.' : review?.reason || (needsReview ? 'PESO will review this document. You can upload a clearer copy or explain a difference.' : 'Your document is being checked.')}</p>}
               {needsReview && ['nsrpForm', 'birthCertificate', 'validId1', 'validId2'].includes(doc.docKey) && doc.latest && <button type="button" onClick={() => setExplanationDoc(doc.docKey)} className="mt-2 rounded border border-slate-300 bg-white px-3 py-1 text-xs text-cyan-800">Explain a difference</button>}
               {locked && <p className="mt-2 text-xs text-green-700">{doc.referenceOnly ? 'Request a correction to update your NSRP. Your identity documents will be checked again.' : 'Request a correction if your information changes.'}</p>}
               {doc.correctionRequest && <p className="mt-2 rounded-lg border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">Correction requested: {doc.correctionRequest.reason}. Waiting for PESO review.</p>}

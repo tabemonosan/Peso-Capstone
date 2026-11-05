@@ -397,7 +397,7 @@ app.get('/api/profile/consistency', async (req, res) => {
     const account = await Applicant.findOne({ email: actor.email }).select('_id').lean()
     if (!account) return res.status(403).json({ error: 'Account unavailable.' })
     res.set('Cache-Control', 'private, no-store')
-    res.json(await consistencyWaitlist.publicState(account._id))
+    res.json(await consistencyWaitlist.publicState(account._id, req.ip))
   } catch { res.status(503).json({ error: 'Document review status is unavailable. Please try again.' }) }
 })
 app.get('/api/profile/review-status', async (req, res) => {
@@ -407,7 +407,7 @@ app.get('/api/profile/review-status', async (req, res) => {
     let account = await Applicant.findOne({ email: actor.email }).lean()
     if (!account || account.deletedAt) return res.status(403).json({ error: 'Account unavailable.' })
     await refreshApplicantVerification(account._id)
-    const consistency = await consistencyWaitlist.publicState(account._id)
+    const consistency = await consistencyWaitlist.publicState(account._id, req.ip)
     account = await Applicant.findById(account._id).lean()
     res.set('Cache-Control', 'private, no-store')
     res.json(await applicantReviewSummary(account, nsrpAutomation, consistency))
@@ -1627,13 +1627,6 @@ app.post('/api/profile/verification-documents/:docKey', verificationUpload.field
     await saveAuthorization(applicant._id, docKey, version.version, declared)
     await scheduleConsistency(applicant._id, docKey, applicant.$locals.consistencyReservation, req.ip)
 
-    await notifyAdmins({
-      type: 'document_resubmitted',
-      title: 'Document awaiting review',
-      message: `${applicantFullName(applicant)} uploaded ${VERIFICATION_DOC_LABELS[docKey]} for review.`,
-      link: '/applicants',
-      metadata: { applicantId: String(applicant._id), docKey },
-    })
 
     res.json({ ok: true, docKey, version: version.version, status: 'pending', uploadsRemaining: MAX_UPLOADS_PER_DOC - slot.uploads, document: { originalName: version.originalName, size: version.size, uploadedAt: version.uploadedAt } })
   } catch (err) {
@@ -1843,7 +1836,7 @@ app.get('/api/applicants/:id/verification-documents', async (req, res) => {
         if (decision?.report?.findings) current.findings = decision.report.findings.map(f => ({ ruleId: f.code, severity: f.severity, fieldGroup: 'registration', evidence: 'self-declared', status: decision.dismissals?.some(d => d.code === f.code) ? 'dismissed' : 'open' }))
       }
     }
-    const consistency = applicant.deletedAt ? null : await consistencyWaitlist.publicState(applicant._id)
+    const consistency = applicant.deletedAt ? null : await consistencyWaitlist.publicState(applicant._id, req.ip)
     res.json({
       documents: summarizeVerificationDocuments(applicant, { withUrls: true, includeHistory: decoded.role === 'Admin' }),
       consistency,

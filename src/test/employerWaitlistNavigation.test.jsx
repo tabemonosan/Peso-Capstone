@@ -47,7 +47,7 @@ describe("employer waitlist navigation", () => {
   it("replaces the employer dashboard and leaves only Account verification in the sidebar", async () => {
     render(<App />)
     fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: employer.email } })
-    fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: "Password123!" } })
+    fireEvent.change(screen.getByLabelText(/^Password$/i, { selector: 'input' }), { target: { value: "Password123!" } })
     fireEvent.submit(screen.getByRole("button", { name: /Sign in/i }).closest("form"))
 
     expect(await screen.findByRole("heading", { name: "You're on the waitlist" })).toBeTruthy()

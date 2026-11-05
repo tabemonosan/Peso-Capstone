@@ -196,7 +196,7 @@ describe('one dashboard per role', () => {
     mockRole(role)
     render(<App />)
     fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: 'user@example.com' } })
-    fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'Password123!' } })
+    fireEvent.change(screen.getByLabelText(/^Password$/i, { selector: 'input' }), { target: { value: 'Password123!' } })
     fireEvent.submit(screen.getByRole('button', { name: /Sign in/i }).closest('form'))
     const nav = await screen.findByRole('navigation', { name: `${role} navigation` })
     const overviewName = role === 'Applicant' ? 'Home' : 'Dashboard'

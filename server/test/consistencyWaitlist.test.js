@@ -3,6 +3,12 @@ import { describe, expect, it } from 'vitest'
 import { consistencyIssues, waitlistIssueMessage } from '../../shared/consistencyWaitlist.js'
 const docs = comparison => ({ birthCertificate: { versions: [{ version: 1, imageComparisons: [comparison] }] } })
 describe('waitlist evidence policy', () => {
+  it('does not waitlist shared phone numbers but preserves identity duplicate flags', () => {
+    const document = ruleId => ({ validId1: { versions: [{ findings: [{ ruleId, severity: 'warning', status: 'open' }] }] } })
+    expect(consistencyIssues(document('duplicate_mobile'))).toEqual([])
+    expect(consistencyIssues(document('duplicate_phone'))).toEqual([])
+    expect(consistencyIssues(document('duplicate_sss'))).toHaveLength(1)
+  })
   it.each([
     ['surname', 'name'], ['firstName', 'name'], ['dob', 'birth date'], ['idNumber', 'ID number'],
   ])('accepts only significant independent %s evidence', (field, fieldGroup) => {

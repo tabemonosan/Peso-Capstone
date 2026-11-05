@@ -33,6 +33,17 @@ const docs = [
 ]
 
 describe('MyDocumentsModal file viewers', () => {
+  it('shows automatic scanning instead of stale review flags during a recheck', () => {
+    render(<MyDocumentsModal token="token" onClose={() => {}} info={{
+      verificationStatus: 'waitlisted', consistency: { checking: true, waitlisted: true, issues: [{ document: 'birthCertificate', chancesLeft: 2 }] },
+      documents: [{ ...docs[1], status: 'pending' }], review: { documents: [{ docKey: 'birthCertificate', needsReview: true, reason: 'Old review message' }] },
+    }} />)
+    const row = screen.getByText('Birth Certificate').closest('li')
+    expect(within(row).getByText('Checking')).toBeInTheDocument()
+    expect(within(row).getByText(/Scanning your upload/)).toBeInTheDocument()
+    expect(screen.queryByText('Old review message')).not.toBeInTheDocument()
+    expect(within(row).queryByRole('button', { name: 'Explain a difference' })).not.toBeInTheDocument()
+  })
   it.each([2, 3])('requires both ID sides and sends them together with the saved type for document %s', async index => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => ({ ok: true }) })
     const doc = docs[index]

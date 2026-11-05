@@ -7,6 +7,7 @@ import { IMAGE_LIMITS } from '../../shared/documentImage.js'
 import { crossChecks, extractDocumentFields } from '../../shared/crossChecks.js'
 import { PhilSysQrSignatureProvider } from './verificationProviders.js'
 import { WAITLIST_LIMITS } from '../../shared/consistencyWaitlist.js'
+import { readDocumentOcr } from './documentReading.js'
 export async function reserveOcr() {
   const collection = mongoose.connection.db.collection('verification_ocr_usage')
   const id = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' })
@@ -23,10 +24,11 @@ export async function processApplicantImages({ accountId, docKey, version, setti
     if (!file) return
     let qr = { found: false, domain: null, allowlisted: false }, comparisons = [{ fieldGroup: 'document', result: 'could_not_read', evidence: 'independent' }]
     const qrComparisons = [], qrFindings = []
+    let pdfRead = false
     const nsrpValues = account.profile?.nsrp || { firstName: account.profile?.firstName, surname: account.profile?.lastName, middleName: account.profile?.middleName, dob: account.profile?.dob }
-    if (file.mimetype !== 'application/pdf') {
+    {
       const buffer = Buffer.from(file.data)
-      qr = await readers.readQr(buffer, async raw => {
+      if (file.mimetype !== 'application/pdf') qr = await readers.readQr(buffer, async raw => {
         await consumeQr(raw)
         if (document.declaredDetails?.idType === 'PhilSys National ID' && settings.philsysQrVerification) {
           const result = await new PhilSysQrSignatureProvider().verify({ ...document, qrPayload: raw }, { nsrp: nsrpValues })
@@ -38,9 +40,9 @@ export async function processApplicantImages({ accountId, docKey, version, setti
         if (settings.crossChecks && docKey.startsWith('validId')) {
           const birthVersion = account.verificationDocuments?.birthCertificate?.versions?.at(-1)?.version
           const birthFile = birthVersion && await loadDocumentFile(accountId, 'birthCertificate', birthVersion)
-          if (birthFile?.mimetype?.startsWith('image/')) birthValues = (await readers.readOcr(Buffer.from(birthFile.data), (text, confidence) => ({ values: confidence >= WAITLIST_LIMITS.minOcrConfidence ? extractDocumentFields(text) : undefined }), { reserve: reserveOcr })).values
+          if (birthFile) birthValues = (await readDocumentOcr(birthFile, (text, confidence) => ({ values: confidence >= WAITLIST_LIMITS.minOcrConfidence ? extractDocumentFields(text) : undefined }), { reserve: reserveOcr }, readers.readOcr)).values
         }
-        const report = await readers.readOcr(buffer, (text, confidence) => {
+        const report = await readDocumentOcr(file, (text, confidence) => {
           if (Number.isFinite(confidence) && confidence < WAITLIST_LIMITS.minOcrConfidence) return { comparisons: [{ fieldGroup: 'document', result: 'could_not_read', evidence: 'independent', reliable: false }], findings: [] }
           const normalized = normalizedText(text), nsrp = nsrpValues
           const fields = [['name', [nsrp.firstName || account.profile?.firstName, nsrp.surname || account.profile?.lastName]], ['birth date', [nsrp.dob]], ['ID number', [document.declaredDetails?.number]]]
@@ -49,15 +51,16 @@ export async function processApplicantImages({ accountId, docKey, version, setti
           const expectedNumber = nsrp[{ SSS: 'gsisSss', Passport: 'passportNo', 'Pag-IBIG': 'pagibig' }[document.declaredDetails?.idType]] || document.declaredDetails?.number
           const cross = settings.crossChecks && Object.keys(parsed).length ? crossChecks({ nsrp: { ...nsrp, idNumber: expectedNumber }, ...(docKey === 'birthCertificate' ? { birth: { values: parsed, evidence: 'independent' } } : { birth: birthValues ? { values: birthValues, evidence: 'independent' } : {}, ids: [{ values: parsed, evidence: 'independent' }] }) }) : null
           return { comparisons: [...fields.map(([fieldGroup, values]) => ({ fieldGroup, result: values.every(Boolean) && values.every(value => normalized.includes(normalizedText(value))) ? 'match' : 'could_not_read', evidence: 'independent' })), ...(cross?.comparisons || []).map(c => ({ ...c, reliable: Number.isFinite(confidence) && confidence >= WAITLIST_LIMITS.minOcrConfidence }))], findings: cross?.findings || [] }
-        }, { reserve: reserveOcr })
+        }, { reserve: reserveOcr }, readers.readOcr)
         if (report.comparisons) comparisons = report.comparisons
+        pdfRead = file.mimetype === 'application/pdf' && comparisons.some(row => row.reliable === true)
         if (report.findings) document.findings = [...(document.findings || []).filter(f => !f.ruleId.startsWith('cross_')), ...report.findings]
       }
     }
     comparisons.push(...qrComparisons)
     document.findings = [...new Map([...(document.findings || []), ...qrFindings].map(f => [f.ruleId, f])).values()]
     const index = versions.length - 1, base = `verificationDocuments.${docKey}.versions.${index}`
-    const updated = await Applicant.collection.updateOne({ _id: account._id, ...(checkToken ? { 'consistencyState.token': checkToken, 'consistencyState.status': 'checking' } : {}), [`${base}.version`]: version, [`${base}.status`]: document.status, [`verificationDocuments.${docKey}.versions`]: { $size: versions.length }, $or: [{ [`${base}.reviewRevision`]: document.reviewRevision || 0 }, ...(!document.reviewRevision ? [{ [`${base}.reviewRevision`]: { $exists: false } }] : [])] }, { $set: { [`${base}.qr`]: qr, [`${base}.imageComparisons`]: comparisons, [`${base}.findings`]: document.findings || [] } })
+    const updated = await Applicant.collection.updateOne({ _id: account._id, ...(checkToken ? { 'consistencyState.token': checkToken, 'consistencyState.status': 'checking' } : {}), [`${base}.version`]: version, [`${base}.status`]: document.status, [`verificationDocuments.${docKey}.versions`]: { $size: versions.length }, $or: [{ [`${base}.reviewRevision`]: document.reviewRevision || 0 }, ...(!document.reviewRevision ? [{ [`${base}.reviewRevision`]: { $exists: false } }] : [])] }, { $set: { [`${base}.qr`]: qr, [`${base}.imageComparisons`]: comparisons, [`${base}.findings`]: document.findings || [], ...(pdfRead ? { [`${base}.quality.warnings`]: (document.quality?.warnings || []).filter(warning => warning !== 'pdf_manual_reading') } : {}) } })
     await onFinished()
     return { completed: Boolean(updated.matchedCount) }
   } catch { console.error('[verification] local image check unavailable; document remains pending') }

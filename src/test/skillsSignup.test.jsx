@@ -56,7 +56,7 @@ afterEach(() => {
 
 function openSignup() {
   render(<App />)
-  fireEvent.click(screen.getByRole('button', { name: /Create an account \(Applicant\)/i }))
+  fireEvent.click(screen.getByRole('button', { name: /^Create an account$/i }))
 }
 
 // Completes the step-1 email-code verification via the mocked endpoints.
@@ -83,8 +83,8 @@ async function chooseOnlinePath() {
 async function advanceToDocumentsStep() {
   openSignup()
   await verifyStepOneEmail()
-  fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'Password123!' } })
-  fireEvent.change(screen.getByLabelText(/Confirm password/i), { target: { value: 'Password123!' } })
+  fireEvent.change(screen.getByLabelText(/^Password$/i, { selector: 'input' }), { target: { value: 'Password123!' } })
+  fireEvent.change(screen.getByLabelText(/Confirm password/i, { selector: 'input' }), { target: { value: 'Password123!' } })
   fireEvent.click(screen.getByRole('checkbox', { name: /collection and processing/i }))
   await chooseOnlinePath()
 
@@ -136,8 +136,8 @@ describe('Applicant sign-up wizard', () => {
   it('starts with account credentials and privacy consent, without duplicate profile fields', () => {
     openSignup()
     expect(screen.getByLabelText(/^Email$/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/^Password$/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/Confirm password/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/^Password$/i, { selector: 'input' })).toBeInTheDocument()
+    expect(screen.getByLabelText(/Confirm password/i, { selector: 'input' })).toBeInTheDocument()
     expect(screen.getByText(/collection and processing/i)).toBeInTheDocument()
     expect(screen.queryByLabelText(/^Location$/i)).not.toBeInTheDocument()
     expect(screen.queryByLabelText(/^About me$/i)).not.toBeInTheDocument()
@@ -148,8 +148,8 @@ describe('Applicant sign-up wizard', () => {
   it('does not persist the password or confirmation while saving browser progress', async () => {
     openSignup()
     fireEvent.change(screen.getByLabelText(/^Email$/i), { target: { value: 'draft@peso.gov' } })
-    fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'Password123!' } })
-    fireEvent.change(screen.getByLabelText(/Confirm password/i), { target: { value: 'Password123!' } })
+    fireEvent.change(screen.getByLabelText(/^Password$/i, { selector: 'input' }), { target: { value: 'Password123!' } })
+    fireEvent.change(screen.getByLabelText(/Confirm password/i, { selector: 'input' }), { target: { value: 'Password123!' } })
     await waitFor(() => expect(localStorage.getItem('peso-applicant-signup-draft')).toContain('draft@peso.gov'))
     const savedDraft = localStorage.getItem('peso-applicant-signup-draft')
     expect(savedDraft).not.toContain('Password123!')
@@ -159,8 +159,8 @@ describe('Applicant sign-up wizard', () => {
   it('sends NSRP answers and all signup documents in one multipart request', async () => {
     openSignup()
     await verifyStepOneEmail()
-    fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'Password123!' } })
-    fireEvent.change(screen.getByLabelText(/Confirm password/i), { target: { value: 'Password123!' } })
+    fireEvent.change(screen.getByLabelText(/^Password$/i, { selector: 'input' }), { target: { value: 'Password123!' } })
+    fireEvent.change(screen.getByLabelText(/Confirm password/i, { selector: 'input' }), { target: { value: 'Password123!' } })
     fireEvent.click(screen.getByRole('checkbox', { name: /collection and processing/i }))
     await chooseOnlinePath()
 

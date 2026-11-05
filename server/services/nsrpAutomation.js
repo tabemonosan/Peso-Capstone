@@ -3,6 +3,7 @@ import mongoose from 'mongoose'
 import { checkNsrp, checkSummary, NSRP_RULES_VERSION, normalizedText } from '../../shared/nsrpChecks.js'
 import { checkNsrp2 } from '../../shared/nsrp2Checks.js'
 import { VERIFICATION_DEFAULTS, REVIEWER_LABELS, openFlags } from '../../shared/verification.js'
+import { isSharedPhoneFinding } from '../../shared/verificationFindings.js'
 
 export const SYSTEM_REVIEWER = REVIEWER_LABELS.system
 const DEFAULTS = VERIFICATION_DEFAULTS
@@ -17,9 +18,9 @@ export function manualReason({ sourceType, version, emailVerified, enabledAtCrea
   if (!emailVerified) return 'Email unverified'
   if (dismissedCritical) return 'Always manual: dismissed critical finding'
   if (MANUAL_TYPES.has(String(employerType || '').trim().toLowerCase().replace(/,\s*subcontractor$/, ' subcontractor'))) return 'Always manual: agency type'
-  const blocking = report?.findings?.filter(f => f.approvalBlocking !== false) || []
+  const blocking = report?.findings?.filter(f => !isSharedPhoneFinding(f) && f.approvalBlocking !== false) || []
   if (report?.rulesVersion !== NSRP_RULES_VERSION || checkSummary(blocking).level !== 'clear'
-    || report?.findings?.some((finding) => /duplicate|cross_account/.test(finding.code))) return 'Needs attention'
+    || report?.findings?.some((finding) => !isSharedPhoneFinding(finding) && /duplicate|cross_account/.test(finding.code))) return 'Needs attention'
   return ''
 }
 
@@ -104,8 +105,8 @@ export function createNsrpAutomation({ Applicant, Employer, EmployerRequest, not
     }
     if ((await getSettings()).dataChecks) {
       const extra = role === 'Applicant'
-        ? [['passport', normalizedText(data.passportNo), 'critical'], ['mobile', normalizeMobile(data.cellphone), 'warning'], ['name_birth', data.surname && data.firstName && data.dob ? normalizedText(data.surname + data.firstName + (data.middleName || '')) + ':' + data.dob : '', 'warning']]
-        : [['mobile', normalizeMobile(data.phone), 'warning'], ['establishment_city', data.companyName && data.registrationDetails?.cityMunicipality ? normalizedText(data.companyName) + ':' + normalizedText(data.registrationDetails.cityMunicipality) : '', 'warning']]
+        ? [['passport', normalizedText(data.passportNo), 'critical'], ['name_birth', data.surname && data.firstName && data.dob ? normalizedText(data.surname + data.firstName + (data.middleName || '')) + ':' + data.dob : '', 'warning']]
+        : [['establishment_city', data.companyName && data.registrationDetails?.cityMunicipality ? normalizedText(data.companyName) + ':' + normalizedText(data.registrationDetails.cityMunicipality) : '', 'warning']]
       for (const [kind, value, severity] of extra) {
         if (!value) continue
         const id = await hash(kind, value)

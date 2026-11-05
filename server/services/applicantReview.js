@@ -1,4 +1,5 @@
 import { REQUIRED_DOC_KEYS, VERIFICATION_DOC_LABELS } from '../../shared/verificationDocs.js'
+import { isSharedPhoneFinding } from '../../shared/verificationFindings.js'
 
 // Owner-facing explanations are templates, never raw findings, sampling details,
 // extracted values, provider errors, private notes or comparison rule identifiers.
@@ -29,7 +30,8 @@ export async function applicantReviewSummary(account, automation, consistency) {
     const correction = consistency?.issues?.filter(i => i.document === docKey || docKey === 'nsrpForm' && i.chancesLeft !== null) || []
     const remaining = Math.max(0, 5 - (slot?.uploads || 0))
     const canUpdate = remaining > 0 && (status === 'under_review' && latest?.status !== 'approved' || status === 'waitlisted' && (correction.length > 0 ? correction.every(i => i.chancesLeft !== null && i.chancesLeft > 0) : latest?.status !== 'approved'))
-    const needsReview = Boolean(latest && docKey !== 'nsrpForm' && (['rejected', 'needs_resubmission'].includes(latest.status) || latest.status === 'pending' && ((latest.reviewReasons || []).length || decision?.reason || latest.findings?.some(f => f.status !== 'dismissed' && f.approvalBlocking !== false && ['warning', 'critical'].includes(f.severity)) || ['requested', 'submitted'].includes(latest.explanation?.status))))
+    const scanning = consistency?.checking && latest?.status === 'pending'
+    const needsReview = !scanning && Boolean(latest && docKey !== 'nsrpForm' && (['rejected', 'needs_resubmission'].includes(latest.status) || latest.status === 'pending' && ((latest.reviewReasons || []).length || decision?.reason || latest.findings?.some(f => !isSharedPhoneFinding(f) && f.status !== 'dismissed' && f.approvalBlocking !== false && ['warning', 'critical'].includes(f.severity)) || ['requested', 'submitted'].includes(latest.explanation?.status))))
     return { docKey, label: VERIFICATION_DOC_LABELS[docKey], status: latest?.status || 'missing', needsReview, reason: latest?.status === 'pending' && !needsReview ? 'Automatic verification is in progress.' : documentReviewMessage(docKey, latest, decision?.reason), canUpdate, uploadsRemaining: remaining }
   }).filter(doc => doc.status !== 'approved')
   return { status, checking: Boolean(consistency?.checking), message: status === 'approved' ? 'Your account is verified.' : status === 'waitlisted' ? 'Your account needs a review by PESO staff. Open My Documents to correct or explain a difference.' : consistency?.checking ? 'Your documents are being checked. You can open My Documents to review your details.' : documents.length ? 'Your account is under review because the required documents below still need verification.' : 'Your documents have been reviewed. PESO staff need to complete the account review.', documents }

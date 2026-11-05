@@ -35,7 +35,7 @@ afterEach(() => vi.unstubAllGlobals())
 async function openForm() {
   render(<App />)
   fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: user.email } })
-  fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'Password123!' } })
+  fireEvent.change(screen.getByLabelText(/^Password$/i, { selector: 'input' }), { target: { value: 'Password123!' } })
   fireEvent.submit(screen.getByRole('button', { name: /Sign in/i }).closest('form'))
   fireEvent.click(await screen.findByRole('button', { name: 'Job Postings', exact: true }))
   fireEvent.click(await screen.findByRole('button', { name: 'Create Job Posting', exact: true }))

@@ -40,6 +40,35 @@ const action = async body => {
   return request(app).post(`/api/admin/document-verification/waitlist/${applicant._id}/action`).set(auth('Admin', admin)).send({ token: account.consistencyState?.token, ...body })
 }
 describe('consistency waitlist', () => {
+  it('automatically rechecks legacy shared-phone flags without using correction chances', async () => {
+    reading.text = sampleText('1990-01-01').replace('1234567890', '4982761053')
+    await nsrpAutomation.updateSettings({ automaticApproval: true, auditPercent: 0, dataChecks: false }, admin.email)
+    await Applicant.updateOne({ _id: applicant._id }, { $set: {
+      verificationStatus: 'waitlisted', verificationReason: 'Your account needs a review by PESO staff.',
+      'profile.nsrp.gsisSss': '4982761053',
+      'verificationDocuments.validId1.versions.0.declaredDetails.number': '4982761053',
+      ...Object.fromEntries(['nsrpForm', 'birthCertificate', 'validId1'].map(key => [`verificationDocuments.${key}.versions.0.findings`, [{ ruleId: 'duplicate_mobile', severity: 'warning', status: 'open' }]])),
+      consistencyState: { status: 'finished', rulesVersion: '2026-11-04.1', used: {}, issues: [{ docKey: 'birthCertificate', reasonCode: 'staff_review', fieldGroup: 'document' }] },
+    } })
+    expect((await consistencyWaitlist.publicState(applicant._id, '192.0.2.8')).checking).toBe(true)
+    await drainVerificationJobs()
+    const state = await consistencyWaitlist.publicState(applicant._id)
+    expect(state).toMatchObject({ status: 'approved', checking: false, waitlisted: false, issues: [] })
+    expect((await Applicant.findById(applicant._id).select('+consistencyState')).consistencyState.used).toEqual({})
+  })
+  it.each(['image/png', 'application/pdf'])('scans an uploaded %s correction and verifies matching documents without a staff task', async mimetype => {
+    await check()
+    reading.text = sampleText('1990-01-01').replace('1234567890', '4982761053')
+    await Applicant.updateOne({ _id: applicant._id }, { $set: { 'profile.nsrp.gsisSss': '4982761053', 'verificationDocuments.validId1.versions.0.declaredDetails.number': '4982761053' } })
+    await nsrpAutomation.updateSettings({ automaticApproval: true, auditPercent: 0, dataChecks: false }, admin.email)
+    const response = await request(app).post('/api/profile/verification-documents/birthCertificate').set(auth('Applicant', applicant)).field('verificationDetails', JSON.stringify({ copyType: 'PSA copy on security paper' })).attach('document', mimetype === 'application/pdf' ? pdfBuffer() : await sharp(image).linear(0.85).png().toBuffer(), { filename: mimetype === 'application/pdf' ? 'SAMPLE.pdf' : 'SAMPLE.png', contentType: mimetype })
+    expect(response.status, JSON.stringify(response.body)).toBe(200)
+    await drainVerificationJobs()
+    const saved = await Applicant.findById(applicant._id)
+    expect(saved.verificationDocuments.birthCertificate.versions.at(-1).status, JSON.stringify(saved.verificationDocuments.birthCertificate.versions.at(-1))).toBe('approved')
+    expect(saved.verificationStatus).toBe('approved')
+    expect(await Notification.countDocuments({ type: 'document_resubmitted' })).toBe(0)
+  })
   it('automatically verifies matching identity documents against NSRP without approving NSRP itself', async () => {
     reading.text = sampleText('1990-01-01').replace('1234567890', '4982761053')
     await Applicant.updateOne({ _id: applicant._id }, { $set: { 'profile.nsrp.gsisSss': '4982761053', 'verificationDocuments.validId1.versions.0.declaredDetails.number': '4982761053' } })

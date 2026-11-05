@@ -4,7 +4,9 @@ import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
 import { pdf } from 'pdf-to-img'
 
 const dionedaSet = process.argv.includes('--nsrp-dioneda')
-const output = new URL(`../../docs/sample-verification-documents/${dionedaSet ? 'dioneda/' : ''}`, import.meta.url)
+const winterSet = process.argv.includes('--winter-gyeoul')
+const suppliedSet = dionedaSet || winterSet
+const output = new URL(`../../docs/sample-verification-documents/${winterSet ? 'winter-gyeoul/' : dionedaSet ? 'dioneda/' : ''}`, import.meta.url)
 await mkdir(output, { recursive: true })
 const ink = rgb(0.12, 0.20, 0.29)
 const red = rgb(0.72, 0.12, 0.12)
@@ -19,11 +21,11 @@ async function document(name, width, height, title, fields, back = false) {
   const text = (value, x, y, size = 12, heavy = false, color = ink) => page.drawText(value, { x, y, size, font: heavy ? bold : font, color })
   page.drawRectangle({ x: 0, y: height - 54, width, height: 54, color: ink })
   text('SAMPLE - NOT VALID', 26, height - 34, 23, true, rgb(1, 1, 1))
-  text(dionedaSet ? 'CAPSTONE TEST FIXTURE / NSRP COMPARISON' : 'CAPSTONE TEST FIXTURE / FICTIONAL RECORD', 26, height - 80, 11, true)
+  text(suppliedSet ? 'CAPSTONE TEST FIXTURE / NSRP COMPARISON' : 'CAPSTONE TEST FIXTURE / FICTIONAL RECORD', 26, height - 80, 11, true)
   text(title, 26, height - 115, 23, true)
   let y = height - 153
   for (const [label, value] of fields) {
-    if (dionedaSet) {
+    if (suppliedSet) {
       text(`${label}: ${value}`, 26, y, 13)
       y -= 48
       continue
@@ -38,7 +40,7 @@ async function document(name, width, height, title, fields, back = false) {
   }
   page.drawLine({ start: { x: 26, y: 65 }, end: { x: width - 26, y: 65 }, color: red, thickness: 2 })
   text('FOR SOFTWARE TESTING ONLY', 26, 43, 12, true, red)
-  text(dionedaSet ? 'Details copied from supplied NSRP. This is not an official document.' : 'All personal details are invented. This is not an official document.', 26, 26, 9)
+  text(suppliedSet ? 'Details copied from supplied NSRP. This is not an official document.' : 'All personal details are invented. This is not an official document.', 26, 26, 9)
   const bytes = await doc.save()
   await writeFile(new URL(`${name}.pdf`, output), bytes)
   const rendered = await pdf(Buffer.from(bytes), { scale: 2 })
@@ -48,7 +50,70 @@ async function document(name, width, height, title, fields, back = false) {
   console.log(`Created ${name}.pdf and ${name}.png (${bytes.length} PDF bytes)`)
 }
 
-if (dionedaSet) {
+if (winterSet) {
+const identity = [
+  ['Surname', 'Gyeoul'],
+  ['First name', 'Winter'],
+  ['Middle name', 'Not provided'],
+  ['Suffix', 'None provided'],
+  ['Date of birth', '2005-01-11'],
+  ['Sex', 'Male'],
+]
+await document('sample-birth-certificate-winter-gyeoul', 612, 792, 'CERTIFICATE OF LIVE BIRTH', [
+  ['Reference number', 'TEST-BIRTH-WINTER-0001'],
+  ...identity,
+  ['Place of birth', 'Seoul, Korea'],
+  ['Record status', 'Test fixture - no civil registry entry'],
+])
+await document('sample-id-front-winter-gyeoul', 640, 720, 'IDENTIFICATION CARD - FRONT', [
+  ['Test ID type', 'Sample identity card (not government-issued)'],
+  ...identity,
+  ['Test ID number', 'TEST-ID-WINTER-0001'],
+  ['Height / civil status', '165 cm / Single'],
+])
+await document('sample-id-back-winter-gyeoul', 640, 480, 'IDENTIFICATION CARD - BACK', [
+  ['Test ID number', 'TEST-ID-WINTER-0001'],
+  ['Address', '258, Nagotgot, Manito, Albay'],
+  ['Contact number', '09564546464'],
+  ['Issuing organization', 'CAPSTONE Test Fixtures (fictional issuer)'],
+], true)
+await writeFile(new URL('README.md', output), `# Winter Gyeoul verification samples
+
+SAMPLE - NOT VALID. For local upload, preview and OCR testing only.
+These fixtures use the sample details supplied in the signup screenshots.
+
+| Field | Value |
+| --- | --- |
+| Surname | Gyeoul |
+| First name | Winter |
+| Middle name / suffix | Not provided |
+| Date of birth | 2005-01-11 (January 11, 2005) |
+| Place of birth | Seoul, Korea |
+| Sex | Male |
+| Civil status | Single |
+| Height | 165 cm |
+| Address | 258, Nagotgot, Manito, Albay |
+| Contact number | 09564546464 |
+| Religion in source | Roman Catholic (not printed) |
+
+The saved NSRP confirms that the displayed date 11/01/2005 uses DD/MM/YYYY.
+The original November 1 interpretation was corrected to January 11, 2005.
+Parents' names and expiry dates were not supplied and are omitted.
+Birth reference TEST-BIRTH-WINTER-0001 and ID number TEST-ID-WINTER-0001
+are invented test identifiers. This sample ID is not a government-issued ID.
+No official seals, signatures, photographs, QR codes or barcodes are included.
+
+Upload either PDF or PNG per slot:
+- sample-birth-certificate-winter-gyeoul: birth certificate sample.
+- sample-id-front-winter-gyeoul: ID front sample.
+- sample-id-back-winter-gyeoul: back of the same ID sample.
+
+These files exercise uploads and data comparisons, not document authenticity.
+No account, verification rule or approval status was changed.
+
+Regenerate: node server/scripts/create-sample-verification-documents.js --winter-gyeoul
+`)
+} else if (dionedaSet) {
 const identity = [
   ['Surname', 'Dioneda'],
   ['First name', 'Eliseo'],

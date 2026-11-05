@@ -13,7 +13,7 @@ describe('account deletion screens', () => {
     fetch.mockImplementation(async (_url, options) => response(options?.method === 'POST' ? record : null))
     render(<ApplicantAccountSettings token="token" />)
     await screen.findByLabelText('Current password')
-    fireEvent.change(screen.getByLabelText('Current password'), { target: { value: 'MyPassword123!' } })
+    fireEvent.change(screen.getByLabelText('Current password', { selector: 'input' }), { target: { value: 'MyPassword123!' } })
     fireEvent.change(screen.getByLabelText('Reason for deletion (optional)'), { target: { value: 'No longer needed' } })
     fireEvent.submit(screen.getByRole('button', { name: 'Request account deletion' }).closest('form'))
     expect(fetch.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(0)
@@ -36,7 +36,7 @@ describe('account deletion screens', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cancel deletion request' }))
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Yes, cancel request' }))
     await screen.findByText('Deletion request cancelled')
-    expect(screen.getByLabelText('Current password')).toBeInTheDocument()
+    expect(screen.getByLabelText('Current password', { selector: 'input' })).toBeInTheDocument()
   })
 
   it('shows decline feedback and allows another request', async () => {
@@ -44,7 +44,7 @@ describe('account deletion screens', () => {
     render(<ApplicantAccountSettings token="token" />)
     await screen.findByText('Deletion request declined')
     expect(screen.getByText(/PESO feedback: Please speak/)).toBeInTheDocument()
-    expect(screen.getByLabelText('Current password')).toBeInTheDocument()
+    expect(screen.getByLabelText('Current password', { selector: 'input' })).toBeInTheDocument()
   })
 
   it('requires admin approval confirmation and refreshes the queue after success', async () => {

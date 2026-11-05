@@ -218,12 +218,13 @@ describe('Document verification foundations', () => {
     expect(versions[0].verificationAudit[0].action).toBe('resubmit')
     expect(versions[1]).toMatchObject({ version: 2, status: 'pending', sourceType: 'uploaded', autoApproved: false })
   })
-  it('finds normalized passport, mobile and name/birth duplicates without revealing other accounts', async () => {
+  it('allows shared mobiles while finding passport and name/birth duplicates without revealing other accounts', async () => {
     const first = await applicant({}, { nsrpAutoEnabledAtCreation: true, profile: { nsrp: validNsrpAnswers({ passportNo: 'P1234567' }) } })
     const second = await applicant({}, { nsrpAutoEnabledAtCreation: true, profile: { nsrp: validNsrpAnswers({ passportNo: 'P1234567' }) } })
     for (const account of [first, second]) await nsrpAutomation.process({ role: 'Applicant', accountId: account._id, ip: '192.0.2.4' })
     const report = (await nsrpAutomation.decisions().findOne({ accountId: second._id })).report
-    expect(report.findings.map(f => f.code)).toEqual(expect.arrayContaining(['duplicate_passport', 'duplicate_mobile', 'duplicate_name_birth']))
+    expect(report.findings.map(f => f.code)).toEqual(expect.arrayContaining(['duplicate_passport', 'duplicate_name_birth']))
+    expect(report.findings.map(f => f.code)).not.toContain('duplicate_mobile')
     expect(JSON.stringify(report)).not.toMatch(/P1234567|09171234567|Juan|Cruz/)
     expect((await Applicant.findById(second._id)).verificationDocuments.nsrpForm.versions[0].status).toBe('pending')
   })

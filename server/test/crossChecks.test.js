@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { it, expect } from 'vitest'
-import { crossChecks, compareName, compareDate, extractDocumentFields } from '../../shared/crossChecks.js'
+import { crossChecks, compareName, compareDate, dateParts, extractDocumentFields } from '../../shared/crossChecks.js'
 it.each([['Ma.', 'Maria'], ['Dela Cruz', 'de la Cruz'], ['Sto. Tomas', 'Santo Tomas'], ['Muñoz', 'Munoz'], ["O'Neil", 'ONeil']])('normalizes %s and %s', (a, b) => expect(compareName(a, b)).toBe('match'))
 it('handles initials, absent middle names, tolerances, and meaningful differences', () => {
  expect(compareName('S', 'Santos', { middle: true })).toBe('match')
@@ -13,6 +13,25 @@ it('normalizes dates and recognizes swapped day/month', () => {
  expect(compareDate('1990-04-12', '12/04/1990')).toBe('match')
  expect(compareDate('1990-04-12', '04/12/1990')).toBe('minor')
  expect(compareDate('1990-04-12', '1991-04-12')).toBe('significant')
+})
+it.each(['Asia/Manila', 'UTC', 'America/Los_Angeles'])('compares calendar birth dates without timezone shifts in %s', timezone => {
+ const previous = process.env.TZ
+ try {
+  process.env.TZ = timezone
+  for (const value of ['November 1, 2005', 'November 1, 2005 (2005-11-01)', 'Nov. 1, 2005', '1 November 2005', '2005-11-01']) {
+   expect(dateParts(value)).toEqual([2005, 11, 1])
+   expect(compareDate(value, '2005-11-01')).toBe('match')
+  }
+  const report = crossChecks({ nsrp: { dob: '2005-11-01' }, birth: { values: extractDocumentFields('Date of birth: November 1, 2005 (2005-11-01)'), evidence: 'independent' } })
+  expect(report.comparisons.find(comparison => comparison.fieldGroup === 'birth date').result).toBe('match')
+ } finally {
+  if (previous === undefined) delete process.env.TZ
+  else process.env.TZ = previous
+ }
+})
+it.each(['2005-02-29', '31/11/2005', 'February 30, 2005', 'November 1, 2005 (2005-11-02)', 'not a date'])('treats invalid or conflicting dates as unreadable: %s', value => {
+ expect(dateParts(value)).toBeNull()
+ expect(compareDate(value, '2005-11-01')).toBe('could_not_read')
 })
 it('never gives self-declared data independent evidence or an attention level', () => {
  const report = crossChecks({ nsrp: { surname: 'Cruz', firstName: 'Juan', dob: '1990-01-01' }, birth: { values: { surname: 'Rivera', firstName: 'Pedro', dob: '2000-01-01' }, evidence: 'self-declared' } })
