@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 
-export default function ProfileDropdown({ children, className, onProfile, onSettings }) {
+export default function ProfileDropdown({ children, className, onProfile, onSettings, onDocuments, onNsrp }) {
   const [open, setOpen] = useState(false)
   const root = useRef(null)
   const trigger = useRef(null)
@@ -25,7 +25,7 @@ export default function ProfileDropdown({ children, className, onProfile, onSett
     <button ref={trigger} type="button" aria-label="Profile" className={className} aria-haspopup={onSettings ? 'menu' : undefined} aria-expanded={onSettings ? open : undefined} aria-controls={open ? menuId : undefined} onClick={() => onSettings ? setOpen(value => !value) : onProfile()} onKeyDown={event => {
       if (onSettings && !open && ['ArrowDown', 'ArrowUp'].includes(event.key)) {
         event.preventDefault(); event.stopPropagation(); setOpen(true)
-        requestAnimationFrame(() => focusItem(event.key === 'ArrowUp' ? 1 : 0))
+        requestAnimationFrame(() => focusItem(event.key === 'ArrowUp' ? root.current.querySelectorAll('[role="menuitem"]').length - 1 : 0))
       }
     }}>
       {children}
@@ -34,6 +34,8 @@ export default function ProfileDropdown({ children, className, onProfile, onSett
     {open && <div id={menuId} role="menu" aria-label="Profile options" className="portal-profile-menu">
       <button type="button" role="menuitem" onClick={() => choose(onProfile)}>View Profile</button>
       <button type="button" role="menuitem" onClick={() => choose(onSettings)}>Account Settings</button>
+      {onNsrp && <button type="button" role="menuitem" onClick={() => choose(onNsrp)}>Use your completed NSRP</button>}
+      {onDocuments && <button type="button" role="menuitem" onClick={() => choose(onDocuments)}>Documents submitted to PESO</button>}
     </div>}
   </div>
 }

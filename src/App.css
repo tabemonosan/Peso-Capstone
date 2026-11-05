@@ -842,7 +842,8 @@
   top: calc(100% + 8px);
   right: 0;
   z-index: 60;
-  width: 190px;
+  width: 256px;
+  max-width: calc(100vw - 32px);
   padding: 6px;
   border: 1px solid #d9e3f2;
   border-radius: 14px;

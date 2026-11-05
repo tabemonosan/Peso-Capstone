@@ -464,7 +464,7 @@ const toggleSkill = (selected, skill) => {
     currentUser?.token || (typeof window !== "undefined" ? localStorage.getItem('peso-token') : null)
   const openApplicantDocuments = () => {
     setShowProfileDocuments(true)
-    setActiveView('profile')
+    setActiveView('documents')
   }
 
   const updateRegistrationUser = useCallback((data) => {
@@ -1322,8 +1322,7 @@ const toggleSkill = (selected, skill) => {
     if (activeRole === 'Applicant' && notification?.type === 'account_deletion_declined') {
       setSelectedNotification(null)
       setShowProfileDocuments(false)
-      setActiveView('profile')
-      requestAnimationFrame(() => document.getElementById('account-settings')?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }))
+      setActiveView('account-settings')
       return
     }
     if (activeRole === 'Admin' && notification?.type === 'csm_response_submitted') {
@@ -1703,12 +1702,14 @@ const toggleSkill = (selected, skill) => {
     if (activeView === 'all-dashboard') setActiveView('dashboard')
   }, [activeView])
 
-  // Restore older saved document destinations inside the applicant profile.
   useEffect(() => {
-    if (activeRole === 'Applicant' && activeView === 'documents') {
-      setShowProfileDocuments(true)
-      setActiveView('profile')
-    }
+    if (activeRole !== 'Applicant' || !['account-settings', 'documents', 'nsrp-import'].includes(activeView)) return
+    const frame = requestAnimationFrame(() => {
+      const page = document.querySelector('[data-applicant-window]')
+      page?.focus({ preventScroll: true })
+      page?.scrollIntoView?.({ block: 'start' })
+    })
+    return () => cancelAnimationFrame(frame)
   }, [activeRole, activeView])
 
   // Support existing document links and the new profile destination after login.
@@ -1718,13 +1719,13 @@ const toggleSkill = (selected, skill) => {
     if (params.get('accountSettings') === '1') {
       documentLinkHandled.current = true
       setShowProfileDocuments(false)
-      setActiveView('profile')
+      setActiveView('account-settings')
       return
     }
     if (window.location.pathname === '/documents' || params.get('documents') === '1' || params.get('editNsrp') === '1') {
       documentLinkHandled.current = true
       setShowProfileDocuments(true)
-      setActiveView('profile')
+      setActiveView('documents')
     }
   }, [isLoggedIn, activeRole])
 
@@ -1744,7 +1745,7 @@ const toggleSkill = (selected, skill) => {
 
   // Incomplete accounts can only leave the checklist through its profile/document links.
   useEffect(() => {
-    if (isLoggedIn && currentUser?.registration && !currentUser.registration.complete && ['Applicant', 'Employer'].includes(activeRole) && !['complete', 'profile', 'documents', 'dashboard'].includes(activeView)) {
+    if (isLoggedIn && currentUser?.registration && !currentUser.registration.complete && ['Applicant', 'Employer'].includes(activeRole) && !['complete', 'profile', 'documents', 'dashboard', 'account-settings', 'nsrp-import'].includes(activeView)) {
       setActiveView('complete')
     }
   }, [isLoggedIn, activeRole, currentUser?.registration, activeView])
@@ -2118,13 +2119,10 @@ const toggleSkill = (selected, skill) => {
                 onProfile={() => { setShowProfileDocuments(false); setActiveView("profile") }}
                 onSettings={activeRole === 'Applicant' ? () => {
                   setShowProfileDocuments(false)
-                  setActiveView('profile')
-                  requestAnimationFrame(() => {
-                    const settings = document.getElementById('account-settings')
-                    settings?.scrollIntoView?.({ block: 'start', behavior: 'smooth' })
-                    settings?.focus({ preventScroll: true })
-                  })
+                  setActiveView('account-settings')
                 } : undefined}
+                onDocuments={activeRole === 'Applicant' ? () => { setShowProfileDocuments(false); setActiveView('documents') } : undefined}
+                onNsrp={activeRole === 'Applicant' && currentUser?.verificationDocuments?.some(doc => doc.docKey === 'nsrpForm' && doc.sourceType === 'uploaded') ? () => { setShowProfileDocuments(false); setActiveView('nsrp-import') } : undefined}
                 className={`portal-profile-button inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-medium transition-colors ${
                   activeView === "profile" ? "bg-cyan-500 text-slate-950" : "text-slate-200"
                 }`}
@@ -2249,7 +2247,7 @@ const toggleSkill = (selected, skill) => {
                 if (activeRole === 'Admin' && target === 'employment-updates') setHiringUpdates({})
                 setActiveView(target)
               }} />
-              {activeRole === 'Applicant' && ['under_review', 'waitlisted'].includes(currentUser?.verificationStatus) && <ApplicantReviewStatus token={getToken()} onManageDocuments={() => { setActiveView('profile'); setShowProfileDocuments(true) }} />}
+              {activeRole === 'Applicant' && ['under_review', 'waitlisted'].includes(currentUser?.verificationStatus) && <ApplicantReviewStatus token={getToken()} onManageDocuments={openApplicantDocuments} />}
               {activeRole === 'Applicant' && applicantApproved && !currentUser?.pageGuides && (
                 <section className="applicant-home-guide" aria-labelledby="applicant-home-guide-title">
                   <div className="applicant-home-guide-icon"><PortalNavIcon name="verification" /></div>
@@ -2527,15 +2525,43 @@ const toggleSkill = (selected, skill) => {
           {activeRole === 'Admin' && clientFeedbackOpen && <AdminCsmFeedbackModal token={getToken()} onClose={() => setClientFeedbackOpen(false)} />}
           {jobSubmittedOpen && <Modal onClose={() => setJobSubmittedOpen(false)} labelledBy="job-submitted-title" maxWidth="max-w-md"><h2 id="job-submitted-title" className="text-xl font-bold text-slate-900">{jobSubmittedOpen.status === 'approved' ? 'Job posting published' : 'Job request submitted for review'}</h2><p className="mt-3 text-sm text-slate-600">{jobSubmittedOpen.status === 'approved' ? 'Your job posting passed automatic safety screening and is now visible to applicants.' : 'PESO will review your job posting. You can track its status in Job Postings.'}</p><JobScreeningSummary moderation={jobSubmittedOpen.moderation} /><button type="button" onClick={() => setJobSubmittedOpen(false)} className="mt-5 rounded-full bg-blue-600 px-5 py-2 text-sm font-semibold text-white">Done</button></Modal>}
 
+          {activeRole === 'Applicant' && activeView === 'nsrp-import' && <section data-applicant-window tabIndex={-1} className="scroll-mt-28" aria-label="Use your completed NSRP">
+                  {currentUser?.verificationDocuments?.some(doc => doc.docKey === 'nsrpForm' && doc.sourceType === 'uploaded') && <NsrpImportReview key={currentUser.id} token={getToken()} disabled={isEditingProfile || profileSaving} onUse={({ profile }) => {
+                    setCurrentUser(current => ({ ...current, profile }))
+                    setProfileData(normalizeProfile({ ...currentUser, profile }, 'Applicant'))
+                  }} />}
+                  {!currentUser?.verificationDocuments?.some(doc => doc.docKey === 'nsrpForm' && doc.sourceType === 'uploaded') && <p className="rounded-xl border border-slate-200 bg-white p-6 text-slate-700">No uploaded NSRP is available. You can manage your NSRP in Documents submitted to PESO.</p>}
+          </section>}
+          {activeRole === 'Applicant' && activeView === 'documents' && <section data-applicant-window tabIndex={-1} className="scroll-mt-28" aria-label="Documents submitted to PESO">
+                  <div id="profile-documents">
+                    <MyDocumentsPage
+                      guideState={currentUser?.pageGuides}
+                      onGuidesSaved={saveGuideState}
+                      applicantId={currentUser?.id || currentUser?._id}
+                      token={getToken()}
+                      open={showProfileDocuments}
+                      onOpenChange={setShowProfileDocuments}
+                      onUpdated={async () => {
+                        const token = getToken()
+                        if (!token) return
+                        const response = await fetch(`${API_URL}/api/profile`, { headers: { Authorization: `Bearer ${token}` } })
+                        const data = await response.json()
+                        if (response.ok && !data.error) setCurrentUser((current) => ({ ...current, registration: data.registration, verificationStatus: data.verificationStatus, verificationReason: data.verificationReason, attentionCount: data.attentionCount, verificationDocuments: data.verificationDocuments }))
+                      }}
+                    />
+                  </div>
+
+          </section>}
+          {activeRole === 'Applicant' && activeView === 'account-settings' && <section data-applicant-window tabIndex={-1} className="scroll-mt-28" aria-label="Account settings window">
+                  <ApplicantAccountSettings token={getToken()} onMessage={(text) => setAppMessage({ type: 'success', text })} />
+          </section>}
+
           {activeView === "profile" && (<section className={`${activeRole === 'Employer' ? 'employer-profile-card portal-card' : activeRole === 'Applicant' ? 'applicant-profile-card portal-card' : ''} rounded-2xl border border-slate-800 bg-slate-900/70 p-6`}>
               {activeRole === 'Applicant' ? (
                 <>
                   <h2 className="text-xl font-semibold text-white">Applicant Profile</h2>
                   <p className="mt-3 text-slate-400">Update your traits and personal information.</p>
-                  {currentUser?.verificationDocuments?.some(doc => doc.docKey === 'nsrpForm' && doc.sourceType === 'uploaded') && <NsrpImportReview key={currentUser.id} token={getToken()} disabled={isEditingProfile || profileSaving} onUse={({ profile }) => {
-                    setCurrentUser(current => ({ ...current, profile }))
-                    setProfileData(normalizeProfile({ ...currentUser, profile }, 'Applicant'))
-                  }} />}
+
 
                   <EditableProfileCover name={formatFullName(profileData) || profileData.name || 'Your name'} initials={applicantProfileInitials} photo={profileData.profileImage} banner={profileData.bannerImage} editing={isEditingProfile} saving={profileSaving} onEdit={() => setIsEditingProfile(true)} onSave={saveProfileEdits} onCancel={cancelProfileEdits} onImage={handleImageFile} photoInputRef={profilePhotoInputRef} />
 
@@ -2682,24 +2708,7 @@ const toggleSkill = (selected, skill) => {
                       />
                     </div>
                   </form>
-                  <div className="mt-6" id="profile-documents">
-                    <MyDocumentsPage
-                      guideState={currentUser?.pageGuides}
-                      onGuidesSaved={saveGuideState}
-                      applicantId={currentUser?.id || currentUser?._id}
-                      token={getToken()}
-                      open={showProfileDocuments}
-                      onOpenChange={setShowProfileDocuments}
-                      onUpdated={async () => {
-                        const token = getToken()
-                        if (!token) return
-                        const response = await fetch(`${API_URL}/api/profile`, { headers: { Authorization: `Bearer ${token}` } })
-                        const data = await response.json()
-                        if (response.ok && !data.error) setCurrentUser((current) => ({ ...current, registration: data.registration, verificationStatus: data.verificationStatus, verificationReason: data.verificationReason, attentionCount: data.attentionCount }))
-                      }}
-                    />
-                  </div>
-                  <ApplicantAccountSettings token={getToken()} onMessage={(text) => setAppMessage({ type: 'success', text })} />
+
                 </>
               ) : (
                 <>
