@@ -21,8 +21,8 @@ export async function appendTrustEvents(Applicant, applicantId, entries) {
     for (const entry of entries) {
       const { key, type, by, reason, at = new Date() } = entry
       if (!by || typeof reason !== 'string' || !reason.trim() || reason.length > 1000 || typeof key !== 'string' || !key || ![...Object.keys(TRUST_DELTAS), 'manual_adjustment', 'reversal'].includes(type) || !Number.isFinite(+new Date(at))) fail('Enter a supported event, time, actor, and reason.')
-      if (type === 'manual_adjustment' && (!Number.isInteger(entry.delta) || entry.delta > 0 || entry.delta < -100)) fail('Manual credits are not supported. Use confirmed attendance or employment.')
-      if (type === 'reversal' && [...events, ...next].some(event => event.type === 'reversal' && event.targetKey === entry.targetKey)) return false
+      if (type === 'manual_adjustment' && (!Number.isInteger(entry.delta) || entry.delta > 0 || entry.delta < -100 || entry.points > 0)) fail('Manual credits are not supported. Use confirmed attendance or employment.')
+      if (type === 'reversal' && [...events, ...next].some(event => event.type === 'reversal' && event.targetKey === entry.targetKey)) throw new ApplicationError('EVENT_ALREADY_REVERSED', 'This event was already reversed. Refresh the history.', 409)
       const event = { ...entry, at: new Date(at), status: 'applied', actor: entry.actor || { role: 'Admin', label: by }, reason: reason.trim(), policy: rules }
       const result = calculateReputation([...events, ...next, event], rules, at)
       const row = result.events.find(row => row.key === key)

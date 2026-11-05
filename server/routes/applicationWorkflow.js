@@ -47,7 +47,7 @@ export function createApplicationWorkflowRouter({ service, Applicant, Admin, Job
     res.json({ points: state.points, initialPoints: state.settings.initialPoints, maximumPoints: state.settings.maximumPoints, minimumPoints: state.settings.minimumPoints, tier: state.tier, recovery: state.recovery, settings: state.settings, lowTrustRouting: state.lowTrustRouting, policy: reputationPolicy(state.settings), page, pageSize: limit, total: events.length,
       items: events.slice((page - 1) * limit, page * limit).map(event => {
         const review = requests.find(review => review.eventKey === event.key || review.eventKey === event.replaces)
-        return { id: publicReputationEventId(event.key), type: event.type, label: event.label, at: event.at, before: event.before, after: event.after, change: event.change, applicationId: event.applicationId ? String(event.applicationId) : null, status: event.status === 'reversed' ? 'reversed' : ['pending', 'processing'].includes(review?.status) ? 'under_review' : 'applied', review: review ? { status: review.status === 'processing' ? 'pending' : review.status, publicReason: review.publicReason || '' } : null, canRequestReview: event.penalty === true && event.change < 0 && event.status !== 'reversed' && !review }
+        return { id: publicReputationEventId(event.key), type: event.type, label: event.label, at: event.at, before: event.before, after: event.after, change: event.change, explanation: event.limit ? 'A policy limit applied to this event.' : Number.isInteger(event.nominalPoints) && event.nominalPoints !== event.change ? 'The score stayed within its allowed range.' : '', applicationId: event.applicationId ? String(event.applicationId) : null, status: event.status === 'reversed' ? 'reversed' : ['pending', 'processing'].includes(review?.status) ? 'under_review' : 'applied', review: review ? { status: review.status === 'processing' ? 'pending' : review.status, publicReason: review.publicReason || '' } : null, canRequestReview: event.penalty === true && (event.nominalPoints < 0 || event.change < 0) && event.status !== 'reversed' && !review }
       }) })
   }))
   router.post('/reputation/reviews', wrap(async (req, res) => {
@@ -134,7 +134,7 @@ export function createApplicationWorkflowRouter({ service, Applicant, Admin, Job
       ApplicationAppeal.find({ status: 'pending' }).sort({ createdAt: -1 }).limit(50).lean(),
       HireReport.find({ reportedByRole: { $ne: 'Applicant' }, status: { $in: ['hired', 'deployed'] } }).sort({ reportedAt: -1 }).limit(50).select('applicantId jobId status').lean(),
     ])
-    res.json({ reports, totalReports, page, limit, meetings, appeals, hires })
+    res.json({ reports, totalReports, page, limit, meetings, appeals, hires, lateCancellationHours: (await loadReputationSettings()).rules.lateCancellationHours })
   }))
   router.get('/admin/applicants', wrap(async (_req, res) => {
     const [accounts, settings] = await Promise.all([Applicant.find({ deletedAt: { $exists: false } }).select('email profile.firstName profile.lastName applyingSuspendedAt +applyingSuspensionReason +trustValue +trustEvents').limit(1000).lean(), loadReputationSettings()])

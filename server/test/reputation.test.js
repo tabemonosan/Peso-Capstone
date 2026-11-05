@@ -78,4 +78,17 @@ describe('deterministic reputation and recovery', () => {
   it('only restores actual losses when an administrator changes the starting score', () => {
     expect(calculate([event('n', 'late_cancellation')], 100, { initialPoints: 90 }).points).toBe(90)
   })
+  it('counts the last twelve calendar months across leap years', () => {
+    const leapPenalty = { key: 'leap', type: 'confirmed_no_show', at: '2024-02-29T12:00:00Z' }
+    expect(calculateReputation([leapPenalty], {}, '2025-02-28T12:00:00Z').confirmedNoShows).toBe(1)
+    expect(calculateReputation([leapPenalty], {}, '2025-03-01T12:00:00Z').confirmedNoShows).toBe(0)
+  })
+  it('preserves legacy booked attendance credits but requires employer identity for new credits', () => {
+    const loss = event('loss', 'manual_adjustment', 0, { delta: -10 })
+    expect(calculate([loss, event('old-attendance', 'attended_interview', 1, { delta: 5 })], 1).points).toBe(95)
+    expect(calculate([loss, event('new-attendance', 'attended_interview', 1, { points: 5, actor: { role: 'Employer' } })], 1).points).toBe(90)
+  })
+  it('does not allow a new administrative loss to bypass the penalty cap', () => {
+    expect(calculate([event('adjustment', 'manual_adjustment', 0, { delta: -80, actor: { role: 'Admin' } })]).points).toBe(70)
+  })
 })

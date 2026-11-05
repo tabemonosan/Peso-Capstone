@@ -17,7 +17,7 @@ export function createReputationReviews({ Applicant, notify, notifyAdmins, now =
   async function request(account, body, file) {
     if (typeof body.eventId !== 'string' || !/^[a-f0-9]{64}$/.test(body.eventId) || !REVIEW_CATEGORIES.includes(body.category) || typeof body.note !== 'string' || !body.note.trim() || body.note.length > 300) fail('INVALID_REVIEW', 'Choose a reason and enter a note of 1 to 300 characters.')
     const state = await readReputation(Applicant, account._id, now())
-    const event = state.events.find(row => publicReputationEventId(row.key) === body.eventId && row.penalty && row.change < 0 && row.status !== 'reversed' && !row.virtual)
+    const event = state.events.find(row => publicReputationEventId(row.key) === body.eventId && row.penalty && (row.nominalPoints < 0 || row.change < 0) && row.status !== 'reversed' && !row.virtual)
     if (!event) fail('PENALTY_UNAVAILABLE', 'Choose an applied penalty from your own history.', 403)
     if (event.replaces) fail('ALREADY_REQUESTED', 'This penalty has already been reviewed.', 409)
     if (file) {
@@ -25,7 +25,7 @@ export function createReputationReviews({ Applicant, notify, notifyAdmins, now =
       // Reuse the document inspection and private binary storage. No public URL.
       await inspectDocument(file)
     }
-    const supportingVersion = (account.trustEvents || state.account.trustEvents || []).findIndex(row => row.key === event.key) + 1
+    const supportingVersion = (account.trustEvents || state.account.trustEvents || []).findIndex((row, index) => (row.key || `legacy:${index}`) === event.key) + 1
     await ReputationReview.init()
     let review
     try {
@@ -74,7 +74,7 @@ export function createReputationReviews({ Applicant, notify, notifyAdmins, now =
     if (!event) fail('EVENT_UNAVAILABLE', 'Event unavailable or already reversed.', 409)
     const applied = await appendTrustEvents(Applicant, applicantId, [{ key: `admin-reverse:${event.key}`, type: 'reversal', targetKey: event.key, applicationId: event.applicationId, by: admin.email, reason: body.reason, at: now() }])
     if (applied) {
-      await ReputationReview.updateMany({ applicantId, eventKey: event.key, status: 'pending' }, { $set: { status: 'reversed', decision: 'reverse', reviewedBy: admin.email, reviewedAt: now(), adminNote: body.reason } })
+      await ReputationReview.updateMany({ applicantId, eventKey: event.key, status: { $in: ['pending', 'processing'] } }, { $set: { status: 'reversed', decision: 'reverse', reviewedBy: admin.email, reviewedAt: now(), adminNote: body.reason, publicReason: '' } })
       await audit({ key: `reputation-reverse:${applicantId}:${event.key}`, action: 'reputation_event_reversed', applicantId: new mongoose.Types.ObjectId(applicantId), eventKey: event.key, by: admin.email, reason: body.reason })
       await message(applicantId, 'PESO reversed a reputation event and recalculated your points. Open My reputation to view the updated history.')
     }

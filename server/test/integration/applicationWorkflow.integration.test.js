@@ -413,7 +413,9 @@ describe('applications, interviews and admin-confirmed events', () => {
 
   it.each([false, true])('routes low-trust applicants only when the optional setting is %s', async enabled => {
     const normal = await makeApplicant('normal@workflow.test')
-    await applicationWorkflow.confirmEvent({ email: admin.email }, { applicantId: applicant._id, type: 'manual_adjustment', delta: -60, eventKey: 'routing-fixture', reason: 'Demo adjustment' })
+    // A historical ledger loss establishes the low-standing routing fixture;
+    // new penalties are deliberately subject to the rolling cap.
+    await Applicant.collection.updateOne({ _id: applicant._id }, { $set: { trustValue: 40, trustEvents: [{ key: 'routing-fixture', type: 'manual_adjustment', delta: -60, by: admin.email, reason: 'Demo adjustment', at: new Date() }] } })
     if (enabled) await referralWorkflow.setLowTrustRouting(true, admin.email)
     expect((await referralWorkflow.getSettings()).lowTrustRouting).toBe(enabled)
     const low = await apply(), regular = await apply(normal)
@@ -445,6 +447,14 @@ describe('applications, interviews and admin-confirmed events', () => {
     expect(mine.body.items[0].status).toBe('declined_by_admin')
     expect(mine.body.items[0].actions).toEqual(['view_outcome'])
     expect(JSON.stringify(mine.body)).not.toMatch(/PRIVATE|trustValue|reviewQueue/)
+  })
+  it('routes a recovered applicant using the ledger instead of a stale low cache', async () => {
+    await referralWorkflow.setLowTrustRouting(true, admin.email)
+    await Applicant.collection.updateOne({ _id: applicant._id }, { $set: { trustValue: 10, trustEvents: [{ key: 'old-loss', type: 'confirmed_no_show', points: -20, at: new Date(Date.now() - 70 * DAY) }] } })
+    const result = await apply().expect(200)
+    expect(result.body.deliveryStatus).toBe('delivered')
+    expect((await api('get', '/reputation', 'Applicant', applicant)).body.points).toBe(100)
+    expect(await mongoose.connection.db.collection('referral_audit').countDocuments({ action: 'application_routed_for_review' })).toBe(0)
   })
 
   it.each(['confirmed', 'dismissed'])('keeps no-show reports separate from ratings and changes trust only if admin %s', async decision => {

@@ -7,7 +7,7 @@ import { startTestDb, stopTestDb, clearDb, pdfBuffer } from './helpers.js'
 import { recordTrustEvent } from '../../services/trustPolicy.js'
 import { calculateReputation } from '../../../shared/reputation.js'
 vi.mock('../../mailer.js', async original => ({ ...await original(), sendEmail: vi.fn(async () => ({ delivered: true })), initMailer: vi.fn() }))
-const { app, applicationWorkflow } = await import('../../index.js')
+const { app } = await import('../../index.js')
 const { Applicant, Employer, Admin, Referral, Notification, DocumentFile } = await import('../../models/collections.js')
 const { Interview, ReputationReview } = await import('../../models/applicationWorkflow.js')
 let applicant, employer, admin
@@ -98,5 +98,43 @@ describe('reputation recovery and reviews', () => {
     await api('post', '/admin/reputation/reviews/not-an-id', 'Admin', admin, { action: 'reverse', reason: 'Test' }).expect(422)
     await api('post', '/admin/reputation/applicants/not-an-id/reverse', 'Admin', admin, { eventKey: 'x', reason: 'Test' }).expect(422)
     await api('post', '/admin/events/confirm', 'Admin', admin, { applicantId: String(applicant._id), type: 'manual_adjustment', delta: 5, eventKey: 'forbidden-positive', reason: 'Unsupported credit' }).expect(422)
+  })
+  it('keeps reputation data out of employer-facing responses in a route loop', async () => {
+    await penalty()
+    const own = await read()
+    await requestReview(own.body.items[0].id).expect(200)
+    for (const path of ['/api/profile', `/api/referrals/employer/${employer._id}`, '/api/hire-reports', '/api/notifications', '/api/jobs']) {
+      const result = await request(app).get(path).set(auth('Employer', employer))
+      expect([200, 403]).toContain(result.status)
+      expect(JSON.stringify(result.body)).not.toMatch(/"(?:trustValue|trustEvents|points|tier|confirmedNoShows|recovery|reputation|eventKey|adminNote)"\s*:/i)
+    }
+    const notifications = await Notification.find({ 'recipient.role': 'Employer' }).lean()
+    expect(JSON.stringify(notifications)).not.toMatch(/reputation_review|points|standing/i)
+  })
+  it.each(['invitation_confirmed', 'seminar_attendance', 'training_completed'])('rejects the unsupported credit type %s without changing points', async type => {
+    await api('post', '/admin/events/confirm', 'Admin', admin, { applicantId: String(applicant._id), type, referenceId: String(new mongoose.Types.ObjectId()), reason: 'Unsupported credit attempt' }).expect(403)
+    expect((await read()).body.points).toBe(100)
+    expect((await Applicant.findById(applicant._id).select('+trustEvents')).trustEvents || []).toHaveLength(0)
+  })
+  it('allows review of a confirmed incident even when the penalty cap made its actual change zero', async () => {
+    await penalty('n1'); await penalty('n2'); await penalty('n3')
+    const own = await read()
+    const capped = own.body.items.find(event => event.type === 'confirmed_no_show' && event.change === 0)
+    expect(capped.canRequestReview).toBe(true)
+    const review = await requestReview(capped.id).expect(200)
+    await api('post', `/admin/reputation/reviews/${review.body.id}`, 'Admin', admin, { action: 'reverse', reason: 'Incident was reported incorrectly.' }).expect(200)
+    const detail = await api('get', `/admin/reputation/applicants/${applicant._id}`).expect(200)
+    expect(detail.body.confirmedNoShows).toBe(2)
+    expect((await read()).body.points).toBe(70)
+  })
+  it('enforces the live late-cancellation window and excludes its exact boundary', async () => {
+    const cancelledAt = new Date()
+    const meeting = await Interview.create({ referralId: new mongoose.Types.ObjectId(), applicantId: applicant._id, employerId: employer._id, status: 'cancelled', cancelledBy: 'Applicant', cancelledAt, scheduledAt: new Date(+cancelledAt + 12 * 3600000) })
+    await api('post', '/admin/reputation/settings', 'Admin', admin, { rules: { lateCancellationHours: 12 }, reason: 'Review cancellation window.' }).expect(200)
+    const body = { applicantId: String(applicant._id), referenceId: String(meeting._id), type: 'late_cancellation', reason: 'Review of cancellation circumstances.' }
+    await api('post', '/admin/events/confirm', 'Admin', admin, body).expect(409)
+    await api('post', '/admin/reputation/settings', 'Admin', admin, { rules: { lateCancellationHours: 24 }, reason: 'Restore the default window.' }).expect(200)
+    await api('post', '/admin/events/confirm', 'Admin', admin, body).expect(200)
+    expect((await read()).body.points).toBe(95)
   })
 })

@@ -1,6 +1,7 @@
 import mongoose from 'mongoose'
 import { ApplicationError, WITHDRAWN_REFERRALS } from './referralWorkflow.js'
 import { recordTrustEvent } from './trustPolicy.js'
+import { loadReputationSettings } from './reputationSettings.js'
 import { validateInterviewInvitation } from '../../shared/interviewInvitation.js'
 const fail = (code, message, status = 409) => { throw new ApplicationError(code, message, status) }
 const id = (value) => { if (!mongoose.isValidObjectId(value)) fail('INVALID_RECORD', 'Choose a valid record.', 403); return value }
@@ -182,6 +183,7 @@ export function createApplicationWorkflow({ Applicant, Employer, JobPosting, Job
   }
   async function confirmEvent(admin, body) {
     const reason = reasonText(body.reason); id(body.applicantId)
+    const { rules } = await loadReputationSettings()
     if (!await Applicant.exists({ _id: body.applicantId, deletedAt: { $exists: false } })) fail('APPLICANT_UNAVAILABLE', 'Applicant unavailable.', 403)
     let key, confirmedMeeting, confirmedHire
     if (body.type === 'attended_interview' || body.type === 'late_cancellation') {
@@ -190,7 +192,7 @@ export function createApplicationWorkflow({ Applicant, Employer, JobPosting, Job
       if (body.type === 'attended_interview') {
         if (!['held', 'attended'].includes(meeting.status)) fail('INTERVIEW_NOT_HELD', 'The employer must first record the interview as held.')
         await Interview.updateOne({ _id: meeting._id }, { $set: { status: 'attended' } })
-      } else if (meeting.status !== 'cancelled' || meeting.cancelledBy !== 'Applicant' || !meeting.cancelledAt || +meeting.scheduledAt - +meeting.cancelledAt >= DAY || +meeting.scheduledAt < +meeting.cancelledAt) fail('NOT_LATE_CANCELLATION', 'This is not an applicant cancellation under 24 hours before the interview.')
+      } else if (meeting.status !== 'cancelled' || meeting.cancelledBy !== 'Applicant' || !meeting.cancelledAt || +meeting.scheduledAt - +meeting.cancelledAt >= rules.lateCancellationHours * 3600000 || +meeting.scheduledAt < +meeting.cancelledAt) fail('NOT_LATE_CANCELLATION', `This is not an applicant cancellation under ${rules.lateCancellationHours} hours before the interview.`)
       key = `${body.type}:${meeting._id}`
       confirmedMeeting = meeting
     } else if (body.type === 'hired') {
