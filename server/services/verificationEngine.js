@@ -8,15 +8,16 @@ import { LocalChecksProvider, PhilSysQrSignatureProvider } from './verificationP
 import { readQr } from './localImageReading.js'
 import { loadDocumentFile } from '../utils/documentFiles.js'
 import { clearAuthorization } from './documentUpload.js'
+import { isSharedPhoneFinding } from '../../shared/verificationFindings.js'
 const advisory = new Set(['education_age', 'work_start_age', 'experience_age', 'married_under_18', 'location_pair', 'employer_location_pair'])
 const safeFinding = f => ({ ruleId: String(f.ruleId || f.code || 'provider_inconclusive').slice(0, 100), severity: ['info', 'warning', 'critical'].includes(f.severity) ? f.severity : 'info', fieldGroup: String(f.fieldGroup || 'document').slice(0, 60), evidence: f.evidence === 'independent' ? 'independent' : 'self-declared', status: f.status === 'dismissed' ? 'dismissed' : 'open', approvalBlocking: advisory.has(f.ruleId || f.code) ? false : f.approvalBlocking !== false })
 function findingsForDocument(account, docKey, document) {
   // Older decisions copied sibling findings into this document. Discard those
   // comparison rules as well as avoiding new copies on subsequent checks.
   const siblingPrefix = docKey === 'birthCertificate' ? 'cross_id_' : docKey.startsWith('validId') ? 'cross_birth_' : null
-  const own = (document.findings || []).filter(f => !siblingPrefix || !String(f.ruleId || f.code || '').startsWith(siblingPrefix))
+  const own = (document.findings || []).filter(f => !isSharedPhoneFinding(f) && (!siblingPrefix || !String(f.ruleId || f.code || '').startsWith(siblingPrefix)))
   // Duplicate identity claims remain an account-wide approval guard.
-  const duplicates = Object.values(account.verificationDocuments || {}).flatMap(slot => slot.versions?.at(-1)?.findings || []).filter(f => /duplicate|cross_account/.test(f.ruleId || f.code || ''))
+  const duplicates = Object.values(account.verificationDocuments || {}).flatMap(slot => slot.versions?.at(-1)?.findings || []).filter(f => !isSharedPhoneFinding(f) && /duplicate|cross_account/.test(f.ruleId || f.code || ''))
   return [...own, ...duplicates]
 }
 export function createVerificationEngine({ Applicant, Employer, EmployerRequest, automation, notify, notifyAdmins, recomputeApplicant, random = () => crypto.randomInt(1000000) / 1000000, providers, beforeApproval } = {}) {

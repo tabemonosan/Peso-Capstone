@@ -72,11 +72,11 @@ describe('PESO Portal prototype', () => {
   it('starts applicant sign-up with account credentials and consent before the NSRP steps', () => {
     render(<App />)
 
-    fireEvent.click(screen.getByRole('button', { name: /Create an account \(Applicant\)/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^Create an account$/i }))
 
     expect(screen.getByLabelText(/^Email$/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/^Password$/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/Confirm password/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/^Password$/i, { selector: 'input' })).toBeInTheDocument()
+    expect(screen.getByLabelText(/Confirm password/i, { selector: 'input' })).toBeInTheDocument()
     expect(screen.getByText(/collection and processing/i)).toBeInTheDocument()
     expect(screen.queryByLabelText(/First name/i)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^Create account$/i })).not.toBeInTheDocument()
@@ -86,7 +86,7 @@ describe('PESO Portal prototype', () => {
   it('renders the portal after a successful admin login without admin role switching controls', async () => {
     render(<App />)
     const emailInput = screen.getByLabelText(/Email/i)
-    const passwordInput = screen.getByLabelText(/Password/i)
+    const passwordInput = screen.getByLabelText(/Password/i, { selector: 'input' })
     const submitButton = screen.getByRole('button', { name: /Sign in/i })
 
     fireEvent.change(emailInput, { target: { value: 'admin@peso.gov' } })
@@ -154,7 +154,7 @@ describe('PESO Portal prototype', () => {
 
     render(<App />)
     fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: 'admin@peso.gov' } })
-    fireEvent.change(screen.getByLabelText(/Password/i), { target: { value: 'password123' } })
+    fireEvent.change(screen.getByLabelText(/Password/i, { selector: 'input' }), { target: { value: 'password123' } })
     fireEvent.click(screen.getByRole('button', { name: /Sign in/i }))
     fireEvent.click(await screen.findByRole('button', { name: 'Applicants' }))
 
@@ -225,7 +225,7 @@ describe('PESO Portal prototype', () => {
 
     render(<App />)
     fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: 'admin@peso.gov' } })
-    fireEvent.change(screen.getByLabelText(/Password/i), { target: { value: 'password123' } })
+    fireEvent.change(screen.getByLabelText(/Password/i, { selector: 'input' }), { target: { value: 'password123' } })
     fireEvent.click(screen.getByRole('button', { name: /Sign in/i }))
     fireEvent.click(await screen.findByRole('button', { name: 'Job Postings' }))
 
@@ -283,7 +283,7 @@ describe('PESO Portal prototype', () => {
 
     render(<App />)
     fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: 'admin@peso.gov' } })
-    fireEvent.change(screen.getByLabelText(/Password/i), { target: { value: 'password123' } })
+    fireEvent.change(screen.getByLabelText(/Password/i, { selector: 'input' }), { target: { value: 'password123' } })
     fireEvent.click(screen.getByRole('button', { name: /Sign in/i }))
     fireEvent.click(await screen.findByRole('button', { name: 'Job Postings' }))
     const jobRow = await screen.findByRole('button', { name: 'View Office Clerk details' })
@@ -341,7 +341,7 @@ describe('PESO Portal prototype', () => {
 
     render(<App />)
     fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: 'incomplete@peso.gov' } })
-    fireEvent.change(screen.getByLabelText(/Password/i), { target: { value: 'password123' } })
+    fireEvent.change(screen.getByLabelText(/Password/i, { selector: 'input' }), { target: { value: 'password123' } })
     fireEvent.click(screen.getByRole('button', { name: /Sign in/i }))
 
     expect(await screen.findByText(/Complete your registration/i)).toBeInTheDocument()
@@ -356,7 +356,7 @@ describe('PESO Portal prototype', () => {
   it('allows employer login and shows employer module navigation', async () => {
     render(<App />)
     const emailInput = screen.getByLabelText(/Email/i)
-    const passwordInput = screen.getByLabelText(/Password/i)
+    const passwordInput = screen.getByLabelText(/Password/i, { selector: 'input' })
     const submitButton = screen.getByRole('button', { name: /Sign in/i })
 
     fireEvent.change(emailInput, { target: { value: 'employer@peso.gov' } })
@@ -436,7 +436,7 @@ describe('PESO Portal prototype', () => {
     render(<App />)
 
     fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: 'applicant@peso.gov' } })
-    fireEvent.change(screen.getByLabelText(/Password/i), { target: { value: 'password123' } })
+    fireEvent.change(screen.getByLabelText(/Password/i, { selector: 'input' }), { target: { value: 'password123' } })
     fireEvent.click(screen.getByRole('button', { name: /Sign in/i }))
 
     fireEvent.click(await screen.findByRole('button', { name: /^Jobs$/i }))

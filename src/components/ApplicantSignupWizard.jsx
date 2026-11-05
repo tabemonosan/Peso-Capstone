@@ -1,3 +1,4 @@
+import PasswordInput from './PasswordInput'
 import { useEffect, useMemo, useRef, useState } from "react"
 import { API_URL } from "../config"
 import { NSRP_SKILL_LABELS } from "../../shared/nsrpSkills.js"
@@ -189,7 +190,6 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
   const [email, setEmail] = useState(saved.email)
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
-  const [showPassword, setShowPassword] = useState(false)
   const [step, setStep] = useState(isUpdate || isPublic ? 1 : saved.step)
   const [answers, setAnswers] = useState(() => isUpdate ? { ...initialAnswers, signatureDataUrl: "" } : saved.answers)
   const [consent, setConsent] = useState(saved.consent)
@@ -992,12 +992,11 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
               </div>
             </section>
           )}
-          <label className="block text-sm font-medium text-slate-800">Password<input id="field-password" type={showPassword ? "text" : "password"} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} aria-invalid={Boolean(fieldErrors.password) || undefined} aria-describedby={fieldErrors.password ? "error-password" : undefined} className={`${inputClass}${inputErrorClass(Boolean(fieldErrors.password))}`} /></label>
+          <div><label htmlFor="field-password" className="block text-sm font-medium text-slate-800">Password</label><PasswordInput id="field-password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} aria-invalid={Boolean(fieldErrors.password) || undefined} aria-describedby={fieldErrors.password ? "error-password" : undefined} className={`${inputClass}${inputErrorClass(Boolean(fieldErrors.password))}`} /></div>
           <PasswordChecklist password={password} confirmPassword={confirmPassword} />
-          <label className="block text-sm font-medium text-slate-800">Confirm password<input id="field-confirmPassword" type={showPassword ? "text" : "password"} autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} aria-invalid={Boolean(fieldErrors.confirmPassword) || undefined} aria-describedby={fieldErrors.confirmPassword ? "error-confirmPassword" : undefined} className={`${inputClass}${inputErrorClass(Boolean(fieldErrors.confirmPassword))}`} /></label>
+          <div><label htmlFor="field-confirmPassword" className="block text-sm font-medium text-slate-800">Confirm password</label><PasswordInput id="field-confirmPassword" visibilityLabel="confirm password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} aria-invalid={Boolean(fieldErrors.confirmPassword) || undefined} aria-describedby={fieldErrors.confirmPassword ? "error-confirmPassword" : undefined} className={`${inputClass}${inputErrorClass(Boolean(fieldErrors.confirmPassword))}`} /></div>
           {fieldErrors.password && <p id="error-password" role="alert" className="text-xs text-rose-600">{fieldErrors.password}</p>}
           {fieldErrors.confirmPassword && <p id="error-confirmPassword" role="alert" className="text-xs text-rose-600">{fieldErrors.confirmPassword}</p>}
-          <button type="button" onClick={() => setShowPassword((value) => !value)} className="self-start text-sm text-cyan-800">{showPassword ? "Hide password" : "Show password"}</button>
           <label className="flex items-start gap-2 text-sm text-slate-700">
             <input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} className="mt-1" />
             <span>I agree to the collection and processing of my personal information and documents for account verification, including automatic image and consistency checks, in accordance with the Data Privacy Act of 2012 (RA 10173). These checks assess consistency and evidence, not authenticity.</span>

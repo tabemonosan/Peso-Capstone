@@ -1,3 +1,4 @@
+import PasswordInput from './PasswordInput'
 import CityProvinceFields from './CityProvinceFields'
 import { digits, mobileInput, validMobile, normalizeMobile, validLandline, TIN_ERROR, MOBILE_ERROR, LANDLINE_ERROR } from '../../shared/employerNumbers.js'
 import { PH_LOCATIONS, provinceForCity } from '../../shared/phLocations.js'
@@ -627,11 +628,11 @@ export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCance
               </div>
             )}
             <Field label="Password" id="employer-password" required error={errors.password}>
-              {() => <input id="employer-password" type="password" autoComplete="new-password" value={password} onChange={(event) => { setPassword(event.target.value); setErrors((current) => ({ ...current, password: undefined })) }} aria-invalid={Boolean(errors.password) || undefined} className={controlClass} />}
+              {() => <PasswordInput id="employer-password" autoComplete="new-password" value={password} onChange={(event) => { setPassword(event.target.value); setErrors((current) => ({ ...current, password: undefined })) }} aria-invalid={Boolean(errors.password) || undefined} className={controlClass} />}
             </Field>
             <PasswordChecklist password={password} confirmPassword={confirmPassword} />
             <Field label="Confirm password" id="employer-confirmPassword" required error={errors.confirmPassword}>
-              {() => <input id="employer-confirmPassword" type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} aria-invalid={Boolean(errors.confirmPassword) || undefined} className={controlClass} />}
+              {() => <PasswordInput id="employer-confirmPassword" visibilityLabel="confirm password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} aria-invalid={Boolean(errors.confirmPassword) || undefined} className={controlClass} />}
             </Field>
             <label className="flex items-start gap-2 text-sm text-slate-700">
               <input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} aria-invalid={Boolean(errors.consent) || undefined} />

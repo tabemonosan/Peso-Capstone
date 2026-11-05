@@ -6,6 +6,8 @@ import { decisionReason } from '../../shared/verificationDecision.js'
 import { VERIFICATION_DEFAULTS } from '../../shared/verification.js'
 const context = () => ({ settings: VERIFICATION_DEFAULTS, docKey: 'validId1', document: { version: 1, status: 'pending', quality: { passed: true, warnings: [] } }, account: { emailVerified: true }, comparisons: [{ fieldGroup: 'name', result: 'match', evidence: 'independent' }] })
 it.each([
+ ['shared phone', c => { c.findings = [{ ruleId: 'duplicate_mobile', severity: 'warning', status: 'open' }] }, ''],
+ ['legacy shared phone', c => { c.findings = [{ code: 'duplicate_phone', severity: 'critical', status: 'open' }] }, ''],
  ['master off', c => { c.settings = { ...c.settings, automaticApproval: false } }, 'Auto-approval off'],
  ['type off', c => { c.settings = { ...c.settings, validId: false } }, 'Auto-approval off'],
  ['engine off', c => { c.settings = { ...c.settings, verificationEngineEnabled: false } }, 'Auto-approval off'],

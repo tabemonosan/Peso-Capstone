@@ -41,7 +41,7 @@ afterEach(() => {
 
 function openSignup() {
   render(<App />)
-  fireEvent.click(screen.getByRole('button', { name: /Create an account \(Applicant\)/i }))
+  fireEvent.click(screen.getByRole('button', { name: /^Create an account$/i }))
 }
 
 const typeCode = (code) => {

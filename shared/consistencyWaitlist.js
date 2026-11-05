@@ -1,5 +1,6 @@
 // Consistency screening policy; no extracted document values belong here or in findings.
-export const WAITLIST_RULES_VERSION = '2026-11-04.1'
+import { isSharedPhoneFinding } from './verificationFindings.js'
+export const WAITLIST_RULES_VERSION = '2026-11-06.2'
 export const APPLICANT_STATUSES = ['under_review', 'waitlisted', 'approved', 'declined', 'restricted']
 export const WAITLIST_DEFAULTS = { waitlistOnMismatch: true, waitlistAttempts: 3, pesoContact: 'Contact your local PESO office.', pesoOfficeHours: 'Contact PESO to confirm office hours.' }
 export const WAITLIST_LIMITS = { timeoutMs: 90000, reminderDays: 7, staleDays: 30, maxAttemptsSetting: 5, minOcrConfidence: 60 }
@@ -12,7 +13,7 @@ export function consistencyIssues(documents = {}) {
   return WAITLIST_DOCUMENTS.flatMap(docKey => {
     const document = documents[docKey]?.versions?.at(-1)
     if (!document) return []
-    const duplicates = (document.findings || []).filter(f => /duplicate|cross_account/.test(f.ruleId || f.code || '') && f.status !== 'dismissed')
+    const duplicates = (document.findings || []).filter(f => !isSharedPhoneFinding(f) && /duplicate|cross_account/.test(f.ruleId || f.code || '') && f.status !== 'dismissed')
     const significant = (document.imageComparisons || []).filter(c => c.evidence === 'independent' && c.reliable === true && c.result === 'significant' && WAITLIST_GROUPS.includes(c.fieldGroup) && /_(?:surname|firstName|dob|idNumber)$/.test(c.ruleId || ''))
     return [...(duplicates.length ? [{ docKey, fieldGroup: 'document', result: 'review', severity: 'warning', evidence: 'independent', reasonCode: 'staff_review' }] : []),
       ...significant.map(c => ({ docKey, fieldGroup: c.fieldGroup, result: 'significant', severity: 'critical', evidence: 'independent', reasonCode: 'cross_check_mismatch' }))]

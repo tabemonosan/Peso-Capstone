@@ -1,3 +1,4 @@
+import PasswordInput from './components/PasswordInput'
 import SkillTagPicker from './components/SkillTagPicker'
 import LandingPage from './components/LandingPage'
 import ProfileDropdown from './components/ProfileDropdown'
@@ -187,8 +188,6 @@ function App() {
   const [rememberMe, setRememberMe] = useState(() =>
     typeof window !== "undefined" && Boolean(localStorage.getItem("peso-portal-remembered-email")),
   )
-  const [showPassword, setShowPassword] = useState(false)
-  const [showSignupPassword, setShowSignupPassword] = useState(false)
   const [profileData, setProfileData] = useState({
     name: "",
     firstName: "",
@@ -1628,7 +1627,6 @@ const toggleSkill = (selected, skill) => {
     setIsLoggedIn(false)
     setFormData({ email: "", password: "" })
     setRememberMe(false)
-    setShowPassword(false)
     setActiveRole("Applicant")
     setActiveView("home")
   }
@@ -1818,21 +1816,14 @@ const toggleSkill = (selected, skill) => {
               </div>
               <div>
                 <label htmlFor="password">Password</label>
-                <input
+                <PasswordInput
                   id="password"
-                  type={showPassword ? "text" : "password"}
+
                   value={formData.password}
                   onChange={(event) => setFormData({ ...formData, password: event.target.value })}
                   placeholder="Enter your password"
                   autoComplete="current-password"
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((value) => !value)}
-                  className="auth-password-toggle"
-                >
-                  {showPassword ? "Hide" : "Show"}
-                </button>
               </div>
               <div className="auth-options">
                 <label className="auth-remember">
@@ -1859,24 +1850,16 @@ const toggleSkill = (selected, skill) => {
                   onClick={() => setAuthView("signup")}
                   className="auth-secondary-button"
                 >
-                  Create an account (Applicant)
+                  Create an account
                 </button>
                 <button
                   type="button"
                   onClick={() => setAuthView("employer")}
                   className="auth-secondary-button"
                 >
-                  Connect with us (Employer)
+                  Connect with us
                 </button>
               </div>
-              <section aria-labelledby="online-nsrp-title" className="mt-4 rounded-xl border border-cyan-200 bg-cyan-50 p-4 text-slate-800">
-                <h2 id="online-nsrp-title" className="text-base font-semibold">Fill out an NSRP form online</h2>
-                <p className="mt-1 text-sm">Prepare and download your completed PDF. No account needed.</p>
-                <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                  <button type="button" onClick={() => setAuthView('nsrp-applicant')} className="auth-secondary-button">Applicant · Form 1</button>
-                  <button type="button" onClick={() => setAuthView('nsrp-employer')} className="auth-secondary-button">Employer · Form 2</button>
-                </div>
-              </section>
             </form>
           ) : authView === "employer" ? (
             <EmployerSignupWizard locations={albayLocations} onCancel={() => setAuthView("login")} onComplete={finishSignup} />
@@ -1998,9 +1981,9 @@ const toggleSkill = (selected, skill) => {
                 <label htmlFor="signup-password" className="block text-sm font-medium text-slate-200">
                   Password
                 </label>
-                <input
+                <PasswordInput
                   id="signup-password"
-                  type={showSignupPassword ? "text" : "password"}
+
                   value={signupForm.password}
                   onChange={(e) => setSignupForm({ ...signupForm, password: e.target.value })}
                   className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
@@ -2013,21 +1996,14 @@ const toggleSkill = (selected, skill) => {
                 <label htmlFor="signup-confirm-password" className="block text-sm font-medium text-slate-200">
                   Confirm password
                 </label>
-                <input
-                  id="signup-confirm-password"
-                  type={showSignupPassword ? "text" : "password"}
+                <PasswordInput
+                  id="signup-confirm-password" visibilityLabel="confirm password"
+
                   value={signupForm.confirmPassword}
                   onChange={(e) => setSignupForm({ ...signupForm, confirmPassword: e.target.value })}
                   className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                   required
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowSignupPassword((current) => !current)}
-                  className="mt-2 text-sm font-medium text-slate-600 hover:text-black"
-                >
-                  {showSignupPassword ? 'Hide password' : 'Show password'}
-                </button>
               </div>
               <div>
                 <label htmlFor="signup-resume" className="block text-sm font-medium text-slate-200">

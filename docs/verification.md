@@ -230,8 +230,16 @@ stored in findings. Admin notes must not copy document values.
 | government_free_email | info | Government contact uses a common free mail domain |
 | agency_manual_license | info | Verify the agency license manually |
 | duplicate_{tin,sss,pagibig,philhealth,passport} | critical | Same normalized identifier on another account |
-| duplicate_{mobile,name_birth,establishment_city} | warning | Shared mobile/name-birth/establishment-city claim |
+| duplicate_{name_birth,establishment_city} | warning | Shared name-birth/establishment-city claim |
 | duplicate_qr | critical | Same verified QR HMAC claimed by another account |
+
+Phone numbers may be shared by applicants and employers. A shared contact
+number does not produce a duplicate finding or block verification. Legacy
+`duplicate_mobile` and `duplicate_phone` findings remain in historical records
+but are ignored by approval, open-flag and waitlist checks. When document status
+is refreshed, a waitlisted account with legacy phone findings is automatically
+rechecked under the current policy without spending a correction attempt.
+Other identity conflicts and IP/mobile approval-rate limits still apply.
 | id_number_format | warning | Advisory format/length check using existing shared number rules |
 | id_expired | warning | Declared expiry is past |
 | national_id_screenshot | warning | Digital screenshot needs careful admin inspection |
@@ -254,8 +262,21 @@ tiny (<600×380, portrait accepted), blank (mean channel deviation <2), malforme
 PDF or >5 pages are 422 failures. Dark (mean <45), glare (>245), low edge
 deviation (<8) and extreme aspect ratio (>5) are soft warnings. Thresholds are
 in IMAGE_LIMITS; decoded images are capped at 20 million pixels and stripped of
-EXIF/GPS. Image heuristics are approximate. PDF contents are manual and tagged
-`pdf_manual_reading`.
+EXIF/GPS. Image heuristics are approximate. PDFs of up to five pages are rendered
+at a bounded resolution and scanned with the same local OCR checks as images.
+The least-confident page determines confidence for the document. Failed,
+unreadable or low-confidence scans stay inconclusive and require review.
+Older `pdf_manual_reading` warnings are removed after a successful PDF rescan.
+
+Applicant uploads start background comparison against the current NSRP and
+supporting documents. Eligible matching uploads, including corrections, are
+automatically approved under the configured verification rules. The document
+window refreshes while scanning and shows Checking instead of stale review
+messages. Staff receive an upload-review notification only after a scan finishes
+with a document still pending; successful automatic approvals create no manual
+upload task. Duplicate-account flags, unresolved differences, quality problems,
+holds and disabled automatic approval still require review. OCR comparison is
+not proof of document authenticity.
 
 ## Philippine cases and fairness
 
@@ -306,8 +327,9 @@ OCR is outside uploads, with a 20-second timeout, one active task, at most 20
 queued and 200 per Manila day across the database. Failed/unreadable fields are
 inconclusive, never a fabricated mismatch. Labelled English fields and positive
 text matches provide comparisons. Admins may re-read labelled values transiently;
-recognized text/values never enter reports, logs or owner responses. PDFs are not
-OCR-read in this implementation and stay manual.
+recognized text/values never enter reports, logs or owner responses. PDFs are
+rendered and OCR-read page by page within the same limits; each page consumes
+OCR quota. A failed or inconclusive read still requires review.
 
 Birth copy type and optional reference are admin details. Optional authorization
 codes live in a separate private collection with a 24-hour TTL, never list
@@ -360,7 +382,7 @@ server-private persisted random key. VERIFICATION_DOC_RETENTION_DAYS remains 30
 - A valid signature proves issuance of the signed data, not that this applicant
   owns it. No face matching or liveness check exists.
 - OCR on phone photos is approximate. An incorrect but plausible read can flag
-  a difference; unreadable fields and PDF contents require a human.
+  a difference; unreadable fields require a human.
 - Birth certificates and most IDs cannot be verified with their issuers without
   issuer access. The PSA QR adapter/key source remains unconfirmed for production.
 - The default evidence requirement, audit sample, rate guard, Mark checked,
@@ -378,7 +400,7 @@ server-private persisted random key. VERIFICATION_DOC_RETENTION_DAYS remains 30
 
 Future work: authorized PSA relying-party access with confirmed formats/keys,
 a licensed eKYC provider, durable job delivery, issuer/ownership verification,
-and wider document-language/PDF reading support.
+and wider document-language support.
 
 ## Fictional seed scenarios
 

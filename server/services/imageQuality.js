@@ -7,7 +7,7 @@ export async function inspectDocument(file) {
     try {
       const pdf = await PDFDocument.load(file.buffer, { ignoreEncryption: false })
       if (!pdf.getPageCount() || pdf.getPageCount() > IMAGE_LIMITS.maxPages) throw new Error('pages')
-      return { passed: true, pages: pdf.getPageCount(), warnings: ['pdf_manual_reading'] }
+      return { passed: true, pages: pdf.getPageCount(), warnings: [] }
     } catch { throw new DocumentImageError('Upload a readable PDF with at most 5 pages.') }
   }
   try {

@@ -25,8 +25,8 @@ describe("employer sign-up wizard", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Verify$/i }))
     await screen.findByText(/Email verified/i)
 
-    fireEvent.change(screen.getByLabelText(/^Password/i), { target: { value: "Password123!" } })
-    fireEvent.change(screen.getByLabelText(/^Confirm password/i), { target: { value: "Password123!" } })
+    fireEvent.change(screen.getByLabelText(/^Password/i, { selector: 'input' }), { target: { value: "Password123!" } })
+    fireEvent.change(screen.getByLabelText(/^Confirm password/i, { selector: 'input' }), { target: { value: "Password123!" } })
     fireEvent.click(screen.getByRole("checkbox", { name: /collection and processing/i }))
     fireEvent.click(screen.getByRole("button", { name: /^Next$/i }))
     await screen.findByRole("radiogroup", { name: /NSRP Form 2 options/i })

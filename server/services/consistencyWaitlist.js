@@ -4,6 +4,7 @@ import { enqueueVerification } from './verificationJobs.js'
 import { processApplicantImages } from './imageChecks.js'
 import { WAITLIST_RULES_VERSION, WAITLIST_DEFAULTS, WAITLIST_LIMITS, WAITLIST_DOCUMENTS, WAITLIST_MESSAGE, WAITLIST_TIP, consistencyIssues, waitlistIssueMessage } from '../../shared/consistencyWaitlist.js'
 import { VERIFICATION_DOC_LABELS } from '../../shared/verificationDocs.js'
+import { isSharedPhoneFinding } from '../../shared/verificationFindings.js'
 
 const DAY = 86400000
 const fail = (code, message, status = 409) => { throw Object.assign(new Error(message), { code, status }) }
@@ -14,9 +15,15 @@ export function createConsistencyWaitlist({ Applicant, automation, notify, notif
   const remaining = (state, key, config) => Math.max(0, config.waitlistAttempts + (state.grants?.[key] || 0) - (state.used?.[key] || 0))
   const snapshot = account => Object.fromEntries(WAITLIST_DOCUMENTS.map(key => [key, latest(account, key)?.version || 0]))
   const unchanged = (a, b) => WAITLIST_DOCUMENTS.every(key => a[key] === b[key])
-  async function publicState(id) {
+  async function publicState(id, ip) {
     let [account, config] = await Promise.all([get(id), settings()])
     if (!account || account.deletedAt) fail('ACCOUNT_UNAVAILABLE', 'Account unavailable.', 403)
+    // Refresh old phone-only review flags under the shared-number policy.
+    // A policy recheck does not count as an applicant correction attempt.
+    if (account.verificationStatus === 'waitlisted' && account.consistencyState?.status !== 'checking' && account.consistencyState?.rulesVersion !== WAITLIST_RULES_VERSION && Object.values(account.verificationDocuments || {}).some(slot => slot.versions?.at(-1)?.findings?.some(isSharedPhoneFinding))) {
+      await begin(id, 'policy', undefined, ip)
+      account = await get(id)
+    }
     if (account.consistencyState?.status === 'checking' && +now() - +new Date(account.consistencyState.startedAt) >= timeoutMs) {
       await finish(id, account.consistencyState.token, 'timeout')
       account = await get(id)
@@ -113,6 +120,11 @@ export function createConsistencyWaitlist({ Applicant, automation, notify, notif
     if (outcome !== 'complete') for (const charge of state.charged || []) { const key = charge.split(':')[0]; next.used[key] = Math.max(0, (next.used[key] || 0) - 1) }
     const result = await Applicant.collection.updateOne({ _id: account._id, 'consistencyState.token': token, 'consistencyState.status': 'checking', verificationStatus: account.verificationStatus }, { $set: { consistencyState: next, verificationStatus: nextStatus, ...(active ? { verificationReason: WAITLIST_MESSAGE } : wasWaitlisted ? { verificationReason: '' } : {}) } })
     if (!result.modifiedCount) return
+    // Notify staff after scanning, only if this upload still needs review.
+    const changed = latest(account, state.changedDoc)
+    if (['birthCertificate', 'validId1', 'validId2'].includes(state.changedDoc) && changed?.status === 'pending') {
+      await notifyAdmins({ type: 'document_resubmitted', title: 'Document needs review', message: 'An uploaded document could not be verified automatically. Open the document review queue.', link: '/verification-flagged', metadata: { applicantId: String(account._id), docKey: state.changedDoc } })
+    }
     const transition = !active && outcome === 'complete' ? await recomputeApplicant(id) : null
     if (transition?.becameVerified) await notify({ recipient: { id: account._id, role: 'Applicant' }, type: 'account_verified', title: 'Account verified', message: 'All your required documents passed verification. Your account is now verified.', link: '/jobs', email: true })
     if (active && !wasWaitlisted) {

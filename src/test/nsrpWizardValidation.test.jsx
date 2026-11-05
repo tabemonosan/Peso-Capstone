@@ -80,8 +80,8 @@ async function completeAccountStep() {
   }
   fireEvent.click(screen.getByRole('button', { name: /^Verify$/i }))
   await screen.findByText(/Email verified/i)
-  fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'Password123!' } })
-  fireEvent.change(screen.getByLabelText(/Confirm password/i), { target: { value: 'Password123!' } })
+  fireEvent.change(screen.getByLabelText(/^Password$/i, { selector: 'input' }), { target: { value: 'Password123!' } })
+  fireEvent.change(screen.getByLabelText(/Confirm password/i, { selector: 'input' }), { target: { value: 'Password123!' } })
   fireEvent.click(screen.getByRole('checkbox', { name: /collection and processing/i }))
   fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
   // "Your NSRP" choice step: pick the online path
@@ -434,7 +434,7 @@ describe('wizard tab navigation', () => {
     expect(screen.getByText('Verification documents')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /10\. Preview & submit/i }))
     await screen.findByText('Verify your email with the 6-digit code before continuing.')
-    expect(screen.getByLabelText(/^Password$/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/^Password$/i, { selector: 'input' })).toBeInTheDocument()
     expect(mockFetch.mock.calls.some(([url]) => url.endsWith('/api/nsrp/preview-signup'))).toBe(false)
   })
 })

@@ -1,4 +1,4 @@
-export const CROSS_RULES_VERSION = '2026-11-03.4'
+export const CROSS_RULES_VERSION = '2026-11-06.1'
 export const NO_MIDDLE = new Set(['', 'nomiddlename', 'n/a', 'na', 'nmn'])
 export function normalizeName(value) {
   return String(value || '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/\bma\.?(?=\s|$)/g, 'maria').replace(/\bsto\.?(?=\s|$)/g, 'santo').replace(/[^\p{L}\p{N}]/gu, '')
@@ -21,11 +21,29 @@ export function compareName(left, right, { middle = false } = {}) {
 }
 export function dateParts(value) {
   const text = String(value || '').trim()
+  const valid = parts => {
+    const [year, month, day] = parts
+    const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+    const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    return year >= 1 && year <= 9999 && month >= 1 && month <= 12 && day >= 1 && day <= days[month - 1] ? parts : null
+  }
   const iso = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/.exec(text)
-  if (iso) return [Number(iso[1]), Number(iso[2]), Number(iso[3])]
+  if (iso) return valid([Number(iso[1]), Number(iso[2]), Number(iso[3])])
   const local = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/.exec(text)
-  if (local) return [Number(local[3]), Number(local[2]), Number(local[1])]
-  if (/[a-z]/i.test(text)) { const d = new Date(text); if (!Number.isNaN(+d)) return [d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate()] }
+  if (local) return valid([Number(local[3]), Number(local[2]), Number(local[1])])
+  // A birth date is a calendar value, not a timestamp. Native Date parsing
+  // shifts local midnight into the previous UTC day in Asia/Manila.
+  const months = 'January February March April May June July August September October November December'.split(' ')
+  const monthPattern = months.map(month => `${month.slice(0, 3)}(?:${month.slice(3)})?`).join('|')
+  const named = new RegExp(`^(${monthPattern})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?[,]?\\s+(\\d{4})(?:\\s*\\((\\d{4}-\\d{2}-\\d{2})\\))?$`, 'i').exec(text)
+  const dayFirst = new RegExp(`^(\\d{1,2})\\s+(${monthPattern})\\.?[,]?\\s+(\\d{4})$`, 'i').exec(text)
+  if (named || dayFirst) {
+    const match = named || dayFirst
+    const monthName = match[named ? 1 : 2].slice(0, 3).toLowerCase()
+    const parts = valid([Number(match[3]), months.findIndex(month => month.slice(0, 3).toLowerCase() === monthName) + 1, Number(match[named ? 2 : 1])])
+    if (named?.[4] && (!parts || dateParts(named[4])?.join() !== parts.join())) return null
+    return parts
+  }
   return null
 }
 export function compareDate(left, right) {
