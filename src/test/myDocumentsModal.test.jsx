@@ -33,6 +33,41 @@ const docs = [
 ]
 
 describe('MyDocumentsModal file viewers', () => {
+  it.each([2, 3])('requires both ID sides and sends them together with the saved type for document %s', async index => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => ({ ok: true }) })
+    const doc = docs[index]
+    render(<MyDocumentsModal token="token" onClose={() => {}} info={{ verificationStatus: 'under_review', documents: [{ ...doc, uploadsRemaining: 4 }] }} />)
+    const row = screen.getByText(new RegExp(doc.label)).closest('li')
+    expect(within(row).getByRole('combobox', { name: 'ID type' })).toHaveValue(doc.idType)
+    fireEvent.change(within(row).getByLabelText('ID number'), { target: { value: 'TEST-123' } })
+    const file = new File(['sample'], 'replacement.png', { type: 'image/png' })
+    const back = new File(['sample back'], 'replacement-back.png', { type: 'image/png' })
+    fireEvent.change(within(row).getByLabelText(`Choose ${doc.label} front file`), { target: { files: [file] } })
+    expect(within(row).getByText('replacement.png')).toBeInTheDocument()
+    expect(within(row).getByRole('button', { name: 'Upload', exact: true })).toBeDisabled()
+    fireEvent.change(within(row).getByLabelText(`Choose ${doc.label} back file`), { target: { files: [back] } })
+    expect(within(row).getByRole('button', { name: 'Upload', exact: true })).toBeEnabled()
+    fireEvent.click(within(row).getByRole('button', { name: 'Upload', exact: true }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    const payload = fetchMock.mock.calls[0][1].body
+    expect(payload.get('document')).toBe(file)
+    expect(payload.get('documentBack')).toBe(back)
+    expect(payload.get('idType')).toBe(doc.idType)
+    expect(JSON.parse(payload.get('verificationDetails'))).toEqual({ number: 'TEST-123' })
+    fetchMock.mockRestore()
+  })
+
+  it('lets under-review applicants edit pending NSRP details and replace pending documents', () => {
+    render(<MyDocumentsModal token="token" onClose={() => {}} info={{ verificationStatus: 'under_review', nsrpData: { firstName: 'Sample', surname: 'Example' }, documents: docs.map(doc => ({ ...doc, uploadsRemaining: 4 })) }} />)
+    expect(screen.getByRole('button', { name: 'Update NSRP' })).toBeEnabled()
+    const birth = screen.getByText('Birth Certificate').closest('li')
+    expect(within(birth).getByRole('button', { name: 'Upload', exact: true })).toBeInTheDocument()
+    expect(within(birth).getByLabelText(/^Birth certificate copy type/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Update NSRP' }))
+    expect(screen.getByRole('heading', { name: 'Update NSRP' })).toBeInTheDocument()
+    expect(screen.getByLabelText(/^Surname/i)).toHaveValue('Example')
+  })
+
   it('keeps document cards closed until the applicant opens them', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => ({ verificationStatus: 'under_review', documents: docs }) })
     render(<MyDocumentsPage applicantId="applicant1" token="token" />)

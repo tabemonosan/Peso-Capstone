@@ -6,6 +6,8 @@ import { EMPLOYER_VERIFICATION_STATUSES, EMPLOYER_VERIFICATION_STATUS } from '..
 import { verificationVersionFields, verificationAccountFields } from './verification.js'
 
 const { Schema } = mongoose
+// Only new registrations receive this subdocument. Legacy accounts stay quiet.
+const pageGuidesSchema = new Schema({ seenPages: { type: [String], default: [] }, dismissedAll: { type: Boolean, default: false } }, { _id: false })
 
 // Shared email-verification fields (applicants and employers only; admins are provisioned)
 const emailVerificationFields = {
@@ -79,6 +81,7 @@ const nsrpWorkExperienceSchema = new Schema({
 }, { _id: false })
 
 const applicantSchema = new Schema({
+  pageGuides: { type: pageGuidesSchema, default: undefined },
   ...verificationAccountFields,
   nsrpAutoEnabledAtCreation: { type: Boolean, select: false },
   sessionVersion: { type: Number, default: 0 },
@@ -87,6 +90,7 @@ const applicantSchema = new Schema({
   applyingSuspensionReason: { type: String, select: false },
   applyingSuspensionHistory: { type: [{ action: String, reason: String, by: String, at: Date }], select: false },
   trustValue: { type: Number, default: 100, min: 0, max: 100, select: false },
+  trustRevision: { type: Number, default: 0, select: false },
   trustEvents: { type: [Schema.Types.Mixed], select: false },
   retainedEmail: { type: String, select: false },
   email: { type: String, required: true, unique: true },  passwordHash: { type: String, required: true },
@@ -181,6 +185,7 @@ export function applicantDisplayName(applicant) {
 }
 
 const employerSchema = new Schema({
+  pageGuides: { type: pageGuidesSchema, default: undefined },
   ...verificationAccountFields,
   receivingApplicantsSuspendedAt: Date,
   receivingApplicantsSuspensionReason: String,
@@ -297,7 +302,7 @@ hireReportSchema.index({ submissionKey: 1 }, { unique: true, sparse: true })
 // `data` is select:false so queries must opt in explicitly.
 const documentFileSchema = new Schema({
   applicant: { type: Schema.Types.ObjectId, ref: 'Applicant', required: true, index: true },
-  slot: { type: String, enum: ['nsrpForm', 'birthCertificate', 'validId1', 'validId2', 'supportingExplanation', 'resume'], required: true },
+  slot: { type: String, enum: ['nsrpForm', 'birthCertificate', 'validId1', 'validId2', 'supportingExplanation', 'reputationReview', 'resume'], required: true },
   version: { type: Number, required: true },
   side: { type: String, enum: ['front', 'back'], default: 'front' },
   mimetype: String,

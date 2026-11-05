@@ -13,6 +13,7 @@ import ApplicationWithdrawal from './ApplicationWithdrawal'
 import PostInterviewTask from './PostInterviewTask'
 
 export default function MyApplicationsPage({ token, onDeclined }) {
+  const [focusApplicationId, setFocusApplicationId] = useState(() => new URLSearchParams(window.location.search).get('applicationId') || '')
   const [data, setData] = useState({ items: [], total: 0, account: {} }), [page, setPage] = useState(1), [limit, setLimit] = useState(10), [order, setOrder] = useState('desc')
   const [loading, setLoading] = useState(true), [error, setError] = useState(''), [action, setAction] = useState(null), [busy, setBusy] = useState(false), [outcome, setOutcome] = useState(null)
   const [selectedId, setSelectedId] = useState(null)
@@ -20,10 +21,10 @@ export default function MyApplicationsPage({ token, onDeclined }) {
   const selectedApplication = data.items.find(item => item.id === selectedId) || data.items[0]
   useEffect(() => { if (detailsRef.current) detailsRef.current.scrollTop = 0 }, [selectedApplication?.id])
   const load = useCallback(async () => {
-    try { const result = await workflowRequest(token, `/mine?page=${page}&limit=${limit}&order=${order}`); setData(result); setError(''); if (!result.items.length && page > 1 && result.total) setPage(page - 1) }
+    try { const result = await workflowRequest(token, `/mine?page=${page}&limit=${limit}&order=${order}${focusApplicationId ? `&applicationId=${encodeURIComponent(focusApplicationId)}` : ''}`); setData(result); setError(''); if (!result.items.length && page > 1 && result.total) setPage(page - 1) }
     catch (err) { setError(err.message) }
     finally { setLoading(false) }
-  }, [token, page, limit, order])
+  }, [token, page, limit, order, focusApplicationId])
   useEffect(() => { load(); const timer = setInterval(load, 10000); return () => clearInterval(timer) }, [load])
   const perform = async (reason) => {
     setBusy(true); setError('')
@@ -43,6 +44,7 @@ export default function MyApplicationsPage({ token, onDeclined }) {
   }
   const labels = { confirm: 'Confirm interview', reschedule: 'Request reschedule', decline: 'Decline invitation', withdraw: 'Withdraw application', respond_no_show: 'Respond to no-show report', appeal: 'Appeal application suspension' }
   return <section className="portal-card rounded-2xl border border-slate-200 bg-white p-6 text-slate-900">
+    {focusApplicationId && <button type="button" className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800" onClick={() => { setFocusApplicationId(''); setPage(1); const url = new URL(window.location.href); url.searchParams.delete('applicationId'); window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`) }}>Show all applications</button>}
     <div className="flex flex-wrap items-end justify-between gap-4"><div><h2 className="text-xl font-bold">My applications</h2><p className="mt-2 text-sm text-slate-600">Follow your applications, interview invitations and outcomes.</p></div><label className="text-xs text-slate-600">Sort by last update<select className={`${workflowControl} mt-1`} value={order} onChange={(e) => { setOrder(e.target.value); setPage(1) }}><option value="desc">Newest first</option><option value="asc">Oldest first</option></select></label></div>
     {data.account?.applyingSuspended && <div role="status" className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950"><p className="font-semibold">PESO has paused new applications and interview confirmations.</p><p className="mt-2">Reason: {data.account.suspensionReason}</p><p className="mt-2">You can still sign in and view your data.</p><button type="button" disabled={data.account.appealPending} onClick={() => { setError(''); setAction({ type: 'appeal' }) }} className="mt-3 rounded-full border border-amber-300 bg-white px-4 py-2 text-sm font-semibold">{data.account.appealPending ? 'Appeal awaiting review' : 'Submit an appeal'}</button></div>}
     {error && <p role="alert" className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</p>}

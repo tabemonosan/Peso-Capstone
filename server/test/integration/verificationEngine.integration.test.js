@@ -34,13 +34,34 @@ it.each(['birthCertificate', 'validId1'])('approves an unflagged %s with indepen
  expect((await saved(user, docKey)).verificationAudit).toHaveLength(1)
  expect(notify).toHaveBeenCalledTimes(1)
 })
-it('holds audit samples before approval and never rerolls the recorded sample', async () => {
+it('does not send an unflagged applicant document to admin review for random sampling', async () => {
  await automation.updateSettings({ auditPercent: 100 }, 'test-admin')
  const user = await account(); await run(user)
- expect(await saved(user)).toMatchObject({ status: 'pending', reviewReasons: ['Audit sample'] })
+ expect(await saved(user)).toMatchObject({ status: 'approved', reviewReasons: [] })
  await automation.updateSettings({ auditPercent: 0 }, 'test-admin'); await run(user)
- expect((await saved(user)).status).toBe('pending')
- expect((await automation.decisions().findOne({ accountId: user._id })).sampleDraw).toBe(0.5)
+ expect((await saved(user)).status).toBe('approved')
+ expect((await automation.decisions().findOne({ accountId: user._id })).sampleDraw).toBeUndefined()
+})
+it('keeps an ID mismatch on the ID without copying it onto the birth certificate', async () => {
+ const mismatch = { ruleId: 'cross_id_nsrp_idNumber', severity: 'critical', fieldGroup: 'ID number', evidence: 'independent', status: 'open', approvalBlocking: true }
+ const user = await account({}, 'birthCertificate', { verificationDocuments: {
+  // Include contamination from an older engine decision on the birth record.
+  birthCertificate: { versions: [version({ findings: [mismatch] })] },
+  validId1: { versions: [version({ findings: [mismatch] })] },
+ } })
+ await run(user)
+ expect((await saved(user)).status).toBe('approved')
+ expect((await saved(user)).findings).toEqual([])
+ await run(user, 'validId1')
+ expect(await saved(user, 'validId1')).toMatchObject({ status: 'pending', reviewReasons: ['Flagged'] })
+})
+it('retains account-wide duplicate identity guards when checking another document', async () => {
+ const duplicate = { ruleId: 'duplicate_sss', severity: 'critical', fieldGroup: 'identifiers', status: 'open' }
+ const user = await account({}, 'birthCertificate', { verificationDocuments: {
+  birthCertificate: { versions: [version()] }, validId1: { versions: [version({ findings: [duplicate] })] },
+ } })
+ await run(user)
+ expect(await saved(user)).toMatchObject({ status: 'pending', reviewReasons: ['Flagged'] })
 })
 it('enforces the shared rolling IP/mobile quota', async () => {
  const users = await Promise.all(Array.from({ length: 6 }, () => account()))
@@ -62,11 +83,34 @@ it('rechecks the kill switch immediately before writing an approval', async () =
  await run(user, 'birthCertificate', instance)
  expect((await saved(user)).status).toBe('pending'); expect(notify).not.toHaveBeenCalled()
 })
-it('never approves resubmissions, uploaded NSRP forms, or accounts with pending explanations', async () => {
- for (const [extra, docKey, expected] of [[{ version: 2 }, 'birthCertificate', 'Resubmission'], [{ sourceType: 'uploaded' }, 'nsrpForm', 'Uploaded file'], [{ explanation: { status: 'submitted' } }, 'birthCertificate', 'Explanation']]) {
+it('does not approve identity evidence against an NSRP reference replaced during the check', async () => {
+ const user = await account({}, 'birthCertificate', { verificationDocuments: { birthCertificate: { versions: [version()] }, nsrpForm: { versions: [version({ sourceType: 'generated' })] } } })
+ const instance = createVerificationEngine({ Applicant, Employer, EmployerRequest, automation, notify, notifyAdmins, recomputeApplicant: async () => {}, beforeApproval: async () => {
+  await Applicant.updateOne({ _id: user._id }, { $push: { 'verificationDocuments.nsrpForm.versions': version({ version: 2, sourceType: 'generated' }) } })
+ } })
+ await run(user, 'birthCertificate', instance)
+ expect(await saved(user)).toMatchObject({ status: 'pending', reviewReasons: ['Registration reference changed'] })
+ expect(notify).not.toHaveBeenCalled()
+})
+it('keeps pending explanations in staff review', async () => {
+ for (const [extra, docKey, expected] of [[{ explanation: { status: 'submitted' } }, 'birthCertificate', 'Explanation']]) {
   const user = await account(extra, docKey); await run(user, docKey)
   expect((await saved(user, docKey)).reviewReasons).toContain(expected)
  }
+})
+it('automatically verifies a clean replacement while preserving the previous version', async () => {
+ const user = await account({ status: 'needs_resubmission' })
+ await Applicant.updateOne({ _id: user._id }, { $push: { 'verificationDocuments.birthCertificate.versions': version({ version: 2 }) } })
+ await run(user)
+ const versions = (await Applicant.findById(user._id)).verificationDocuments.birthCertificate.versions
+ expect(versions[0].status).toBe('needs_resubmission')
+ expect(versions[1]).toMatchObject({ version: 2, status: 'approved', autoApproved: true })
+})
+it.each(['uploaded', 'generated'])('does not independently approve or sample the %s NSRP reference', async sourceType => {
+ const user = await account({ sourceType }, 'nsrpForm'); await run(user, 'nsrpForm')
+ expect((await saved(user, 'nsrpForm')).status).toBe('pending')
+ expect(await automation.decisions().countDocuments({ accountId: user._id })).toBe(0)
+ expect(notify).not.toHaveBeenCalled()
 })
 it('provider errors leave status pending and emit only a fixed redacted message', async () => {
  const log = vi.spyOn(console, 'error').mockImplementation(() => {})

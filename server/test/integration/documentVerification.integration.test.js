@@ -6,16 +6,16 @@ import { beforeAll, beforeEach, afterAll, describe, it, expect, vi } from 'vites
 import { startTestDb, stopTestDb, clearDb, validNsrpAnswers, pdfBuffer } from './helpers.js'
 import { VERIFICATION_DEFAULTS } from '../../../shared/verification.js'
 vi.mock('../../mailer.js', async original => ({ ...await original(), sendEmail: vi.fn(async () => ({ delivered: true })), initMailer: vi.fn() }))
-const { app, nsrpAutomation } = await import('../../index.js')
+const { app, nsrpAutomation, verificationEngine } = await import('../../index.js')
 const { Applicant, Employer, Admin, Notification } = await import('../../models/collections.js')
 const EmployerRequest = mongoose.model('EmployerRequest')
 let admin, sequence = 0
 const sign = (role = 'Admin', account) => jwt.sign({ email: account?.email || 'review-admin@example.invalid', role, ...(account ? { sub: String(account._id), sessionVersion: account.sessionVersion || 0 } : {}) }, process.env.JWT_SECRET || 'dev-secret')
 const api = (method, path, role = 'Admin', account) => request(app)[method](`/api/admin/document-verification${path}`).set('Authorization', `Bearer ${sign(role, account)}`)
 const flag = { ruleId: 'example_name_difference', severity: 'warning', fieldGroup: 'name', evidence: 'independent', status: 'open' }
-async function applicant(version = {}, extra = {}) {
+async function applicant(version = {}, extra = {}, docKey = 'nsrpForm') {
   return Applicant.create({ email: `review-${++sequence}@example.invalid`, passwordHash: 'test', emailVerified: true, profile: { nsrp: validNsrpAnswers() },
-    verificationDocuments: { nsrpForm: { versions: [{ version: 1, status: 'pending', sourceType: 'generated', uploadedAt: new Date(), ...version }] } }, ...extra })
+    verificationDocuments: { [docKey]: { versions: [{ version: 1, status: 'pending', sourceType: 'generated', uploadedAt: new Date(), ...version }] } }, ...extra })
 }
 const action = (account, type, extra = {}) => api('post', '/action').send({ role: 'Applicant', accountId: String(account._id), docKey: 'nsrpForm', version: 1, unresolved: 0, action: type, reason: 'Supervisor review recorded', ...extra })
 beforeAll(startTestDb, 180000)
@@ -23,6 +23,14 @@ afterAll(stopTestDb)
 beforeEach(async () => { await clearDb(); admin = await Admin.create({ email: 'review-admin@example.invalid', passwordHash: 'test' }) })
 
 describe('Document verification foundations', () => {
+  it('excludes checking and verified documents from the admin review queue', async () => {
+    await applicant({}, {}, 'birthCertificate')
+    await applicant({ status: 'approved', autoApproved: true }, {}, 'validId1')
+    const flagged = await applicant({ reviewReasons: ['Could not be read'] }, {}, 'birthCertificate')
+    const response = await api('get', '/queue').expect(200)
+    expect(response.body.total).toBe(1)
+    expect(response.body.items[0].accountId).toBe(String(flagged._id))
+  })
   it('provides all defaults, validates settings, and audits administrative changes', async () => {
     const headers = { Authorization: `Bearer ${sign()}` }
     const before = await request(app).get('/api/admin/nsrp-automation/settings').set(headers).expect(200)
@@ -42,9 +50,9 @@ describe('Document verification foundations', () => {
   })
   it('paginates and sorts flagged documents, tags explanations/samples/exceptions, and highlights seven days', async () => {
     const old = await applicant({ uploadedAt: new Date('2026-01-01'), findings: [flag] })
-    await applicant({ uploadedAt: new Date('2026-02-01'), reviewReasons: ['Audit sample'] })
+    await applicant({ uploadedAt: new Date('2026-02-01'), reviewReasons: ['Audit sample'] }, {}, 'birthCertificate')
     await applicant({ uploadedAt: new Date('2026-03-01'), explanation: { status: 'submitted', note: 'Corrected record' } })
-    await applicant({ uploadedAt: new Date('2026-04-01'), reviewReasons: ['Check or approval unavailable'] })
+    await applicant({ uploadedAt: new Date('2026-04-01'), reviewReasons: ['Check or approval unavailable'] }, {}, 'birthCertificate')
     const first = await api('get', '/queue?limit=1').expect(200)
     expect(first.body.total).toBe(4)
     expect(first.body.items).toHaveLength(1)
@@ -56,15 +64,16 @@ describe('Document verification foundations', () => {
     const explanations = await api('get', '/queue?from=2026-03-01&to=2026-03-31').expect(200)
     expect(explanations.body.items[0].reasons).toContain('Explanation submitted')
     expect(explanations.body.total).toBe(1)
-    expect((await api('get', '/queue?docKey=birthCertificate').expect(200)).body.total).toBe(0)
+    expect((await api('get', '/queue?docKey=birthCertificate').expect(200)).body.total).toBe(2)
     expect((await api('get', '/counts').expect(200)).body.flagged).toBe(4)
   })
   it('filters automatic approvals by type, date, and checked state, including legacy reviewers', async () => {
-    await applicant({ status: 'approved', autoApproved: true, reviewedAt: new Date('2026-06-10') })
-    await applicant({ status: 'approved', reviewedBy: 'System (auto-approval)', reviewedAt: new Date('2026-06-10'), adminConfirmedAt: new Date(), adminConfirmedBy: String(admin._id) })
-    await applicant({ status: 'approved', approvedBy: String(admin._id) })
+    await applicant({ status: 'approved', autoApproved: true, reviewedAt: new Date('2026-06-10') }, {}, 'birthCertificate')
+    await applicant({ status: 'approved', reviewedBy: 'System (auto-approval)', reviewedAt: new Date('2026-06-10'), adminConfirmedAt: new Date(), adminConfirmedBy: String(admin._id) }, {}, 'birthCertificate')
+    await applicant({ status: 'approved', approvedBy: String(admin._id) }, {}, 'birthCertificate')
+    await applicant({ status: 'approved', autoApproved: true }) // Legacy NSRP approvals no longer need review.
     expect((await api('get', '/queue?queue=auto').expect(200)).body.total).toBe(2)
-    const unchecked = await api('get', '/queue?queue=auto&checked=false&docKey=nsrpForm&from=2026-06-01&to=2026-06-30').expect(200)
+    const unchecked = await api('get', '/queue?queue=auto&checked=false&docKey=birthCertificate&from=2026-06-01&to=2026-06-30').expect(200)
     expect(unchecked.body.total).toBe(1)
     expect((await api('get', '/queue?queue=auto&checked=true').expect(200)).body.total).toBe(1)
   })
@@ -157,16 +166,16 @@ describe('Document verification foundations', () => {
   })
   it('uses independent evidence by default and honors master switch and account hold in typed-only mode', async () => {
     const run = async () => {
-      const account = await applicant({}, { nsrpAutoEnabledAtCreation: true })
-      await nsrpAutomation.process({ role: 'Applicant', accountId: account._id, ip: '192.0.2.9' })
+      const account = await applicant({ quality: { passed: true } }, {}, 'birthCertificate')
+      await verificationEngine.process({ role: 'Applicant', accountId: account._id, docKey: 'birthCertificate', ip: '192.0.2.9' })
       return { account, decision: await nsrpAutomation.decisions().findOne({ accountId: account._id }) }
     }
     expect((await run()).decision.reason).toBe('Not independent')
     await nsrpAutomation.updateSettings({ minimumEvidence: 'none', automaticApproval: false }, admin.email)
     expect((await run()).decision.reason).toBe('Auto-approval off')
     await nsrpAutomation.updateSettings({ automaticApproval: true }, admin.email)
-    const held = await applicant({}, { nsrpAutoEnabledAtCreation: true, holdAutoApproval: true })
-    await nsrpAutomation.process({ role: 'Applicant', accountId: held._id, ip: '192.0.2.9' })
+    const held = await applicant({ quality: { passed: true } }, { holdAutoApproval: true }, 'birthCertificate')
+    await verificationEngine.process({ role: 'Applicant', accountId: held._id, docKey: 'birthCertificate', ip: '192.0.2.9' })
     expect((await nsrpAutomation.decisions().findOne({ accountId: held._id })).reason).toBe('Hold')
   })
   it('enforces reasons and flag confirmation through the existing applicant review endpoint too', async () => {
@@ -188,7 +197,7 @@ describe('Document verification foundations', () => {
     expect(version.findings[0]).toMatchObject({ status: 'dismissed', dismissedBy: String(admin._id) })
     expect(version.verificationAudit[0].action).toBe('resolve')
     expect((await nsrpAutomation.decisions().findOne({ _id: id })).dismissedCritical).toBe(true)
-    expect((await api('get', '/queue').expect(200)).body.items[0].unresolved).toBe(0)
+    expect((await api('get', '/queue').expect(200)).body.items.some(item => item.accountId === String(account._id))).toBe(false)
   })
   it('keeps employer findings and administrative notes out of the owner verification response', async () => {
     const employer = await Employer.create({ email: 'private-employer@example.invalid', passwordHash: 'test' })

@@ -7,6 +7,7 @@ const interviewSchema = new Schema({
   scheduledAt: { type: Date, required: true }, mode: { type: String, enum: ['In person', 'Online'], default: 'In person' }, location: String, message: String, responseMessage: String,
   city: String, barangay: String, province: String, landmark: String, meetingLink: String,
   status: { type: String, enum: ['invited', 'confirmed', 'reschedule_requested', 'declined', 'cancelled', 'held', 'attended', 'missed'], default: 'invited' },
+  outcome: { type: String, enum: ['passed', 'did_not_pass', 'not_selected', 'hired'] },
   cancelledBy: String, cancelledAt: Date, history,
   postInterviewTask: {
     status: { type: String, enum: ['requested', 'submitted', 'completed'] },
@@ -32,6 +33,16 @@ appealSchema.index({ applicantId: 1 }, { unique: true, partialFilterExpression: 
 export const Interview = mongoose.models.Interview || mongoose.model('Interview', interviewSchema)
 export const ApplicationReport = mongoose.models.ApplicationReport || mongoose.model('ApplicationReport', reportSchema)
 export const ApplicationAppeal = mongoose.models.ApplicationAppeal || mongoose.model('ApplicationAppeal', appealSchema)
+const reputationReviewSchema = new Schema({
+  applicantId: { type: Schema.Types.ObjectId, required: true }, eventKey: { type: String, required: true }, applicationId: Schema.Types.ObjectId,
+  category: String, note: String, supportingVersion: Number, originalName: String,
+  status: { type: String, enum: ['pending', 'processing', 'reversed', 'kept', 'reduced'], default: 'pending' },
+  decision: String, reducedPoints: Number, reviewedBy: String, reviewedAt: Date,
+  adminNote: { type: String, select: false }, publicReason: String,
+}, { collection: 'reputation_reviews', timestamps: true })
+reputationReviewSchema.index({ applicantId: 1, eventKey: 1 }, { unique: true })
+reputationReviewSchema.index({ status: 1, createdAt: 1 })
+export const ReputationReview = mongoose.models.ReputationReview || mongoose.model('ReputationReview', reputationReviewSchema)
 const postInterviewFileSchema = new Schema({
   interviewId: { type: Schema.Types.ObjectId, required: true }, applicantId: { type: Schema.Types.ObjectId, required: true },
   employerId: { type: Schema.Types.ObjectId, required: true }, requirementKey: { type: String, required: true },

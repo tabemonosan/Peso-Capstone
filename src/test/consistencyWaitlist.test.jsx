@@ -24,6 +24,24 @@ it('keeps explanations available while upload chances are exhausted', () => {
   expect(screen.getByRole('button', { name: 'Explain a difference' })).toBeEnabled()
   expect(screen.queryByRole('button', { name: /Resubmit|Replace|Upload document/i })).not.toBeInTheDocument()
 })
+it('allows a pending birth certificate replacement when only the ID has an exhausted mismatch', () => {
+  render(<MyDocumentsModal token="sample" onClose={() => {}} info={{ verificationStatus: 'waitlisted', consistency: { ...state, issues: [{ ...state.issues[0], document: 'validId1', label: 'Valid ID #1', fieldGroup: 'ID number' }] }, documents: [{ docKey: 'birthCertificate', label: 'Birth Certificate', status: 'pending', uploadsRemaining: 3, latest: { version: 2 } }] }} />)
+  const birth = screen.getByText('Birth Certificate').closest('li')
+  fireEvent.change(within(birth).getByLabelText(/^Birth certificate copy type/), { target: { value: 'PSA copy on security paper' } })
+  fireEvent.change(within(birth).getByLabelText('Choose Birth Certificate file'), { target: { files: [new File(['sample'], 'clearer.png', { type: 'image/png' })] } })
+  expect(within(birth).getByRole('button', { name: 'Upload', exact: true })).toBeEnabled()
+})
+it('does not request an explanation or admin review for a verified document', () => {
+  render(<MyDocumentsModal token="sample" onClose={() => {}} info={{ verificationStatus: 'approved', documents: [{ docKey: 'birthCertificate', label: 'Birth Certificate', status: 'approved', latest: { version: 1 } }] }} />)
+  expect(screen.getByText('Verified')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Explain a difference' })).not.toBeInTheDocument()
+  expect(screen.queryByText(/Waiting for PESO review/)).not.toBeInTheDocument()
+})
+it('shows an unprocessed document as checking without requesting an explanation', () => {
+  render(<MyDocumentsModal token="sample" onClose={() => {}} info={{ verificationStatus: 'under_review', documents: [{ docKey: 'birthCertificate', label: 'Birth Certificate', status: 'pending', latest: { version: 1 } }] }} />)
+  expect(screen.getByText('Checking')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Explain a difference' })).not.toBeInTheDocument()
+})
 it('requires a comparison checkbox and reason for admin release', async () => {
   const fetcher = vi.fn(async () => ({ ok: true, json: async () => ({ ok: true }) }))
   vi.stubGlobal('fetch', fetcher)

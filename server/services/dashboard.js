@@ -33,7 +33,7 @@ const pendingDocsPipeline = [
           $filter: {
             input: { $objectToArray: { $ifNull: ['$verificationDocuments', {}] } },
             as: 'doc',
-            cond: { $eq: [{ $arrayElemAt: ['$$doc.v.versions.status', -1] }, 'pending'] },
+            cond: { $and: [{ $ne: ['$$doc.k', 'nsrpForm'] }, { $eq: [{ $arrayElemAt: ['$$doc.v.versions.status', -1] }, 'pending'] }] },
           },
         },
       },

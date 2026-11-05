@@ -1,4 +1,5 @@
 import SkillTagPicker from './components/SkillTagPicker'
+import PageGuide from './components/PageGuide'
 import MyApplicationsPage from './components/MyApplicationsPage'
 import ApplicantReputationPage from './components/ApplicantReputationPage'
 import PortalNotice from './components/PortalNotice'
@@ -27,7 +28,7 @@ import PasswordChecklist from "./components/PasswordChecklist"
 import ApplicantSignupWizard from "./components/ApplicantSignupWizard"
 import EmployerSignupWizard from "./components/EmployerSignupWizard"
 import AdminNsrpAutomation, { AdminNsrpAccountDecision } from './components/AdminNsrpAutomation'
-import AdminDocumentVerification, { VerificationQueueBadge } from './components/AdminDocumentVerification'
+import AdminDocumentVerification from './components/AdminDocumentVerification'
 import EmployerVerificationPage from "./components/EmployerVerificationPage"
 import { validatePassword } from "./utils/passwordPolicy"
 import { SUFFIX_OPTIONS, capitalizeName, validateNameField, formatFullName, formatDisplayName } from "../shared/nameFields.js"
@@ -49,7 +50,8 @@ import { usePagination, useDebouncedValue } from "./hooks/usePagination"
 import { useSort } from "./hooks/useSort"
 import { sortItems } from "./utils/sortItems"
 import RoleDashboard from "./components/AllDashboard"
-import AdminReferralsPage, { AutomaticReferralBanner } from './components/AdminReferralsPage'
+import ApplicantReviewStatus from './components/ApplicantReviewStatus'
+import AdminReferralsPage from './components/AdminReferralsPage'
 
 const focusJobError = (form) => requestAnimationFrame(() => {
   const input = form?.querySelector('[aria-invalid="true"]')
@@ -77,9 +79,6 @@ const navigationByRole = {
     { id: "employers", label: "Employers" },
     { id: "applicants", label: "Applicants" },
     { id: "requests", label: "Employer Requests" },
-    { id: "verification-rules", label: "Verification rules" },
-    { id: "verification-flagged", label: "Flagged for review" },
-    { id: "verification-auto", label: "Auto-approved" },
     { id: "account-deletions", label: "Account Deletions" },
     { id: "jobs", label: "Job Postings" },
     { id: "job-titles", label: "Job Titles" },
@@ -1687,6 +1686,11 @@ const toggleSkill = (selected, skill) => {
   const accountNeedsVerification = Boolean(
     currentUser?.verificationStatus && currentUser.verificationStatus !== 'approved',
   )
+  const saveGuideState = (next) => setCurrentUser(current => !current || (current.id || current._id) !== (currentUser?.id || currentUser?._id) ? current : ({ ...current, pageGuides: {
+    ...next,
+    dismissedAll: Boolean(current?.pageGuides?.dismissedAll || next.dismissedAll),
+    seenPages: [...new Set([...(current?.pageGuides?.seenPages || []), ...(next.seenPages || [])])],
+  } }))
   useEffect(() => {
     const update = event => { if (activeRole === 'Applicant' && event.detail?.status) setCurrentUser(current => ({ ...current, verificationStatus: event.detail.status })) }
     window.addEventListener('applicant-consistency', update)
@@ -2154,7 +2158,6 @@ const toggleSkill = (selected, skill) => {
               >
                 <PortalNavIcon name={activeRole === 'Applicant' && item.id === 'dashboard' ? 'home' : item.id} />
                 <span>{item.label}</span>
-                {activeRole === 'Admin' && item.id === 'verification-flagged' && <VerificationQueueBadge token={getToken()} />}
               </button>
             ))}
           </nav>
@@ -2178,7 +2181,7 @@ const toggleSkill = (selected, skill) => {
           )}
 
           <main className="space-y-6">
-          {activeRole === 'Admin' && <AutomaticReferralBanner token={getToken()} onOpen={() => setActiveView('peso-referrals')} />}
+          {!showProfileDocuments && <PageGuide key={`${currentUser?.id}:${activeRole}:${activeView}`} role={activeRole} view={activeView} state={currentUser?.pageGuides} token={getToken()} onSaved={saveGuideState} />}
           {activeRole === 'Admin' && <AdminNsrpAutomation key={activeView} token={getToken()} bannerOnly={activeView !== 'verification-rules'} />}
           {activeRole === 'Admin' && ['verification-flagged', 'verification-auto'].includes(activeView) && <AdminDocumentVerification key={activeView} token={getToken()} queue={activeView === 'verification-auto' ? 'auto' : 'flagged'} />}
           {approvalNotice && activeRole === 'Employer' && (
@@ -2233,11 +2236,12 @@ const toggleSkill = (selected, skill) => {
                   </div>
                 </section>
               )}
-              <RoleDashboard token={getToken()} applicantOverview={activeRole === 'Applicant' ? { openJobs: availableJobs.length, notifications: notifTotal } : undefined} onNavigate={(target) => {
+              <RoleDashboard key={activeRole === 'Applicant' ? currentUser?.verificationStatus : activeRole} token={getToken()} applicantOverview={activeRole === 'Applicant' ? { openJobs: availableJobs.length, notifications: notifTotal } : undefined} onNavigate={(target) => {
                 if (activeRole === 'Admin' && target === 'employment-updates') setHiringUpdates({})
                 setActiveView(target)
               }} />
-              {activeRole === 'Applicant' && applicantApproved && (
+              {activeRole === 'Applicant' && ['under_review', 'waitlisted'].includes(currentUser?.verificationStatus) && <ApplicantReviewStatus token={getToken()} onManageDocuments={() => { setActiveView('profile'); setShowProfileDocuments(true) }} />}
+              {activeRole === 'Applicant' && applicantApproved && !currentUser?.pageGuides && (
                 <section className="applicant-home-guide" aria-labelledby="applicant-home-guide-title">
                   <div className="applicant-home-guide-icon"><PortalNavIcon name="verification" /></div>
                   <div>
@@ -2667,6 +2671,8 @@ const toggleSkill = (selected, skill) => {
                   </form>
                   <div className="mt-6" id="profile-documents">
                     <MyDocumentsPage
+                      guideState={currentUser?.pageGuides}
+                      onGuidesSaved={saveGuideState}
                       applicantId={currentUser?.id || currentUser?._id}
                       token={getToken()}
                       open={showProfileDocuments}
@@ -2925,7 +2931,7 @@ const toggleSkill = (selected, skill) => {
           )}
 
           {activeView === "my-applications" && activeRole === "Applicant" && <MyApplicationsPage token={getToken()} onDeclined={() => { fetchJobs(); setActiveView('jobs') }} />}
-          {activeView === 'my-reputation' && activeRole === 'Applicant' && <ApplicantReputationPage token={getToken()} onOpenApplications={() => setActiveView('my-applications')} />}
+          {activeView === 'my-reputation' && activeRole === 'Applicant' && <ApplicantReputationPage token={getToken()} onOpenApplications={applicationId => { const url = new URL(window.location.href); if (applicationId) url.searchParams.set('applicationId', applicationId); else url.searchParams.delete('applicationId'); window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`); setActiveView('my-applications') }} />}
           {activeView === "referrals" && activeRole === "Employer" && (
             <ReferralList
               profileImage={profileData.profileImage}
@@ -3300,6 +3306,7 @@ const toggleSkill = (selected, skill) => {
 
           {activeView === "peso-referrals" && activeRole === "Admin" && (
             <AdminReferralsPage
+              onOpenReviewQueue={() => setActiveView('verification-flagged')}
               token={getToken()}
               adminUsers={adminUsers}
               onLoadApplicants={fetchAdminUsers}

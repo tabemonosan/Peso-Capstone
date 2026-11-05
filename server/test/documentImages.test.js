@@ -23,6 +23,16 @@ it('allows dark and blurry photos with warnings and accepts a normal photo', asy
   const result = await inspectDocument(blurry)
   expect(result.warnings).toContain('blur')
 })
+it('does not mistake an alpha channel for blur in a clear PNG', async () => {
+  const source = await normal()
+  const opaque = await sharp(source).removeAlpha().png().toBuffer()
+  const withAlpha = await sharp(source).ensureAlpha().png().toBuffer()
+  expect((await sharp(withAlpha).metadata()).hasAlpha).toBe(true)
+  const opaqueResult = await inspectDocument(file(opaque))
+  const alphaResult = await inspectDocument(file(withAlpha))
+  expect(opaqueResult.warnings).not.toContain('blur')
+  expect(alphaResult.warnings).toEqual(opaqueResult.warnings)
+})
 it('autorotates EXIF images and strips metadata', async () => {
   const input = file(await sharp(await normal()).jpeg().withMetadata({ orientation: 6 }).toBuffer())
   const result = await inspectDocument(input)

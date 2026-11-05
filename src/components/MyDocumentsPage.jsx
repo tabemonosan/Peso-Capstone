@@ -4,7 +4,7 @@ import MyDocumentsModal from "./MyDocumentsModal"
 import ConsistencyWaitlistCard from './ConsistencyWaitlistCard'
 
 // Document details open only after the applicant chooses to manage them.
-export default function MyDocumentsPage({ applicantId, token, onUpdated, open, onOpenChange }) {
+export default function MyDocumentsPage({ applicantId, token, onUpdated, open, onOpenChange, guideState, onGuidesSaved }) {
   const [info, setInfo] = useState(null)
   const [error, setError] = useState('')
   const [showDocsModal, setShowDocsModal] = useState(() => new URLSearchParams(window.location.search).get("editNsrp") === "1")
@@ -89,6 +89,8 @@ export default function MyDocumentsPage({ applicantId, token, onUpdated, open, o
 
       {(open ?? showDocsModal) && (
         <MyDocumentsModal
+          guideState={guideState}
+          onGuidesSaved={onGuidesSaved}
           info={info}
           token={token}
           onClose={() => setDocumentsOpen(false)}

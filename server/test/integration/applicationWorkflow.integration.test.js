@@ -4,6 +4,7 @@ import mongoose from 'mongoose'
 import request from 'supertest'
 import jwt from 'jsonwebtoken'
 import bcrypt from 'bcryptjs'
+import { REPUTATION_DEFAULTS } from '../../../shared/reputation.js'
 import { startTestDb, stopTestDb, clearDb, jobApplicationRequest, pdfBuffer } from './helpers.js'
 vi.mock('node:dns/promises', () => ({ Resolver: class { async resolveMx() { return [{ exchange: 'mail.example.test', priority: 10 }] } } }))
 vi.mock('../../mailer.js', async original => ({ ...await original(), sendEmail: vi.fn(async () => ({ delivered: true })), initMailer: vi.fn() }))
@@ -147,8 +148,8 @@ describe('applications, interviews and admin-confirmed events', () => {
     await api('post', `/admin/reports/${encodeURIComponent(report.id)}/review`, 'Admin', admin, decision).expect(200)
     await api('post', `/admin/reports/${encodeURIComponent(report.id)}/review`, 'Admin', admin, decision).expect(200)
     const result = await api('get', '/reputation', 'Applicant', applicant).expect(200)
-    expect(result.body).toMatchObject({ points: 80, total: 1 })
-    expect(result.body.items[0]).toMatchObject({ type: 'confirmed_no_show', before: 100, after: 80, change: -20 })
+    expect(result.body).toMatchObject({ points: 100 - REPUTATION_DEFAULTS.noShowFirst, total: 1 })
+    expect(result.body.items[0]).toMatchObject({ type: 'confirmed_no_show', before: 100, after: 100 - REPUTATION_DEFAULTS.noShowFirst, change: -REPUTATION_DEFAULTS.noShowFirst })
     expect(JSON.stringify(result.body)).not.toContain('PRIVATE')
     expect(await Notification.countDocuments({ type: 'reputation_updated' })).toBe(1)
   })
@@ -412,7 +413,9 @@ describe('applications, interviews and admin-confirmed events', () => {
 
   it.each([false, true])('routes low-trust applicants only when the optional setting is %s', async enabled => {
     const normal = await makeApplicant('normal@workflow.test')
-    await applicationWorkflow.confirmEvent({ email: admin.email }, { applicantId: applicant._id, type: 'manual_adjustment', delta: -60, eventKey: 'routing-fixture', reason: 'Demo adjustment' })
+    // A historical ledger loss establishes the low-standing routing fixture;
+    // new penalties are deliberately subject to the rolling cap.
+    await Applicant.collection.updateOne({ _id: applicant._id }, { $set: { trustValue: 40, trustEvents: [{ key: 'routing-fixture', type: 'manual_adjustment', delta: -60, by: admin.email, reason: 'Demo adjustment', at: new Date() }] } })
     if (enabled) await referralWorkflow.setLowTrustRouting(true, admin.email)
     expect((await referralWorkflow.getSettings()).lowTrustRouting).toBe(enabled)
     const low = await apply(), regular = await apply(normal)
@@ -436,7 +439,7 @@ describe('applications, interviews and admin-confirmed events', () => {
 
   it('requires a reason to decline queued applications and keeps the reason private', async () => {
     await referralWorkflow.setLowTrustRouting(true, admin.email)
-    await Applicant.collection.updateOne({ _id: applicant._id }, { $set: { trustValue: 10 } })
+    await Applicant.collection.updateOne({ _id: applicant._id }, { $set: { trustValue: 10, trustEvents: [{ key: 'legacy-fixture-loss', type: 'manual_adjustment', delta: -90, by: 'Legacy fixture', reason: 'Existing recorded loss', at: new Date() }] } })
     const result = await apply().expect(200)
     await api('post', `/admin/applications/${result.body.applicationId}/review`, 'Admin', admin, { decision: 'declined', reason: '' }).expect(403)
     await api('post', `/admin/applications/${result.body.applicationId}/review`, 'Admin', admin, { decision: 'declined', reason: 'PRIVATE admin decision' }).expect(200)
@@ -444,6 +447,14 @@ describe('applications, interviews and admin-confirmed events', () => {
     expect(mine.body.items[0].status).toBe('declined_by_admin')
     expect(mine.body.items[0].actions).toEqual(['view_outcome'])
     expect(JSON.stringify(mine.body)).not.toMatch(/PRIVATE|trustValue|reviewQueue/)
+  })
+  it('routes a recovered applicant using the ledger instead of a stale low cache', async () => {
+    await referralWorkflow.setLowTrustRouting(true, admin.email)
+    await Applicant.collection.updateOne({ _id: applicant._id }, { $set: { trustValue: 10, trustEvents: [{ key: 'old-loss', type: 'confirmed_no_show', points: -20, at: new Date(Date.now() - 70 * DAY) }] } })
+    const result = await apply().expect(200)
+    expect(result.body.deliveryStatus).toBe('delivered')
+    expect((await api('get', '/reputation', 'Applicant', applicant)).body.points).toBe(100)
+    expect(await mongoose.connection.db.collection('referral_audit').countDocuments({ action: 'application_routed_for_review' })).toBe(0)
   })
 
   it.each(['confirmed', 'dismissed'])('keeps no-show reports separate from ratings and changes trust only if admin %s', async decision => {
@@ -458,7 +469,7 @@ describe('applications, interviews and admin-confirmed events', () => {
     await api('post', `/admin/reports/${encodeURIComponent(report.id)}/review`, 'Admin', admin, { decision, reason: 'PRIVATE admin evidence review' }).expect(200)
     await api('post', `/admin/reports/${encodeURIComponent(report.id)}/review`, 'Admin', admin, { decision, reason: 'Retry same decision' }).expect(200)
     const account = await score()
-    expect(account.trustValue).toBe(decision === 'confirmed' ? 80 : 100)
+    expect(account.trustValue).toBe(decision === 'confirmed' ? 100 - REPUTATION_DEFAULTS.noShowFirst : 100)
     expect(account.trustEvents).toHaveLength(decision === 'confirmed' ? 1 : 0)
     mine = await api('get', '/mine', 'Applicant', applicant).expect(200)
     if (decision === 'confirmed') expect(mine.body.items[0].actions).toContain('view_outcome')
@@ -472,7 +483,7 @@ describe('applications, interviews and admin-confirmed events', () => {
     await api('post', `/reports/${encodeURIComponent(report.id)}/respond`, 'Applicant', applicant, { response: 'Late response' }).expect(409)
     await request(app).post('/api/applications/reports').set(auth('Applicant', applicant)).send({ referralId: String(referral._id), type: 'no_show', reason: 'Applicant report' }).expect(403)
     await api('post', `/admin/reports/${encodeURIComponent(report.id)}/review`, 'Admin', admin, { decision: 'confirmed', reason: 'Window closed, evidence reviewed' }).expect(200)
-    expect((await score()).trustValue).toBe(80)
+    expect((await score()).trustValue).toBe(100 - REPUTATION_DEFAULTS.noShowFirst)
   })
 
   it('preserves reciprocal ratings and recipient visibility without allowing ratings to change trust', async () => {
@@ -486,7 +497,7 @@ describe('applications, interviews and admin-confirmed events', () => {
       const response = await request(app).get(`/api/ratings/${applicant._id}`).set(auth(role, account)).expect(200)
       expect(response.body.totalRatings).toBe(1)
     }
-    await Applicant.collection.updateOne({ _id: applicant._id }, { $set: { trustValue: 50 } })
+    await Applicant.collection.updateOne({ _id: applicant._id }, { $set: { trustValue: 50, trustEvents: [{ key: 'legacy-fixture-loss', type: 'manual_adjustment', delta: -50, by: 'Legacy fixture', reason: 'Existing recorded loss', at: new Date() }] } })
     await Interview.updateOne({ _id: meeting.id }, { status: 'held' })
     const event = { applicantId: String(applicant._id), type: 'attended_interview', referenceId: meeting.id, reason: 'Admin confirms attendance' }
     await api('post', '/admin/events/confirm', 'Employer', employer, event).expect(403)
@@ -585,7 +596,7 @@ describe('applications, interviews and admin-confirmed events', () => {
     await request(app).post(`/api/applications/${referral.applicationId}/withdraw`).set(auth('Applicant', applicant)).expect(200)
     expect((await score()).trustValue).toBe(100)
     await api('post', '/admin/events/confirm', 'Admin', admin, { applicantId: String(applicant._id), type: 'late_cancellation', referenceId: meeting.id, reason: 'Admin confirms late cancellation' }).expect(200)
-    expect((await score()).trustValue).toBe(90)
+    expect((await score()).trustValue).toBe(100 - REPUTATION_DEFAULTS.lateFirst)
   })
 
   it('aggregates dashboard/report counts from the full-cycle seed', async () => {
@@ -601,7 +612,7 @@ describe('applications, interviews and admin-confirmed events', () => {
       }
     }
     const missed = await score(fixture.applicants[2])
-    expect(missed.trustValue).toBe(80)
+    expect(missed.trustValue).toBe(100 - REPUTATION_DEFAULTS.noShowFirst)
     expect(missed.trustEvents).toHaveLength(1)
     expect((await score(fixture.applicants[1])).trustValue).toBe(100)
     expect((await referralWorkflow.getSettings()).lowTrustRouting).toBe(false)

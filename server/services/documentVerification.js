@@ -7,6 +7,7 @@ import { readOcr } from './localImageReading.js'
 import { reserveOcr } from './imageChecks.js'
 import { extractDocumentFields } from '../../shared/crossChecks.js'
 import { WAITLIST_LIMITS } from '../../shared/consistencyWaitlist.js'
+import { identityRecheckUpdate } from './nsrpReference.js'
 
 const fail = (status, message) => { const error = new Error(message); error.status = status; throw error }
 const oid = value => {
@@ -63,9 +64,10 @@ export function createDocumentVerification({ Applicant, Employer, EmployerReques
   async function list(query = {}) {
     const page = Math.max(1, Math.min(10000, Number.parseInt(query.page, 10) || 1))
     const limit = Math.max(1, Math.min(100, Number.parseInt(query.limit, 10) || 25))
-    const match = query.queue === 'auto' ? { status: 'approved', $or: [{ autoApproved: true }, { reviewedBy: { $in: ['System (auto-approval)', 'System (verification engine)'] } }] }
+    const match = query.queue === 'auto' ? { status: 'approved', docKey: { $ne: 'nsrpForm' }, $or: [{ autoApproved: true }, { reviewedBy: { $in: ['System (auto-approval)', 'System (verification engine)'] } }] }
       : { $or: [
-        { status: { $in: ['pending', 'needs_resubmission'] } },
+        { role: 'Employer', status: { $in: ['pending', 'needs_resubmission'] } },
+        { role: 'Applicant', docKey: { $ne: 'nsrpForm' }, $or: [{ status: 'needs_resubmission' }, { status: 'pending', 'reasons.0': { $exists: true } }, { status: 'pending', holdAutoApproval: true }] },
         { findings: { $elemMatch: { severity: { $in: ['warning', 'critical'] }, status: { $ne: 'dismissed' } } } },
         { 'explanation.status': 'submitted' },
       ] }
@@ -94,7 +96,7 @@ export function createDocumentVerification({ Applicant, Employer, EmployerReques
       { $set: { entry: DOCUMENT_KEYS.filter(key => key !== 'employerNsrpForm').map(key => ({ docKey: key, document: { $arrayElemAt: [`$verificationDocuments.${key}.versions`, -1] } })) } },
       { $unwind: '$entry' }, projection('Applicant'),
       { $unionWith: { coll: EmployerRequest.collection.name, pipeline: employerPipeline } },
-      { $set: { decisionKey: { $cond: [{ $in: ['$docKey', ['nsrpForm', 'employerNsrpForm']] }, { $concat: ['$role', ':', { $toString: '$accountId' }, ':', { $toString: '$version' }] }, ''] } } },
+      { $set: { decisionKey: { $cond: [{ $in: ['$docKey', ['nsrpForm', 'employerNsrpForm']] }, { $concat: ['$role', ':', { $toString: '$accountId' }, ':', { $toString: '$version' }] }, { $concat: ['$role', ':', { $toString: '$accountId' }, ':', '$docKey', ':', { $toString: '$version' }] }] } } },
       { $lookup: { from: 'nsrp_auto_decisions', localField: 'decisionKey', foreignField: '_id', as: 'legacyDecision' } },
       { $set: { legacyDecision: { $arrayElemAt: ['$legacyDecision', 0] } } },
       { $set: {
@@ -172,7 +174,7 @@ export function createDocumentVerification({ Applicant, Employer, EmployerReques
       if (document.adminConfirmedAt) fail(409, 'Already marked checked')
       set[`${base}.adminConfirmedAt`] = at; set[`${base}.adminConfirmedBy`] = by
     } else if (action === 'revoke') {
-      if (document.status !== 'approved') fail(409, 'Only approved documents can be revoked')
+      if (document.status !== 'approved' && !(target.docKey === 'nsrpForm' && account.verificationStatus === 'approved')) fail(409, 'Only approved documents can be revoked')
       set[`${base}.status`] = 'pending'; set[`${base}.reviewReasons`] = ['Revoked approval']
       set[`${base}.autoApproved`] = false
       for (const key of ['approvedBy', 'adminConfirmedBy', 'adminConfirmedAt', 'reviewedBy', 'reviewedAt', 'reviewReason']) unset[`${base}.${key}`] = ''
@@ -190,6 +192,12 @@ export function createDocumentVerification({ Applicant, Employer, EmployerReques
     const revision = document.reviewRevision || 0
     const match = { _id: record._id, [path]: { $size: count }, [`${base}.version`]: document.version, [`${base}.status`]: document.status,
       $or: [{ [`${base}.reviewRevision`]: revision }, ...(revision === 0 ? [{ [`${base}.reviewRevision`]: { $exists: false } }] : [])] }
+    if (target.role === 'Applicant' && target.docKey !== 'nsrpForm' && action === 'approve' && account.verificationDocuments?.nsrpForm?.versions?.length) match['verificationDocuments.nsrpForm.versions'] = { $size: account.verificationDocuments.nsrpForm.versions.length }
+    if (target.role === 'Applicant' && target.docKey === 'nsrpForm' && action === 'revoke') {
+      const recheck = identityRecheckUpdate(account, by, at)
+      Object.assign(set, recheck.set); Object.assign(unset, recheck.unset)
+      Object.assign(push, recheck.push); Object.assign(match, recheck.match)
+    }
     const changed = await model.collection.updateOne(match, { $set: set, $push: push, $inc: { [`${base}.reviewRevision`]: 1 }, ...(Object.keys(unset).length ? { $unset: unset } : {}) })
     if (!changed.modifiedCount) fail(409, 'Document changed; refresh the queue')
     if (['approve', 'decline', 'resubmit', 'checked'].includes(action)) await clearAuthorization(account._id, target.docKey, document.version)
@@ -206,6 +214,7 @@ export function createDocumentVerification({ Applicant, Employer, EmployerReques
     })
     if (['approve', 'resubmit', 'decline', 'revoke', 'explain'].includes(action)) {
       const messages = { approve: 'Your document was approved by PESO.', resubmit: 'Please upload a clearer or corrected document for PESO review.', decline: 'PESO could not approve your document. Please contact the office for assistance.', revoke: 'Your document has returned to PESO review. You do not need to upload it again.', explain: 'PESO would like additional information about your document. Please contact the office.' }
+      if (target.docKey === 'nsrpForm' && action === 'revoke') messages.revoke = 'PESO reopened your NSRP reference for correction. Your birth certificate and IDs will need to be checked again.'
       await notify({ recipient: { id: account._id, role: target.role }, type: 'document_review_update', title: 'Document review update', message: messages[action], link: target.role === 'Applicant' ? '/profile?documents=1' : '/verification', email: true })
     }
     return { ok: true }

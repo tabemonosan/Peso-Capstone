@@ -10,9 +10,20 @@ import { loadDocumentFile } from '../utils/documentFiles.js'
 import { clearAuthorization } from './documentUpload.js'
 const advisory = new Set(['education_age', 'work_start_age', 'experience_age', 'married_under_18', 'location_pair', 'employer_location_pair'])
 const safeFinding = f => ({ ruleId: String(f.ruleId || f.code || 'provider_inconclusive').slice(0, 100), severity: ['info', 'warning', 'critical'].includes(f.severity) ? f.severity : 'info', fieldGroup: String(f.fieldGroup || 'document').slice(0, 60), evidence: f.evidence === 'independent' ? 'independent' : 'self-declared', status: f.status === 'dismissed' ? 'dismissed' : 'open', approvalBlocking: advisory.has(f.ruleId || f.code) ? false : f.approvalBlocking !== false })
+function findingsForDocument(account, docKey, document) {
+  // Older decisions copied sibling findings into this document. Discard those
+  // comparison rules as well as avoiding new copies on subsequent checks.
+  const siblingPrefix = docKey === 'birthCertificate' ? 'cross_id_' : docKey.startsWith('validId') ? 'cross_birth_' : null
+  const own = (document.findings || []).filter(f => !siblingPrefix || !String(f.ruleId || f.code || '').startsWith(siblingPrefix))
+  // Duplicate identity claims remain an account-wide approval guard.
+  const duplicates = Object.values(account.verificationDocuments || {}).flatMap(slot => slot.versions?.at(-1)?.findings || []).filter(f => /duplicate|cross_account/.test(f.ruleId || f.code || ''))
+  return [...own, ...duplicates]
+}
 export function createVerificationEngine({ Applicant, Employer, EmployerRequest, automation, notify, notifyAdmins, recomputeApplicant, random = () => crypto.randomInt(1000000) / 1000000, providers, beforeApproval } = {}) {
   const decisions = () => automation.decisions()
   async function process({ role, accountId, docKey, ip, checkToken }) {
+    // Form 1 supplies the comparison baseline; it cannot verify itself.
+    if (role === 'Applicant' && docKey === 'nsrpForm') return
     const key = ['nsrpForm', 'employerNsrpForm'].includes(docKey) ? `${role}:${accountId}:` : `${role}:${accountId}:${docKey}:`
     let decisionKey, approved = false, locked = false
     try {
@@ -28,16 +39,18 @@ export function createVerificationEngine({ Applicant, Employer, EmployerRequest,
       if (!document || document.status !== 'pending') return
       decisionKey = key + document.version
       await decisions().updateOne({ _id: decisionKey }, { $setOnInsert: { role, accountId: account._id, recordId: record._id, accountLabel: account.email, docKey, version: document.version, at: new Date(), result: 'Ready' } }, { upsert: true })
-      const lock = await decisions().updateOne({ _id: decisionKey, result: { $in: ['Ready', 'Manual'] }, reason: { $nin: ['Audit sample', 'Resubmission', 'Uploaded file', 'Always manual', 'Revoked approval', 'Retake requested', 'Technical attempts: admin review', 'Check or approval unavailable'] } }, { $set: { result: 'Processing', docKey } })
+      const manualReasons = ['Uploaded file', 'Always manual', 'Revoked approval', 'Retake requested', 'Technical attempts: admin review', 'Check or approval unavailable']
+      if (role !== 'Applicant') manualReasons.push('Audit sample', 'Resubmission')
+      const lock = await decisions().updateOne({ _id: decisionKey, result: { $in: ['Ready', 'Manual'] }, reason: { $nin: manualReasons } }, { $set: { result: 'Processing', docKey } })
       if (!lock.modifiedCount) return
       locked = true
       const settings = await automation.getSettings(), nsrpDocument = ['nsrpForm', 'employerNsrpForm'].includes(docKey)
       const nsrp = account.profile?.nsrp || { firstName: account.profile?.firstName, surname: account.profile?.lastName, dob: account.profile?.dob }
       const oldDecision = await decisions().findOne({ _id: decisionKey })
       const report = nsrpDocument ? oldDecision.report || (role === 'Applicant' ? checkNsrp(nsrp) : checkNsrp2(record)) : null
-      const currentDocument = { ...document, quality: nsrpDocument && document.sourceType === 'generated' ? { passed: true, warnings: [] } : document.quality }
+      const currentDocument = { ...document, ...(role === 'Applicant' ? { findings: findingsForDocument(account, docKey, document) } : {}), quality: nsrpDocument && document.sourceType === 'generated' ? { passed: true, warnings: [] } : document.quality }
       const allVersions = role === 'Applicant' ? Object.values(account.verificationDocuments || {}).map(slot => slot.versions?.at(-1)).filter(Boolean) : [document]
-      let findings = [...allVersions.flatMap(v => v.findings || []), ...(report?.findings || [])].map(safeFinding)
+      let findings = [...(role === 'Applicant' ? findingsForDocument(account, docKey, document) : allVersions.flatMap(v => v.findings || [])), ...(report?.findings || [])].map(safeFinding)
       let comparisons = [...(document.imageComparisons || [])], verifiedQr = false
       if (docKey === 'nsrpForm') comparisons = allVersions.flatMap(v => v.imageComparisons || [])
       let selectedProvider = new LocalChecksProvider(), providerResult = await selectedProvider.verify(currentDocument, { nsrp })
@@ -79,7 +92,7 @@ export function createVerificationEngine({ Applicant, Employer, EmployerRequest,
         reason = attempts >= 3 ? 'Technical attempts: admin review' : 'Retake requested'
         await notify({ recipient: { id: account._id, role }, type: 'document_review_update', title: 'Document review update', message: 'Please take a clearer photo and submit it for PESO review.', link: role === 'Applicant' ? '/profile?documents=1' : '/verification' })
       } else {
-        if (!reason) {
+        if (!reason && role !== 'Applicant') {
           if (oldDecision.sampleDraw === undefined) await decisions().updateOne({ _id: decisionKey, sampleDraw: { $exists: false } }, { $set: { sampleDraw: random() } })
           sampled = (await decisions().findOne({ _id: decisionKey })).sampleDraw * 100 < settings.auditPercent
           if (sampled) reason = 'Audit sample'
@@ -89,13 +102,17 @@ export function createVerificationEngine({ Applicant, Employer, EmployerRequest,
           if (beforeApproval) await beforeApproval()
           const freshSettings = await automation.getSettings(), freshAccount = await accountModel.findById(accountId).select('+holdAutoApproval').lean()
           const freshVersions = role === 'Applicant' ? Object.values(freshAccount.verificationDocuments || {}).map(slot => slot.versions?.at(-1)).filter(Boolean) : allVersions
-          reason = decisionReason({ ...context, settings: freshSettings, account: { ...freshAccount, employerType: record.registrationDetails?.employerType }, findings: [...findings, ...freshVersions.flatMap(v => v.findings || []).map(safeFinding)], pendingExplanation: freshVersions.some(v => ['requested', 'submitted'].includes(v.explanation?.status)) })
+          const freshFindings = role === 'Applicant' ? findingsForDocument(freshAccount, docKey, freshAccount.verificationDocuments?.[docKey]?.versions?.at(-1) || {}) : freshVersions.flatMap(v => v.findings || [])
+          reason = decisionReason({ ...context, settings: freshSettings, account: { ...freshAccount, employerType: record.registrationDetails?.employerType }, findings: [...findings, ...freshFindings.map(safeFinding)], pendingExplanation: freshVersions.some(v => ['requested', 'submitted'].includes(v.explanation?.status)) })
+          if (role === 'Applicant' && (account.verificationDocuments?.nsrpForm?.versions?.length || 0) !== (freshAccount.verificationDocuments?.nsrpForm?.versions?.length || 0)) reason = 'Registration reference changed'
         }
         if (!reason) {
           const revision = document.reviewRevision || 0
-          const match = { _id: record._id, [path]: { $size: 1 }, [`${base}.version`]: 1, [`${base}.status`]: 'pending', $or: [{ [`${base}.reviewRevision`]: revision }, ...(revision === 0 ? [{ [`${base}.reviewRevision`]: { $exists: false } }] : [])] }
+          const match = { _id: record._id, [path]: { $size: versions.length }, [`${base}.version`]: document.version, [`${base}.status`]: 'pending', $or: [{ [`${base}.reviewRevision`]: revision }, ...(revision === 0 ? [{ [`${base}.reviewRevision`]: { $exists: false } }] : [])] }
+          if (role === 'Applicant' && account.verificationDocuments?.nsrpForm?.versions?.length) match['verificationDocuments.nsrpForm.versions'] = { $size: account.verificationDocuments.nsrpForm.versions.length }
           if (checkToken) Object.assign(match, { 'consistencyState.token': checkToken, 'consistencyState.status': 'checking' })
           const set = { [`${base}.status`]: 'approved', [`${base}.autoApproved`]: true, [`${base}.approvedBy`]: 'system', [`${base}.reviewedBy`]: REVIEWER_LABELS.system, [`${base}.reviewedAt`]: at, [`${base}.provider`]: providerResult.provider, [`${base}.assurance`]: providerResult.assurance, [`${base}.rulesVersion`]: DECISION_RULES_VERSION, [`${base}.autoApprovalSummary`]: [{ ruleId: settings.minimumEvidence === 'none' ? 'typed-only-override' : verifiedQr ? 'verified-qr' : 'eligible-evidence', level: 'clear' }], [`${base}.reviewReasons`]: [] }
+          if (role === 'Applicant') set[`${base}.findings`] = findings
           if (role === 'Employer') set['requirementsFile.status'] = 'approved'
           const historyPath = role === 'Applicant' ? `verificationDocuments.${docKey}.history` : 'reviewHistory'
           const event = role === 'Applicant' ? { action: 'auto-approved', by: REVIEWER_LABELS.system, at, reason: DECISION_RULES_VERSION } : { decision: 'approved', by: REVIEWER_LABELS.system, at, reason: 'Document auto-approved: ' + DECISION_RULES_VERSION }
@@ -105,7 +122,7 @@ export function createVerificationEngine({ Applicant, Employer, EmployerRequest,
             const transition = await recomputeApplicant(account._id)
             if (transition?.becameVerified) await notify({ recipient: { id: account._id, role }, type: 'account_verified', title: 'Account verified', message: 'All your required documents were approved. Your account is now verified.', link: '/jobs', email: true })
           }
-          if (approved) await notify({ recipient: { id: account._id, role }, type: 'document_approved', title: 'Document approved', message: 'Your document was approved after an automatic check. PESO may still review it.', link: role === 'Applicant' ? '/profile?documents=1' : '/verification', email: true })
+          if (approved) await notify({ recipient: { id: account._id, role }, type: 'document_approved', title: 'Document approved', message: 'Your document passed automatic verification. No admin review is needed.', link: role === 'Applicant' ? '/profile?documents=1' : '/verification', email: true })
         }
         if (reason) await model.collection.updateOne({ _id: record._id, [`${base}.status`]: 'pending', [`${base}.version`]: document.version }, { $set: { [`${base}.reviewReasons`]: [reason], [`${base}.findings`]: findings } })
       }

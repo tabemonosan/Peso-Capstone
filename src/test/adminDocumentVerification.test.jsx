@@ -69,5 +69,5 @@ it('shows a sidebar count and displays queue failures without hiding them', asyn
   badge.unmount()
   fetchMock.mockResolvedValue({ ok: false, json: async () => ({ error: 'Document review tools are switched off' }) })
   render(<AdminDocumentVerification token="admin-token" />)
-  expect(await screen.findByRole('alert')).toHaveTextContent('Document review tools are switched off')
+  expect(await screen.findByRole('alert', { name: 'Document review error' })).toHaveTextContent('Document review tools are switched off')
 })

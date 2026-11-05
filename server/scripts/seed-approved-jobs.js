@@ -7,6 +7,7 @@ import { Applicant, Employer, Admin, Referral, HireReport, Notification } from '
 import { Interview, ApplicationReport, ApplicationAppeal } from '../models/applicationWorkflow.js'
 import { createReferralWorkflow } from '../services/referralWorkflow.js'
 import { createApplicationWorkflow } from '../services/applicationWorkflow.js'
+import { recordTrustEvent } from '../services/trustPolicy.js'
 import { seedVerificationScenarios } from './verification-seed.js'
 export { seedVerificationScenarios }
 
@@ -79,7 +80,11 @@ export async function seedFullCycle({ tag = crypto.randomBytes(5).toString('hex'
   }
   await workflow.report(actor(applicants[3]), { referralId: referrals[3]._id, type: 'problem', reason: 'Fictional problem for admin review' })
   await workflow.suspendApplicant(adminActor, applicants[5]._id, { suspended: true, reason: 'Fictional demo suspension, appeal available' })
-  await workflow.confirmEvent(adminActor, { applicantId: applicants[6]._id, type: 'manual_adjustment', delta: -60, eventKey: 'demo-adjustment-' + tag, reason: 'Demo internal routing fixture' })
+  // Build low standing through a real, capped historical trajectory instead
+  // of a single oversized administrative adjustment.
+  for (const [index, day] of [0, 1, 2, 31, 32].entries()) {
+    await recordTrustEvent(Applicant, { applicantId: applicants[6]._id, key: `demo-prior-no-show:${tag}:${index}`, type: 'confirmed_no_show', by: admin.email, reason: 'Fictional prior confirmed incident for routing demonstration.', at: new Date(+now - (34 - day) * DAY) })
+  }
   // Capture one queued example through the real routing path; leave the setting OFF.
   await referralWorkflow.setLowTrustRouting(true, admin.email)
   await referralWorkflow.submit({ email: applicants[6].email, jobId: job._id, sharingConsent: true, ip: 'fake-seed', nsrpFile: fakeFile(), resumeFile: fakeFile(), applicationDetails: { email: applicants[6].email, mobile: applicants[6].phone, bachelorDegree: 'No', hasExperience: 'No', experience: '' } })

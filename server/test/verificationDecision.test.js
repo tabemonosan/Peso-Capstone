@@ -9,7 +9,7 @@ it.each([
  ['master off', c => { c.settings = { ...c.settings, automaticApproval: false } }, 'Auto-approval off'],
  ['type off', c => { c.settings = { ...c.settings, validId: false } }, 'Auto-approval off'],
  ['engine off', c => { c.settings = { ...c.settings, verificationEngineEnabled: false } }, 'Auto-approval off'],
- ['resubmission', c => { c.document.version = 2 }, 'Resubmission'],
+ ['employer resubmission', c => { c.docKey = 'employerNsrpForm'; c.document.version = 2 }, 'Resubmission'],
  ['uploaded NSRP', c => { c.docKey = 'nsrpForm'; c.document.sourceType = 'uploaded' }, 'Uploaded file'],
  ['unverified email', c => { c.account.emailVerified = false }, 'Email unverified'],
  ['hold', c => { c.account.holdAutoApproval = true }, 'Hold'],
@@ -24,6 +24,12 @@ it.each([
  ['sex is not evidence', c => { c.comparisons[0].fieldGroup = 'sex' }, 'Not independent'],
  ['government', c => { c.docKey = 'employerNsrpForm'; c.document.sourceType = 'generated'; c.account.employerType = 'Government' }, 'Always manual'],
 ])('keeps %s pending with the right reason', (_, mutate, reason) => { const c = context(); mutate(c); expect(decisionReason(c)).toBe(reason) })
+it('allows a replacement identity document to pass the same verification checks', () => {
+ const c = context(); c.document.version = 2
+ expect(decisionReason(c)).toBe('')
+ c.findings = [{ severity: 'warning', status: 'open' }]
+ expect(decisionReason(c)).toBe('Flagged')
+})
 it('permits the explicit none evidence mode and never consults protected attributes', () => {
  const c = context(); c.settings = { ...c.settings, minimumEvidence: 'none' }; c.comparisons = []; c.account = { ...c.account, age: 99, sex: 'Female', religion: 'Other', disability: 'Other', civilStatus: 'Married', address: 'Different' }
  expect(decisionReason(c)).toBe('')

@@ -1,49 +1,9 @@
 # Applicant reputation and one-time employer ratings
 
-Applicants have **100 initial reputation points**, bounded between 0 and 100.
-The implementation reuses the existing `trustValue` and `trustEvents` ledger;
-existing confirmed events are preserved. Accounts without stored points show
-100, and future events apply against that baseline. No mass reset, backfill or
-migration is run.
-
-Applicants open **My reputation** in their navigation to see their own current
-points, policy and paginated history. Employers cannot view these points. PESO
-retains its existing admin controls and private evidence/audit reasons. The
-applicant history returns standardized event labels, actual before/after
-points, actual point change and server timestamp; it excludes admin identities,
-raw private notes and internal event keys. Ordinary applicant and employer
-profile/application endpoints still exclude the private ledger fields.
-
-## Point policy
-
-| PESO-confirmed event | Points |
-| --- | ---: |
-| Interview no-show | −20 |
-| Applicant cancellation within 24 hours before an interview | −10 |
-| Interview attendance | +5 |
-| Reported hire or deployment | +10 |
-
-The shared `shared/reputation.js` policy drives the displayed rules and server
-constants. Positive events recover points up to 100; losses stop at zero.
-History shows the actual change after those limits, which can be zero.
-
-No-show reports do not deduct points on submission. The applicant has the
-existing seven-day response opportunity. PESO must review the response or wait
-for the deadline and confirm the report. Late cancellations also require PESO
-confirmation. Events are applied once using the existing atomic ledger key;
-retries cannot repeat the same penalty. Confirmed changes trigger an in-app
-notification linking to My reputation. No new automatic suspension is added.
-
-PESO may restore points or make reasoned manual adjustments through its existing
-controls. Applicants can explain missed interviews in My applications and
-contact PESO to request review of a completed decision.
-
-Suggested future review categories include a confirmed failure to start an
-agreed job without notice, or deliberate falsification established through
-independent evidence. These are **not new automatic penalties** in this
-implementation. Emergencies, declining an offer, unemployment, low star ratings,
-document OCR mismatches or unsupported allegations must not be treated as
-confirmed misconduct on their own.
+The reputation ledger, weekly recovery, graduated penalties, review process,
+admin settings, privacy rules, defaults, and rollback instructions are documented
+in [Reputation recovery policy](reputation-recovery.md). The implementation
+extends the existing ledger and workflows without resetting accounts.
 
 ## Employer ratings
 

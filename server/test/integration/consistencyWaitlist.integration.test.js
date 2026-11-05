@@ -34,12 +34,24 @@ beforeEach(async () => {
   for (const slot of ['birthCertificate', 'validId1']) await storeDocumentFile(applicant._id, slot, 1, 'front', { mimetype: 'image/png', buffer: image, size: image.length })
   await nsrpAutomation.updateSettings({ automaticApproval: false }, admin.email)
 })
-const check = async () => { await consistencyWaitlist.begin(applicant._id, 'signup'); await drainVerificationJobs(); return consistencyWaitlist.publicState(applicant._id) }
+const check = async () => { await consistencyWaitlist.begin(applicant._id, 'signup', undefined, '192.0.2.8'); await drainVerificationJobs(); return consistencyWaitlist.publicState(applicant._id) }
 const action = async body => {
   const account = await Applicant.findById(applicant._id).select('+consistencyState').lean()
   return request(app).post(`/api/admin/document-verification/waitlist/${applicant._id}/action`).set(auth('Admin', admin)).send({ token: account.consistencyState?.token, ...body })
 }
 describe('consistency waitlist', () => {
+  it('automatically verifies matching identity documents against NSRP without approving NSRP itself', async () => {
+    reading.text = sampleText('1990-01-01').replace('1234567890', '4982761053')
+    await Applicant.updateOne({ _id: applicant._id }, { $set: { 'profile.nsrp.gsisSss': '4982761053', 'verificationDocuments.validId1.versions.0.declaredDetails.number': '4982761053' } })
+    await nsrpAutomation.updateSettings({ automaticApproval: true, auditPercent: 0, dataChecks: false }, admin.email)
+    await nsrpAutomation.process({ role: 'Applicant', accountId: applicant._id, ip: '192.0.2.8' })
+    await check()
+    const saved = await Applicant.findById(applicant._id)
+    expect(saved.verificationDocuments.nsrpForm.versions[0].status).toBe('pending')
+    expect(saved.verificationDocuments.birthCertificate.versions[0].status, JSON.stringify(saved.verificationDocuments)).toBe('approved')
+    expect(saved.verificationDocuments.validId1.versions[0].status).toBe('approved')
+    expect(saved.verificationStatus).toBe('approved')
+  })
   it.each([false, true])('signup succeeds with asynchronous screening when reader failure is %s', async readerFailure => {
     reading.fail = readerFailure
     const email = `signup-screening-${readerFailure}@example.test`
@@ -108,6 +120,17 @@ describe('consistency waitlist', () => {
     await consistencyWaitlist.begin(applicant._id, 'nsrpForm'); await drainVerificationJobs()
     expect((await consistencyWaitlist.publicState(applicant._id)).status).toBe('under_review')
     expect(await Notification.countDocuments({ type: 'consistency_review_update' })).toBe(1)
+  })
+  it('verifies a previously waitlisted account after all corrected documents pass', async () => {
+    await check()
+    reading.text = sampleText('1990-01-01').replace('1234567890', '4982761053')
+    await Applicant.updateOne({ _id: applicant._id }, { $set: { 'profile.nsrp.gsisSss': '4982761053', 'verificationDocuments.validId1.versions.0.declaredDetails.number': '4982761053' } })
+    await nsrpAutomation.updateSettings({ automaticApproval: true, auditPercent: 100, dataChecks: false }, admin.email)
+    await consistencyWaitlist.begin(applicant._id, 'nsrpForm', undefined, '192.0.2.8'); await drainVerificationJobs()
+    const saved = await Applicant.findById(applicant._id)
+    expect(saved.verificationDocuments.birthCertificate.versions[0].status, JSON.stringify(saved.verificationDocuments)).toBe('approved')
+    expect(saved.verificationDocuments.validId1.versions[0].status).toBe('approved')
+    expect(saved.verificationStatus).toBe('approved')
   })
   it('enforces attempts independently of upload caps, keeps explanations available, and permits reasoned grants', async () => {
     await check()
