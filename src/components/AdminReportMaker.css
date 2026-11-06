@@ -12,7 +12,8 @@
 .report-maker :is(button,input,select):focus-visible { outline: 2px solid var(--peso-primary); outline-offset: 3px; }
 .report-maker-empty,.report-maker-note { padding: 20px; background: var(--peso-canvas); border: 1px solid var(--peso-line); border-radius: 14px; font-size: 13px; line-height: 1.7; }
 .report-maker-error { padding: 14px; background: #fff1f2; color: #9f1239; border-radius: 12px; margin-bottom: 16px; }
-.report-maker-preview { display: grid; gap: 24px; }
+.report-maker-preview { display: grid; grid-template-columns: minmax(0,1fr); min-width: 0; gap: 24px; }
+.report-maker-preview > * { min-width: 0; }
 .report-maker-result-heading { display: flex; align-items: start; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
 .report-maker-downloads { display: flex; flex-wrap: wrap; gap: 8px; }
 .report-maker-metrics { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; }
