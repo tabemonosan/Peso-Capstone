@@ -9,10 +9,14 @@ export const WAITLIST_DOCUMENTS = ['nsrpForm', 'birthCertificate', 'validId1', '
 export const WAITLIST_TIP = 'Text reading is approximate. If your photo is blurry or cropped, retake it, or explain the difference.'
 export const WAITLIST_MESSAGE = 'Your account needs a review by PESO staff.'
 export const WAITLIST_TRANSITIONS = { under_review: ['waitlisted'], waitlisted: ['under_review', 'declined'] }
+export const isManuallyApproved = document => document?.status === 'approved'
+  && document.autoApproved !== true
+  && Boolean(document.reviewedBy || document.approvedBy)
+  && !/^(system(?:\s|$))/i.test(document.reviewedBy || document.approvedBy)
 export function consistencyIssues(documents = {}) {
   return WAITLIST_DOCUMENTS.flatMap(docKey => {
     const document = documents[docKey]?.versions?.at(-1)
-    if (!document) return []
+    if (!document || isManuallyApproved(document)) return []
     const duplicates = (document.findings || []).filter(f => !isSharedPhoneFinding(f) && /duplicate|cross_account/.test(f.ruleId || f.code || '') && f.status !== 'dismissed')
     const significant = (document.imageComparisons || []).filter(c => c.evidence === 'independent' && c.reliable === true && c.result === 'significant' && WAITLIST_GROUPS.includes(c.fieldGroup) && /_(?:surname|firstName|dob|idNumber)$/.test(c.ruleId || ''))
     return [...(duplicates.length ? [{ docKey, fieldGroup: 'document', result: 'review', severity: 'warning', evidence: 'independent', reasonCode: 'staff_review' }] : []),

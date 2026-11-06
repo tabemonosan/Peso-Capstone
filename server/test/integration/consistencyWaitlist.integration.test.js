@@ -9,6 +9,7 @@ import { startTestDb, stopTestDb, clearDb, validNsrpAnswers, validBasicInfo, ema
 import { drainVerificationJobs } from '../../services/verificationJobs.js'
 import { storeDocumentFile } from '../../utils/documentFiles.js'
 import { createConsistencyWaitlist } from '../../services/consistencyWaitlist.js'
+import { MANUAL_CHECKLIST } from '../../../shared/manualDocumentReview.js'
 const reading = vi.hoisted(() => ({ text: '', confidence: 95, fail: false, qr: '' }))
 vi.mock('../../services/localImageReading.js', () => ({
   readQr: vi.fn(async (_buffer, consume) => { if (reading.qr && consume) await consume(reading.qr); return { found: Boolean(reading.qr) } }),
@@ -40,6 +41,88 @@ const action = async body => {
   return request(app).post(`/api/admin/document-verification/waitlist/${applicant._id}/action`).set(auth('Admin', admin)).send({ token: account.consistencyState?.token, ...body })
 }
 describe('consistency waitlist', () => {
+  describe.each(['online', 'upload'])('%s signup automation', mode => {
+    it.each([
+      ['matching documents', {}, false, false, 'approved', 'approved', 'approved'],
+      ['significant mismatch', {}, true, false, 'waitlisted', 'pending', 'pending'],
+      ['reader unavailable', {}, false, true, 'under_review', 'pending', 'pending'],
+      ['glare warning', {}, false, false, 'under_review', 'pending', 'pending'],
+      ['automation disabled', { automaticApproval: false }, false, false, 'under_review', 'pending', 'pending'],
+      ['birth certificate automation disabled', { birthCertificate: false }, false, false, 'under_review', 'pending', 'approved'],
+      ['ID automation disabled', { validId: false }, false, false, 'under_review', 'approved', 'pending'],
+    ])('handles %s through the signup endpoint', async (_label, settings, mismatch, readerFailure, status, birthStatus, idStatus) => {
+      reading.text = sampleText(mismatch ? '1992-02-03' : '1990-01-01').replace('1234567890', '4982761053')
+      reading.fail = readerFailure
+      const upload = _label === 'glare warning' ? image : await sharp(image).linear(0.85).png().toBuffer()
+      await nsrpAutomation.updateSettings({ automaticApproval: true, ...settings }, admin.email)
+      const email = `signup-${mode}@example.test`
+      let submission = request(app).post('/api/signup')
+        .field('email', email).field('password', 'SamplePassword123!').field('consent', 'true')
+        .field('emailProof', emailProofFor(email)).field('nsrpMode', mode).field('id1Type', 'SSS')
+        .field('verificationDetails', JSON.stringify({ birthCertificate: { copyType: 'PSA copy on security paper' }, validId1: { number: '4982761053' } }))
+      if (mode === 'online') submission = submission.field('nsrpAnswers', JSON.stringify(validNsrpAnswers({ firstName: 'Sample', surname: 'Example', gsisSss: '4982761053' })))
+      else {
+        for (const [key, value] of Object.entries(validBasicInfo({ firstName: 'Sample', lastName: 'Example' }))) submission = submission.field(key, value)
+        submission = submission.attach('nsrpFile', pdfBuffer(), { filename: 'SAMPLE.pdf', contentType: 'application/pdf' })
+      }
+      const response = await submission
+        .attach('birthCertificate', upload, { filename: 'SAMPLE-birth.png', contentType: 'image/png' })
+        .attach('validId1Front', upload, { filename: 'SAMPLE-id.png', contentType: 'image/png' })
+      expect(response.status, JSON.stringify(response.body)).toBe(200)
+      await drainVerificationJobs()
+      const created = await Applicant.findOne({ email }).lean()
+      expect(created.verificationDocuments.birthCertificate.versions.at(-1).status, JSON.stringify(created.verificationDocuments.birthCertificate)).toBe(birthStatus)
+      expect(created.verificationDocuments.validId1.versions.at(-1).status, JSON.stringify(created.verificationDocuments.validId1)).toBe(idStatus)
+      expect(created.verificationStatus).toBe(status)
+      expect(created.verificationDocuments.nsrpForm.versions.at(-1).status).toBe('pending')
+      const review = await request(app).get('/api/profile/review-status').set('Authorization', `Bearer ${response.body.token}`).expect(200)
+      expect(review.body.status).toBe(status)
+      expect(await Notification.countDocuments({ type: 'account_verified', 'recipient.id': created._id })).toBe(status === 'approved' ? 1 : 0)
+    })
+  })
+  const approve = async docKey => {
+    const account = await Applicant.findById(applicant._id).lean()
+    const document = account.verificationDocuments[docKey].versions.at(-1)
+    return request(app).post('/api/admin/document-verification/action').set(auth('Admin', admin)).send({
+      role: 'Applicant', accountId: String(applicant._id), docKey, version: document.version,
+      action: 'approve', reason: 'Compared the original document against NSRP.',
+      unresolved: (document.findings || []).filter(f => ['warning', 'critical'].includes(f.severity) && f.status !== 'dismissed').length,
+      checklist: Object.fromEntries(Object.keys(MANUAL_CHECKLIST).map(key => [key, true])),
+    }).expect(200)
+  }
+  it('clears each manually approved document and verifies after both approvals, including later checks', async () => {
+    await check()
+    await approve('birthCertificate')
+    let account = await Applicant.findById(applicant._id).select('+consistencyState').lean()
+    expect(account.verificationStatus).toBe('waitlisted')
+    expect(account.consistencyState.issues.every(issue => issue.docKey !== 'birthCertificate')).toBe(true)
+    await approve('validId1')
+    account = await Applicant.findById(applicant._id).select('+consistencyState').lean()
+    expect(account.verificationStatus).toBe('approved')
+    expect(account.consistencyState.issues).toEqual([])
+    expect(await Notification.countDocuments({ type: 'account_verified' })).toBe(1)
+    expect((await check()).status).toBe('approved')
+  })
+  it('prevents a check already in progress from overriding manual approval', async () => {
+    await check()
+    await Applicant.updateOne({ _id: applicant._id }, { $set: { 'consistencyState.status': 'checking' } })
+    const before = await Applicant.findById(applicant._id).select('+consistencyState').lean()
+    await approve('birthCertificate')
+    await approve('validId1')
+    await consistencyWaitlist.finish(applicant._id, before.consistencyState.token, 'complete')
+    expect((await Applicant.findById(applicant._id)).verificationStatus).toBe('approved')
+  })
+  it('repairs existing waitlists whose documents were already manually approved', async () => {
+    await check()
+    await Applicant.updateOne({ _id: applicant._id }, { $set: Object.fromEntries(['birthCertificate', 'validId1'].flatMap(key => [
+      [`verificationDocuments.${key}.versions.0.status`, 'approved'],
+      [`verificationDocuments.${key}.versions.0.reviewedBy`, admin.email],
+      [`verificationDocuments.${key}.versions.0.autoApproved`, false],
+    ])) })
+    expect((await consistencyWaitlist.publicState(applicant._id)).checking).toBe(true)
+    await drainVerificationJobs()
+    expect((await consistencyWaitlist.publicState(applicant._id)).status).toBe('approved')
+  })
   it('automatically rechecks legacy shared-phone flags without using correction chances', async () => {
     reading.text = sampleText('1990-01-01').replace('1234567890', '4982761053')
     await nsrpAutomation.updateSettings({ automaticApproval: true, auditPercent: 0, dataChecks: false }, admin.email)

@@ -2,7 +2,7 @@ import crypto from 'node:crypto'
 import mongoose from 'mongoose'
 import { enqueueVerification } from './verificationJobs.js'
 import { processApplicantImages } from './imageChecks.js'
-import { WAITLIST_RULES_VERSION, WAITLIST_DEFAULTS, WAITLIST_LIMITS, WAITLIST_DOCUMENTS, WAITLIST_MESSAGE, WAITLIST_TIP, consistencyIssues, waitlistIssueMessage } from '../../shared/consistencyWaitlist.js'
+import { WAITLIST_RULES_VERSION, WAITLIST_DEFAULTS, WAITLIST_LIMITS, WAITLIST_DOCUMENTS, WAITLIST_MESSAGE, WAITLIST_TIP, consistencyIssues, waitlistIssueMessage, isManuallyApproved } from '../../shared/consistencyWaitlist.js'
 import { VERIFICATION_DOC_LABELS } from '../../shared/verificationDocs.js'
 import { isSharedPhoneFinding } from '../../shared/verificationFindings.js'
 
@@ -18,9 +18,10 @@ export function createConsistencyWaitlist({ Applicant, automation, notify, notif
   async function publicState(id, ip) {
     let [account, config] = await Promise.all([get(id), settings()])
     if (!account || account.deletedAt) fail('ACCOUNT_UNAVAILABLE', 'Account unavailable.', 403)
-    // Refresh old phone-only review flags under the shared-number policy.
+    // Refresh obsolete phone flags and flags already settled by staff approval.
     // A policy recheck does not count as an applicant correction attempt.
-    if (account.verificationStatus === 'waitlisted' && account.consistencyState?.status !== 'checking' && account.consistencyState?.rulesVersion !== WAITLIST_RULES_VERSION && Object.values(account.verificationDocuments || {}).some(slot => slot.versions?.at(-1)?.findings?.some(isSharedPhoneFinding))) {
+    const approvedIssue = account.consistencyState?.issues?.some(issue => isManuallyApproved(latest(account, issue.docKey)))
+    if (account.verificationStatus === 'waitlisted' && account.consistencyState?.status !== 'checking' && (approvedIssue || account.consistencyState?.rulesVersion !== WAITLIST_RULES_VERSION && Object.values(account.verificationDocuments || {}).some(slot => slot.versions?.at(-1)?.findings?.some(isSharedPhoneFinding)))) {
       await begin(id, 'policy', undefined, ip)
       account = await get(id)
     }
@@ -91,6 +92,7 @@ export function createConsistencyWaitlist({ Applicant, automation, notify, notif
       if (account?.consistencyState?.token !== token) return
       const work = (async () => {
         for (const docKey of ['birthCertificate', 'validId1', 'validId2']) {
+          if (isManuallyApproved(latest(account, docKey))) continue
           const version = latest(account, docKey)?.version
           if (version) {
             const result = await readImages({ accountId: id, docKey, version, settings: config, recheck: true, checkToken: token })
@@ -100,6 +102,7 @@ export function createConsistencyWaitlist({ Applicant, automation, notify, notif
         // Refresh all comparisons before deciding, so an old mismatch on another
         // document cannot block a clean correction against the current reference.
         for (const docKey of ['birthCertificate', 'validId1', 'validId2']) {
+          if (isManuallyApproved(latest(account, docKey))) continue
           if (latest(account, docKey)?.version) await verifyDocument({ role: 'Applicant', accountId: id, docKey, checkToken: token, ip })
         }
         return 'complete'
