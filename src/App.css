@@ -1,15 +1,15 @@
 .portal-shell {
   min-height: 100vh;
-  background: #edf3f9;
-  color: #10233c;
+  background: var(--peso-soft);
+  color: var(--peso-ink);
   font-family: Arial, sans-serif;
 }
 
 .portal-header {
   height: 88px;
-  border-top: 2px solid #1b1231;
-  border-bottom: 1px solid #b7c7d8;
-  background: #ffffff;
+  border-top: 2px solid var(--peso-ink);
+  border-bottom: 1px solid var(--peso-line-strong);
+  background: var(--peso-surface);
 }
 
 .portal-header-inner {
@@ -50,17 +50,17 @@
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  border: 3px solid #1263a7;
+  border: 3px solid var(--peso-primary);
   border-radius: 50%;
-  background: #ffffff;
-  color: #1263a7;
+  background: var(--peso-surface);
+  color: var(--peso-primary);
   font-size: 26px;
   font-weight: 800;
 }
 
 .portal-brand p {
   margin: 0;
-  color: #087393;
+  color: var(--peso-body);
   font-size: 18px;
   font-weight: 800;
   letter-spacing: 2px;
@@ -68,7 +68,7 @@
 
 .portal-brand h1 {
   margin: 1px 0 0;
-  color: #10233c;
+  color: var(--peso-ink);
   font-size: 20px;
   font-weight: 800;
 }
@@ -76,10 +76,10 @@
 .portal-logout {
   min-height: 36px;
   padding: 5px 13px;
-  border: 1px solid #91a8be;
+  border: 1px solid var(--peso-line-strong);
   border-radius: 14px;
-  background: #ffffff;
-  color: #10233c;
+  background: var(--peso-surface);
+  color: var(--peso-ink);
   font-size: 10px;
   font-weight: 700;
   cursor: pointer;
@@ -98,26 +98,26 @@
 .portal-sidebar {
   align-self: start;
   padding: 12px;
-  border: 1px solid #d2dfeb;
+  border: 1px solid var(--peso-line);
   border-radius: 7px;
-  background: #ffffff;
-  box-shadow: 0 2px 6px rgba(34, 67, 100, 0.05);
+  background: var(--peso-surface);
+  box-shadow: 0 2px 6px rgb(36 24 32 / 5%);
 }
 
 .portal-session {
   display: grid;
   gap: 2px;
   padding: 12px 10px;
-  border: 1px solid #d6e1ec;
+  border: 1px solid var(--peso-line);
   border-radius: 5px;
-  background: #eef3f9;
-  color: #5f7590;
+  background: var(--peso-soft);
+  color: var(--peso-muted);
   font-size: 12px;
 }
 
 .portal-session strong {
   overflow-wrap: anywhere;
-  color: #174a7a;
+  color: var(--peso-body);
   font-size: 13px;
 }
 
@@ -127,7 +127,7 @@
 
 .portal-eyebrow {
   margin: 0 0 8px;
-  color: #1761a1;
+  color: var(--peso-primary);
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 1.5px;
@@ -145,15 +145,15 @@
   padding: 10px 11px;
   border: 0;
   border-radius: 5px;
-  background: #f1f5fa;
-  color: #38516c;
+  background: var(--peso-soft);
+  color: var(--peso-muted);
   font-size: 13px;
   text-align: left;
   cursor: pointer;
 }
 
 .portal-nav-item.is-active {
-  background: #1263a7;
+  background: var(--peso-primary);
   color: #ffffff;
   font-weight: 700;
 }
@@ -185,9 +185,9 @@
 .portal-verify-button,
 .portal-verify-submit {
   padding: 6px 12px;
-  border: 1px solid #1263a7;
+  border: 1px solid var(--peso-primary);
   border-radius: 5px;
-  background: #1263a7;
+  background: var(--peso-primary);
   color: #ffffff;
   font-size: 12px;
   font-weight: 700;
@@ -202,33 +202,33 @@
   align-items: center;
   justify-content: center;
   padding: 20px;
-  background: rgba(16, 35, 60, 0.35);
+  background: rgb(36 24 32 / 35%);
 }
 
 .portal-verification-modal {
   width: min(100%, 390px);
   padding: 22px;
-  border: 1px solid #b7c7d8;
+  border: 1px solid var(--peso-line-strong);
   border-radius: 10px;
-  background: #ffffff;
-  box-shadow: 0 12px 30px rgba(34, 67, 100, 0.2);
+  background: var(--peso-surface);
+  box-shadow: 0 12px 30px rgb(36 24 32 / 20%);
 }
 
 .portal-verification-modal h2 {
   margin: 0;
-  color: #000000;
+  color: var(--peso-ink);
   font-size: 18px;
 }
 
 .portal-verification-modal p {
   margin: 6px 0 18px;
-  color: #5e748c;
+  color: var(--peso-muted);
   font-size: 13px;
 }
 
 .portal-verification-modal label {
   display: block;
-  color: #000000;
+  color: var(--peso-ink);
   font-size: 13px;
   font-weight: 700;
 }
@@ -242,10 +242,10 @@
   box-sizing: border-box;
   margin-top: 6px;
   padding: 10px 12px;
-  border: 1px solid #9db1c5;
+  border: 1px solid var(--peso-line-strong);
   border-radius: 7px;
-  background: #ffffff;
-  color: #000000;
+  background: var(--peso-surface);
+  color: var(--peso-ink);
   font: inherit;
 }
 
@@ -258,10 +258,10 @@
 
 .portal-verify-cancel {
   padding: 6px 12px;
-  border: 1px solid #8fa5ba;
+  border: 1px solid var(--peso-line-strong);
   border-radius: 5px;
-  background: #ffffff;
-  color: #29445f;
+  background: var(--peso-surface);
+  color: var(--peso-body);
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
@@ -292,17 +292,17 @@
 .portal-card {
   margin-bottom: 13px;
   padding: 20px;
-  border: 1px solid #d2dfeb;
+  border: 1px solid var(--peso-line);
   border-radius: 7px;
-  background: #ffffff;
-  box-shadow: 0 2px 6px rgba(34, 67, 100, 0.05);
+  background: var(--peso-surface);
+  box-shadow: 0 2px 6px rgb(36 24 32 / 5%);
 }
 
 .portal-card h2,
 .portal-card h3,
 .portal-section-title {
   margin: 0;
-  color: #10233c;
+  color: var(--peso-ink);
   font-size: 16px;
   font-weight: 800;
 }
@@ -310,7 +310,7 @@
 .portal-card > p,
 .portal-card h2 + p {
   margin: 3px 0 0;
-  color: #5e748c;
+  color: var(--peso-muted);
   font-size: 13px;
 }
 
@@ -321,19 +321,19 @@
 .portal-control {
   min-height: 32px;
   padding: 6px 10px;
-  border: 1px solid #8fa5ba;
+  border: 1px solid var(--peso-line-strong);
   border-radius: 5px;
-  background: #ffffff;
-  color: #10233c;
+  background: var(--peso-surface);
+  color: var(--peso-ink);
   font-size: 14px;
 }
 
 .portal-primary-button {
   min-height: 32px;
   padding: 6px 13px;
-  border: 1px solid #1263a7;
+  border: 1px solid var(--peso-primary);
   border-radius: 5px;
-  background: #1263a7;
+  background: var(--peso-primary);
   color: #ffffff;
   font-size: 14px;
   font-weight: 700;
@@ -356,7 +356,7 @@
   /* No fixed height / vertical scroll: the page scrolls, the table grows to fit
      its rows. overflow-x is only a fallback for very narrow screens. */
   overflow-x: auto;
-  border: 1px solid #8ea5bb;
+  border: 1px solid var(--peso-line-strong);
   border-radius: 6px;
 }
 
@@ -393,7 +393,7 @@
 
 .portal-applicant-name-button:hover,
 .portal-applicant-name-button:focus-visible {
-  color: #0891b2;
+  color: var(--peso-primary);
   text-decoration: underline;
 }
 
@@ -408,7 +408,7 @@
   position: sticky;
   top: 0;
   z-index: 10;
-  background: #f3f7fb;
+  background: var(--peso-canvas);
 }
 
 .portal-cell-truncate {
@@ -455,7 +455,7 @@
   display: block;
   height: 12px;
   border-radius: 4px;
-  background: linear-gradient(90deg, #e2eaf2 25%, #f3f7fb 50%, #e2eaf2 75%);
+  background: linear-gradient(90deg, var(--peso-soft) 25%, var(--peso-canvas) 50%, var(--peso-soft) 75%);
   background-size: 200% 100%;
   animation: portal-skeleton-shimmer 1.2s infinite;
 }
@@ -491,7 +491,7 @@
 
   .portal-applicants-table tr,
   .portal-employers-table tr {
-    border-bottom: 8px solid #eef3f8;
+    border-bottom: 8px solid var(--peso-soft);
     padding: 6px 0;
   }
 
@@ -520,7 +520,7 @@
   .portal-employers-table td::before {
     content: attr(data-label);
     flex-shrink: 0;
-    color: #526b84;
+    color: var(--peso-muted);
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 1px;
@@ -540,15 +540,15 @@
   width: 100%;
   min-width: 680px;
   border-collapse: collapse;
-  color: #29445f;
+  color: var(--peso-body);
   font-size: 13px;
 }
 
 .portal-table th {
   padding: 9px 10px;
-  border-bottom: 1px solid #a9bacb;
-  background: #f3f7fb;
-  color: #526b84;
+  border-bottom: 1px solid var(--peso-line-strong);
+  background: var(--peso-canvas);
+  color: var(--peso-muted);
   font-size: 11px;
   letter-spacing: 1px;
   text-align: left;
@@ -556,13 +556,13 @@
 }
 
 .portal-employers-table th {
-  color: #000000;
+  color: var(--peso-ink);
   font-weight: 700;
 }
 
 .portal-table td {
   padding: 8px 10px;
-  border-bottom: 1px solid #dce5ee;
+  border-bottom: 1px solid var(--peso-line);
   white-space: nowrap;
 }
 
@@ -576,7 +576,7 @@
 }
 
 .portal-table td strong {
-  color: #10233c;
+  color: var(--peso-ink);
 }
 
 .portal-status {
@@ -603,24 +603,24 @@
 
 .portal-table-action {
   padding: 5px 10px;
-  border: 1px solid #8fa5ba;
+  border: 1px solid var(--peso-line-strong);
   border-radius: 4px;
-  background: #ffffff;
-  color: #29445f;
+  background: var(--peso-surface);
+  color: var(--peso-body);
   font-size: 13px;
   cursor: pointer;
 }
 
 .portal-empty {
-  color: #5e748c;
+  color: var(--peso-muted);
   font-size: 10px;
 }
 
 .portal-shell-admin .admin-jobs-card,
 .portal-shell-admin .admin-referrals-card,
 .portal-shell-admin .admin-requests-card {
-  color: #10233c;
-  background: #ffffff !important;
+  color: var(--peso-ink);
+  background: var(--peso-surface) !important;
 }
 
 .portal-shell-admin .admin-jobs-card h2,
@@ -628,14 +628,14 @@
 .portal-shell-admin .admin-referrals-card h2,
 .portal-shell-admin .admin-referrals-card h3,
 .portal-shell-admin .admin-referrals-card h4 {
-  color: #10233c;
+  color: var(--peso-ink);
 }
 
 .portal-shell-admin .admin-jobs-card > p,
 .portal-shell-admin .admin-jobs-card p,
 .portal-shell-admin .admin-referrals-card > p,
 .portal-shell-admin .admin-referrals-card p {
-  color: #5e748c;
+  color: var(--peso-muted);
 }
 
 .portal-shell-admin .admin-jobs-panel,
@@ -643,28 +643,28 @@
 .portal-shell-admin .admin-jobs-search,
 .portal-shell-admin .admin-referral-job,
 .portal-shell-admin .admin-referral-applicant {
-  border-color: #d2dfeb !important;
-  background: #ffffff !important;
+  border-color: var(--peso-line) !important;
+  background: var(--peso-surface) !important;
 }
 
 .portal-shell-admin .admin-jobs-panel input,
 .portal-shell-admin .admin-jobs-panel select {
-  border-color: #9db1c5;
-  background: #ffffff;
-  color: #10233c;
+  border-color: var(--peso-line-strong);
+  background: var(--peso-surface);
+  color: var(--peso-ink);
 }
 
 .portal-shell-admin .admin-jobs-panel > div > div,
 .portal-shell-admin .admin-jobs-panel > div > button {
-  border-color: #c4d4e5 !important;
-  background: #ffffff !important;
-  color: #10233c !important;
+  border-color: var(--peso-line-strong) !important;
+  background: var(--peso-surface) !important;
+  color: var(--peso-ink) !important;
 }
 
 .portal-shell-admin .admin-jobs-panel button[class*="bg-cyan"],
 .portal-shell-admin .admin-referrals-panel button[class*="bg-cyan"] {
-  border-color: #1263a7;
-  background: #1263a7 !important;
+  border-color: var(--peso-primary);
+  background: var(--peso-primary) !important;
   color: #ffffff !important;
 }
 
@@ -682,26 +682,26 @@
 
 .portal-shell-admin .admin-jobs-panel button[class*="bg-green"]:disabled,
 .portal-shell-admin .admin-jobs-panel button[class*="bg-red"]:disabled {
-  border-color: #c4d4e5 !important;
-  background: #e2e8f0 !important;
-  color: #64748b !important;
+  border-color: var(--peso-line-strong) !important;
+  background: var(--peso-soft) !important;
+  color: var(--peso-muted) !important;
 }
 
 .portal-shell-admin .admin-jobs-panel .admin-bulk-review-bar {
-  border-color: #cbd5e1 !important;
-  background: #f1f5f9 !important;
-  color: #10233c !important;
+  border-color: var(--peso-line-strong) !important;
+  background: var(--peso-soft) !important;
+  color: var(--peso-ink) !important;
 }
 
 .portal-shell-admin .admin-jobs-panel .admin-bulk-review-bar label {
-  color: #334155 !important;
+  color: var(--peso-body) !important;
 }
 
 .portal-shell-admin .admin-jobs-panel button[class*="bg-slate"],
 .portal-shell-admin .admin-referrals-panel button[class*="bg-slate"] {
-  border-color: #8fa5ba !important;
-  background: #ffffff !important;
-  color: #29445f !important;
+  border-color: var(--peso-line-strong) !important;
+  background: var(--peso-surface) !important;
+  color: var(--peso-body) !important;
 }
 
 .portal-shell-admin .admin-referrals-panel button[class*="bg-amber"] {
@@ -711,52 +711,52 @@
 }
 
 .portal-shell-admin .admin-hire-reports {
-  border-color: #d2dfeb !important;
-  background: #ffffff !important;
+  border-color: var(--peso-line) !important;
+  background: var(--peso-surface) !important;
 }
 
 .portal-shell-admin .admin-hire-reports table {
-  color: #29445f;
+  color: var(--peso-body);
 }
 
 .portal-shell-admin .admin-hire-reports thead tr,
 .portal-shell-admin .admin-hire-reports tbody tr {
-  border-color: #dce5ee !important;
+  border-color: var(--peso-line) !important;
 }
 
 .portal-shell-admin .admin-hire-reports thead {
-  color: #526b84;
+  color: var(--peso-muted);
 }
 
 .portal-shell-admin .admin-requests-card {
-  color: #000000 !important;
-  background: #ffffff !important;
+  color: var(--peso-ink) !important;
+  background: var(--peso-surface) !important;
 }
 
 .portal-shell-admin .admin-requests-card h2,
 .portal-shell-admin .admin-requests-card p {
-  color: #000000 !important;
+  color: var(--peso-ink) !important;
 }
 
 .portal-shell-admin .admin-requests-card > p,
 .portal-shell-admin .admin-request-item p {
-  color: #000000 !important;
+  color: var(--peso-ink) !important;
 }
 
 .portal-shell-admin .admin-request-item {
-  border-color: #d2dfeb !important;
-  background: #ffffff !important;
+  border-color: var(--peso-line) !important;
+  background: var(--peso-surface) !important;
 }
 
 .portal-shell-admin {
-  background: #dfeaf2;
+  background: var(--peso-soft);
 }
 
 .portal-shell-admin .portal-header {
   height: 88px;
-  border-top-color: #d2dfeb;
-  border-bottom-color: #d2dfeb;
-  background: #ffffff;
+  border-top-color: var(--peso-line);
+  border-bottom-color: var(--peso-line);
+  background: var(--peso-surface);
 }
 
 .portal-shell-admin .portal-brand img {
@@ -765,12 +765,12 @@
 }
 
 .portal-shell-admin .portal-brand p {
-  color: #087393;
+  color: var(--peso-body);
   font-size: 18px;
 }
 
 .portal-shell-admin .portal-brand h1 {
-  color: #10233c;
+  color: var(--peso-ink);
   font-size: 20px;
 }
 
@@ -778,35 +778,35 @@
 .portal-shell-admin .portal-session strong,
 .portal-shell-admin .portal-session span,
 .portal-shell-admin .portal-nav-item:not(.is-active) {
-  color: #000000;
+  color: var(--peso-ink);
 }
 
 .portal-shell-admin .portal-eyebrow {
-  color: #1761a1;
+  color: var(--peso-primary);
 }
 
 .portal-shell-admin .portal-session {
-  color: #5f7590;
+  color: var(--peso-muted);
 }
 
 .portal-shell-admin .portal-session strong {
-  color: #174a7a;
+  color: var(--peso-body);
 }
 
 .portal-shell-admin .portal-session span,
 .portal-shell-admin .portal-nav-item:not(.is-active) {
-  color: #38516c;
+  color: var(--peso-muted);
 }
 
 .portal-shell-admin .portal-nav-item:not(.is-active) {
-  background: #e9eef5;
+  background: var(--peso-soft);
 }
 
 .portal-shell-admin .portal-session > p:not(.portal-eyebrow),
 .portal-shell-admin .portal-session > span,
 .portal-shell-employer .portal-session > p:not(.portal-eyebrow),
 .portal-shell-employer .portal-session > span {
-  color: #000000;
+  color: var(--peso-ink);
 }
 
 .portal-shell-admin .portal-nav-item,
@@ -819,18 +819,54 @@
   min-height: 44px;
   justify-content: center;
   padding: 5px 18px !important;
-  border-color: #8fa5ba !important;
-  background: #ffffff !important;
-  color: #10233c !important;
+  border-color: var(--peso-line-strong) !important;
+  background: var(--peso-surface) !important;
+  color: var(--peso-ink) !important;
   font-weight: 700 !important;
 }
 
 .portal-profile-icon {
   width: 30px !important;
   height: 30px !important;
-  background: #08aeca !important;
-  color: #10233c !important;
+  background: var(--peso-primary) !important;
+  color: var(--peso-ink) !important;
   font-size: 16px !important;
+}
+
+.portal-profile-dropdown {
+  position: relative;
+}
+
+.portal-profile-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  width: 190px;
+  max-width: calc(100vw - 32px);
+  padding: 6px;
+  border: 1px solid var(--peso-line);
+  border-radius: 14px;
+  background: var(--peso-surface);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--peso-body) 10%, transparent);
+}
+
+.portal-profile-menu button {
+  display: block;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--peso-body);
+  text-align: left;
+  font-size: 14px;
+}
+
+.portal-profile-menu button:hover,
+.portal-profile-menu button:focus-visible {
+  background: var(--peso-soft);
+  outline: 2px solid var(--peso-line);
+  outline-offset: -2px;
 }
 
 .portal-shell-admin .portal-content {
@@ -844,7 +880,7 @@
 .portal-shell-admin .directory-card h3,
 .portal-shell-admin .directory-card p,
 .portal-shell-admin .directory-card label {
-  color: #000000 !important;
+  color: var(--peso-ink) !important;
 }
 
 .portal-shell-admin .admin-jobs-card p,
@@ -856,11 +892,11 @@
 .portal-shell-admin .admin-referrals-card h3,
 .portal-shell-admin .admin-referrals-card h4,
 .portal-shell-admin .admin-hire-reports p {
-  color: #000000 !important;
+  color: var(--peso-ink) !important;
 }
 
 .portal-shell-admin .directory-card .portal-table td {
-  color: #000000;
+  color: var(--peso-ink);
 }
 
 .portal-shell-admin .admin-request-item p.text-amber-300 {
@@ -872,143 +908,143 @@
 }
 
 .portal-shell-admin .admin-request-item button[class*="bg-cyan"] {
-  border-color: #1263a7;
-  background: #1263a7 !important;
+  border-color: var(--peso-primary);
+  background: var(--peso-primary) !important;
   color: #ffffff !important;
 }
 
 .portal-shell-admin .admin-request-item button[class*="bg-slate"] {
-  border-color: #8fa5ba !important;
-  background: #ffffff !important;
-  color: #29445f !important;
+  border-color: var(--peso-line-strong) !important;
+  background: var(--peso-surface) !important;
+  color: var(--peso-body) !important;
 }
 
 .portal-shell-admin .admin-directory-modal {
-  border-color: #1263a7 !important;
-  background: #ffffff !important;
-  color: #10233c;
+  border-color: var(--peso-primary) !important;
+  background: var(--peso-surface) !important;
+  color: var(--peso-ink);
 }
 
 .portal-shell-admin .admin-directory-modal h2,
 .portal-shell-admin .admin-directory-modal p {
-  color: #10233c !important;
+  color: var(--peso-ink) !important;
 }
 
 .portal-shell-admin .admin-directory-modal h2 + p {
-  color: #1263a7 !important;
+  color: var(--peso-primary) !important;
 }
 
 .portal-shell-admin .admin-modal-close {
-  border-color: #8fa5ba !important;
-  background: #ffffff !important;
-  color: #29445f !important;
+  border-color: var(--peso-line-strong) !important;
+  background: var(--peso-surface) !important;
+  color: var(--peso-body) !important;
 }
 
 .portal-shell-admin .admin-modal-details {
-  border-color: #d2dfeb !important;
-  background: #f6f9fc !important;
-  color: #29445f !important;
+  border-color: var(--peso-line) !important;
+  background: var(--peso-canvas) !important;
+  color: var(--peso-body) !important;
 }
 
 .portal-shell-admin .admin-modal-details span {
-  color: #10233c !important;
+  color: var(--peso-ink) !important;
 }
 
 .portal-shell-employer .employer-module-card {
-  color: #000000;
-  background: #ffffff !important;
+  color: var(--peso-ink);
+  background: var(--peso-surface) !important;
 }
 
 .portal-shell-employer .admin-requests-card > p {
-  color: #000000 !important;
+  color: var(--peso-ink) !important;
 }
 
 .portal-shell-employer .employer-referrals-card {
-  color: #000000 !important;
-  background: #ffffff !important;
+  color: var(--peso-ink) !important;
+  background: var(--peso-surface) !important;
 }
 
 .portal-shell-employer .employer-referrals-card > h2,
 .portal-shell-employer .employer-referrals-card > p {
-  color: #000000 !important;
+  color: var(--peso-ink) !important;
 }
 
 .portal-shell-employer .employer-module-card h2,
 .portal-shell-employer .employer-module-card h3,
 .portal-shell-employer .employer-module-card p,
 .portal-shell-employer .employer-module-card label {
-  color: #000000 !important;
+  color: var(--peso-ink) !important;
 }
 
 .portal-shell-employer .employer-form-panel,
 .portal-shell-employer .employer-pending-panel,
 .portal-shell-employer .employer-pending-item {
-  border-color: #d2dfeb !important;
-  background: #ffffff !important;
+  border-color: var(--peso-line) !important;
+  background: var(--peso-surface) !important;
 }
 
 .portal-shell-employer .employer-form-panel input,
 .portal-shell-employer .employer-form-panel textarea {
-  border-color: #9db1c5;
-  background: #ffffff;
-  color: #000000;
+  border-color: var(--peso-line-strong);
+  background: var(--peso-surface);
+  color: var(--peso-ink);
 }
 
 /* Skill tag picker inside the white employer form panel */
 .portal-shell-employer .employer-form-panel input[type="text"],
 .portal-shell-employer .employer-form-panel input:not([type]) {
-  border-color: #9db1c5;
-  background: #ffffff;
-  color: #000000;
+  border-color: var(--peso-line-strong);
+  background: var(--peso-surface);
+  color: var(--peso-ink);
 }
 
 .portal-shell-employer .employer-form-panel span[class*="rounded-full"] {
-  border-color: #c4d4e5 !important;
-  background: #ffffff !important;
-  color: #000000 !important;
+  border-color: var(--peso-line-strong) !important;
+  background: var(--peso-surface) !important;
+  color: var(--peso-ink) !important;
 }
 
 .portal-shell-employer .employer-form-panel span[class*="rounded-full"] button {
-  color: #5f7590 !important;
+  color: var(--peso-muted) !important;
 }
 
 .portal-shell-employer .employer-form-panel div[class*="shadow-lg"] {
-  border-color: #c4d4e5 !important;
-  background: #ffffff !important;
+  border-color: var(--peso-line-strong) !important;
+  background: var(--peso-surface) !important;
 }
 
 .portal-shell-employer .employer-form-panel div[class*="shadow-lg"] button {
-  color: #000000 !important;
+  color: var(--peso-ink) !important;
 }
 
 .portal-shell-employer .employer-form-panel div[class*="shadow-lg"] button:hover {
-  background: #eef3f9 !important;
+  background: var(--peso-soft) !important;
 }
 
 .portal-shell-employer .employer-form-panel input::placeholder,
 .portal-shell-employer .employer-form-panel textarea::placeholder {
-  color: #66809c;
+  color: var(--peso-muted);
 }
 
 .portal-shell-employer .employer-skill-option {
-  border-color: #c4d4e5 !important;
-  background: #f6f9fc !important;
-  color: #000000 !important;
+  border-color: var(--peso-line-strong) !important;
+  background: var(--peso-canvas) !important;
+  color: var(--peso-ink) !important;
 }
 
 .portal-shell-employer .employer-skill-option input {
-  accent-color: #1263a7;
+  accent-color: var(--peso-primary);
 }
 
 .portal-shell-employer .employer-form-panel button[type="submit"] {
-  border: 1px solid #1263a7;
-  background: #1263a7;
+  border: 1px solid var(--peso-primary);
+  background: var(--peso-primary);
   color: #ffffff;
 }
 
 .portal-shell-employer .employer-pending-item p,
 .portal-shell-employer .employer-pending-item span {
-  color: #000000 !important;
+  color: var(--peso-ink) !important;
 }
 
 .portal-shell-employer .employer-pending-item span {
@@ -1018,66 +1054,66 @@
 }
 
 .portal-shell-employer .employer-notifications-card {
-  color: #000000;
-  background: #ffffff !important;
+  color: var(--peso-ink);
+  background: var(--peso-surface) !important;
 }
 
 .notifications-module,
 .notifications-module h2,
 .notifications-module > p {
-  color: #000000 !important;
+  color: var(--peso-ink) !important;
 }
 
 .portal-shell-employer .employer-notifications-card h2,
 .portal-shell-employer .employer-notifications-card p,
 .portal-shell-employer .employer-notifications-card span {
-  color: #000000 !important;
+  color: var(--peso-ink) !important;
 }
 
 .portal-shell-employer .employer-notification-item {
-  border-color: #d2dfeb !important;
-  background: #ffffff !important;
+  border-color: var(--peso-line) !important;
+  background: var(--peso-surface) !important;
 }
 
 .portal-shell-employer .employer-notification-item:hover {
-  border-color: #1263a7 !important;
+  border-color: var(--peso-primary) !important;
 }
 
 .portal-shell-employer .employer-profile-card {
-  color: #000000;
-  background: #ffffff !important;
+  color: var(--peso-ink);
+  background: var(--peso-surface) !important;
 }
 
 .portal-shell-employer .employer-profile-card h2,
 .portal-shell-employer .employer-profile-card p,
 .portal-shell-employer .employer-profile-card label {
-  color: #000000 !important;
+  color: var(--peso-ink) !important;
 }
 
 .portal-shell-employer .employer-profile-card input,
 .portal-shell-employer .employer-profile-card textarea {
-  border-color: #9db1c5;
-  background: #ffffff;
-  color: #000000;
+  border-color: var(--peso-line-strong);
+  background: var(--peso-surface);
+  color: var(--peso-ink);
 }
 
 .portal-shell-employer .employer-profile-card input::placeholder,
 .portal-shell-employer .employer-profile-card textarea::placeholder {
-  color: #66809c;
+  color: var(--peso-muted);
 }
 
 .portal-shell-employer .employer-profile-card button {
-  border: 1px solid #1263a7;
-  background: #1263a7;
+  border: 1px solid var(--peso-primary);
+  background: var(--peso-primary);
   color: #ffffff;
 }
 
 .employer-dashboard-postings {
   margin-top: 24px;
   padding: 18px;
-  border: 1px solid #d2dfeb;
+  border: 1px solid var(--peso-line);
   border-radius: 10px;
-  background: #ffffff;
+  background: var(--peso-surface);
 }
 
 .employer-dashboard-postings-heading {
@@ -1090,7 +1126,7 @@
 .employer-dashboard-postings h3,
 .employer-dashboard-posting h4 {
   margin: 0;
-  color: #000000;
+  color: var(--peso-ink);
   font-weight: 800;
 }
 
@@ -1104,7 +1140,7 @@
 
 .employer-dashboard-postings p {
   margin: 4px 0 0;
-  color: #29445f;
+  color: var(--peso-body);
   font-size: 12px;
 }
 
@@ -1132,81 +1168,81 @@
   justify-content: space-between;
   gap: 16px;
   padding: 14px;
-  border: 1px solid #d2dfeb;
+  border: 1px solid var(--peso-line);
   border-radius: 8px;
-  background: #f6f9fc;
+  background: var(--peso-canvas);
 }
 
 .employer-dashboard-empty {
   margin-top: 14px !important;
-  color: #5e748c !important;
+  color: var(--peso-muted) !important;
 }
 
 .portal-shell-applicant .applicant-jobs-card {
-  color: #000000;
-  background: #ffffff !important;
+  color: var(--peso-ink);
+  background: var(--peso-surface) !important;
 }
 
 .portal-shell-applicant .applicant-jobs-card h2,
 .portal-shell-applicant .applicant-jobs-card h3,
 .portal-shell-applicant .applicant-jobs-card h4,
 .portal-shell-applicant .applicant-jobs-card p {
-  color: #000000 !important;
+  color: var(--peso-ink) !important;
 }
 
 .portal-shell-applicant .applicant-job-search,
 .portal-shell-applicant .applicant-available-jobs,
 .portal-shell-applicant .applicant-applied-jobs,
 .portal-shell-applicant .applicant-job-item {
-  border-color: #d2dfeb !important;
-  background: #ffffff !important;
+  border-color: var(--peso-line) !important;
+  background: var(--peso-surface) !important;
 }
 
 .portal-shell-applicant .applicant-applied-jobs h3 {
-  color: #10233c !important;
+  color: var(--peso-ink) !important;
 }
 
 .portal-shell-applicant .applicant-applied-jobs p {
-  color: #5e748c !important;
+  color: var(--peso-muted) !important;
 }
 
 .portal-shell-applicant .applicant-applied-jobs .applicant-application-item p:first-child,
 .portal-shell-applicant .applicant-applied-jobs .applicant-application-item p.text-base {
-  color: #10233c !important;
+  color: var(--peso-ink) !important;
 }
 
 .portal-shell-applicant .applicant-job-search input,
 .portal-shell-applicant .applicant-job-search select {
-  border-color: #9db1c5;
-  background: #ffffff;
-  color: #000000;
+  border-color: var(--peso-line-strong);
+  background: var(--peso-surface);
+  color: var(--peso-ink);
 }
 
 .portal-shell-applicant .applicant-job-item > button span,
 .portal-shell-applicant .applicant-job-item button[class*="bg-cyan"] {
-  background: #1263a7 !important;
+  background: var(--peso-primary) !important;
   color: #ffffff !important;
 }
 
 .portal-shell-applicant .applicant-job-item > div:not(.employer-banner) {
-  border-color: #d2dfeb !important;
-  background: #f6f9fc !important;
+  border-color: var(--peso-line) !important;
+  background: var(--peso-canvas) !important;
 }
 
 .portal-shell-applicant .applicant-job-item p,
 .portal-shell-applicant .applicant-job-item span {
-  color: #29445f;
+  color: var(--peso-body);
 }
 
 .portal-shell-applicant .applicant-job-item p.text-lg,
 .portal-shell-applicant .applicant-job-item p.font-semibold:first-of-type {
-  color: #10233c;
+  color: var(--peso-ink);
 }
 
 .portal-shell-applicant .applicant-job-item span[class*="text-cyan"] {
-  background: #d9efff !important;
-  border-color: #a9c7d9 !important;
-  color: #1263a7 !important;
+  background: var(--peso-soft) !important;
+  border-color: var(--peso-line-strong) !important;
+  color: var(--peso-primary) !important;
 }
 
 .portal-shell-applicant .applicant-job-item span[class*="text-green"] {
@@ -1218,23 +1254,23 @@
 }
 
 .portal-shell-applicant .applicant-job-item span[class*="bg-cyan-500\/15"] {
-  background: #d9efff !important;
-  color: #1263a7 !important;
+  background: var(--peso-soft) !important;
+  color: var(--peso-primary) !important;
 }
 
 .portal-shell-applicant .applicant-applications-card {
-  color: #000000;
-  background: #ffffff !important;
+  color: var(--peso-ink);
+  background: var(--peso-surface) !important;
 }
 
 .portal-shell-applicant .applicant-applications-card h2,
 .portal-shell-applicant .applicant-applications-card p {
-  color: #000000 !important;
+  color: var(--peso-ink) !important;
 }
 
 .portal-shell-applicant .applicant-application-item {
-  border-color: #d2dfeb !important;
-  background: #ffffff !important;
+  border-color: var(--peso-line) !important;
+  background: var(--peso-surface) !important;
 }
 
 .portal-shell-applicant .applicant-application-item span {
@@ -1244,68 +1280,68 @@
 }
 
 .portal-shell-applicant .applicant-profile-card {
-  color: #000000;
-  background: #ffffff !important;
+  color: var(--peso-ink);
+  background: var(--peso-surface) !important;
 }
 
 .portal-shell-applicant .applicant-profile-card h2,
 .portal-shell-applicant .applicant-profile-card p,
 .portal-shell-applicant .applicant-profile-card label {
-  color: #000000 !important;
+  color: var(--peso-ink) !important;
 }
 
 .portal-shell-applicant .applicant-profile-card input,
 .portal-shell-applicant .applicant-profile-card textarea {
-  border-color: #9db1c5;
-  background: #ffffff;
-  color: #000000;
+  border-color: var(--peso-line-strong);
+  background: var(--peso-surface);
+  color: var(--peso-ink);
 }
 
 .portal-shell-applicant .applicant-profile-card div[class*="bg-slate"]:not(.employer-banner) {
-  border-color: #d2dfeb !important;
-  background: #f6f9fc !important;
-  color: #000000 !important;
+  border-color: var(--peso-line) !important;
+  background: var(--peso-canvas) !important;
+  color: var(--peso-ink) !important;
 }
 
 .portal-shell-applicant .applicant-profile-card .employer-banner {
-  background-color: #d7e3ee;
+  background-color: var(--peso-line);
 }
 
 .portal-shell-applicant .applicant-profile-card input[type="file"] {
-  background: #ffffff;
-  color: #000000;
+  background: var(--peso-surface);
+  color: var(--peso-ink);
 }
 
 .portal-shell-applicant .applicant-profile-card input[type="file"]::file-selector-button {
-  border-color: #9db1c5;
-  background: #eaf7ff;
-  color: #1d2d3d;
+  border-color: var(--peso-line-strong);
+  background: var(--peso-soft);
+  color: var(--peso-ink);
 }
 
 .portal-shell-applicant .applicant-profile-card input::placeholder,
 .portal-shell-applicant .applicant-profile-card textarea::placeholder {
-  color: #66809c;
+  color: var(--peso-muted);
 }
 
 .portal-shell-applicant .applicant-profile-card .auth-skill-option {
-  border-color: #c4d4e5;
-  background: #f6f9fc;
-  color: #000000;
+  border-color: var(--peso-line-strong);
+  background: var(--peso-canvas);
+  color: var(--peso-ink);
 }
 
 .portal-shell-applicant .applicant-profile-skill-option {
-  border-color: #a9c7d9 !important;
-  background: #eaf7ff !important;
-  color: #1d2d3d !important;
+  border-color: var(--peso-line-strong) !important;
+  background: var(--peso-soft) !important;
+  color: var(--peso-ink) !important;
 }
 
 .portal-shell-applicant .applicant-profile-skill-checkbox {
-  accent-color: #2ea6d8;
+  accent-color: var(--peso-primary);
 }
 
 .portal-shell-applicant .applicant-profile-card button {
-  border-color: #2ea6d8;
-  background: #2ea6d8;
+  border-color: var(--peso-primary);
+  background: var(--peso-primary);
   color: #ffffff;
 }
 
@@ -1313,9 +1349,9 @@
 .portal-shell-applicant .applicant-profile-card .skill-tag-chip,
 .portal-shell-employer .employer-form-panel .skill-tag-chip,
 .portal-shell-employer .employer-profile-card .skill-tag-chip {
-  border: 1px solid #c4d4e5 !important;
-  background: #ffffff !important;
-  color: #000000 !important;
+  border: 1px solid var(--peso-line-strong) !important;
+  background: var(--peso-surface) !important;
+  color: var(--peso-ink) !important;
 }
 
 .portal-shell-applicant .applicant-profile-card .skill-tag-remove,
@@ -1323,117 +1359,117 @@
 .portal-shell-employer .employer-profile-card .skill-tag-remove {
   border: none !important;
   background: transparent !important;
-  color: #5f7590 !important;
+  color: var(--peso-muted) !important;
   padding: 0 !important;
 }
 
 .portal-shell-applicant .applicant-profile-card .skill-tag-input,
 .portal-shell-employer .employer-form-panel .skill-tag-input,
 .portal-shell-employer .employer-profile-card .skill-tag-input {
-  border-color: #9db1c5 !important;
-  background: #ffffff !important;
-  color: #000000 !important;
+  border-color: var(--peso-line-strong) !important;
+  background: var(--peso-surface) !important;
+  color: var(--peso-ink) !important;
 }
 
 .portal-shell-applicant .applicant-profile-card .skill-tag-suggestions,
 .portal-shell-employer .employer-form-panel .skill-tag-suggestions,
 .portal-shell-employer .employer-profile-card .skill-tag-suggestions {
-  border-color: #c4d4e5 !important;
-  background: #ffffff !important;
+  border-color: var(--peso-line-strong) !important;
+  background: var(--peso-surface) !important;
 }
 
 .portal-shell-applicant .applicant-profile-card .skill-tag-suggestion,
 .portal-shell-employer .employer-form-panel .skill-tag-suggestion,
 .portal-shell-employer .employer-profile-card .skill-tag-suggestion {
   border: none !important;
-  background: #ffffff !important;
-  color: #000000 !important;
+  background: var(--peso-surface) !important;
+  color: var(--peso-ink) !important;
 }
 
 .portal-shell-applicant .applicant-profile-card .skill-tag-suggestion:hover,
 .portal-shell-employer .employer-form-panel .skill-tag-suggestion:hover,
 .portal-shell-employer .employer-profile-card .skill-tag-suggestion:hover {
-  background: #eef3f9 !important;
+  background: var(--peso-soft) !important;
 }
 
 .portal-shell-applicant .applicant-profile-summary {
-  border-color: #d2dfeb;
-  background: #f3f9fd;
+  border-color: var(--peso-line);
+  background: var(--peso-canvas);
 }
 
 .portal-shell-applicant .applicant-profile-avatar {
-  background: #5ec2df !important;
+  background: var(--peso-accent) !important;
   color: #ffffff !important;
-  box-shadow: 0 6px 14px rgba(94, 194, 223, 0.25);
+  box-shadow: 0 6px 14px rgb(173 47 101 / 25%);
 }
 
 .portal-shell-applicant .applicant-profile-summary .rounded-full {
-  background: #dff5ff !important;
-  border-color: #9ad6ea !important;
-  color: #1a5f7b !important;
+  background: var(--peso-soft) !important;
+  border-color: var(--peso-line-strong) !important;
+  color: var(--peso-body) !important;
 }
 
 .portal-shell-applicant .applicant-skill-modal {
-  border-color: #d0dbe6;
-  background: #ffffff;
+  border-color: var(--peso-line);
+  background: var(--peso-surface);
 }
 
 .portal-shell-applicant .applicant-skill-modal button {
-  background: #22d3ee;
-  color: #082f49;
+  background: var(--peso-primary);
+  color: var(--peso-ink);
 }
 
 /* Keep the tag picker white inside the skill modal */
 .portal-shell-applicant .applicant-skill-modal .skill-tag-chip {
-  border: 1px solid #c4d4e5 !important;
-  background: #ffffff !important;
-  color: #000000 !important;
+  border: 1px solid var(--peso-line-strong) !important;
+  background: var(--peso-surface) !important;
+  color: var(--peso-ink) !important;
 }
 
 .portal-shell-applicant .applicant-skill-modal .skill-tag-remove {
   border: none !important;
   background: transparent !important;
-  color: #000000 !important;
+  color: var(--peso-ink) !important;
   padding: 0 !important;
 }
 
 .portal-shell-applicant .applicant-skill-modal .skill-tag-input {
-  border-color: #9db1c5 !important;
-  background: #ffffff !important;
-  color: #000000 !important;
+  border-color: var(--peso-line-strong) !important;
+  background: var(--peso-surface) !important;
+  color: var(--peso-ink) !important;
 }
 
 .portal-shell-applicant .applicant-skill-modal .skill-tag-suggestions {
-  border-color: #c4d4e5 !important;
-  background: #ffffff !important;
+  border-color: var(--peso-line-strong) !important;
+  background: var(--peso-surface) !important;
 }
 
 .portal-shell-applicant .applicant-skill-modal .skill-tag-suggestion {
   border: none !important;
-  background: #ffffff !important;
-  color: #000000 !important;
+  background: var(--peso-surface) !important;
+  color: var(--peso-ink) !important;
 }
 
 .portal-shell-applicant .applicant-skill-modal .skill-tag-suggestion:hover {
-  background: #eef3f9 !important;
+  background: var(--peso-soft) !important;
 }
 
 .portal-shell-applicant .applicant-skill-modal h3,
 .portal-shell-applicant .applicant-skill-modal p,
 .portal-shell-applicant .applicant-skill-modal label {
-  color: #0f172a;
+  color: var(--peso-ink);
 }
 
 .portal-shell-applicant {
-  background: #edf5fb;
-  color: #10233c;
+  background: var(--peso-soft);
+  color: var(--peso-ink);
 }
 
 .portal-shell-applicant .portal-header {
   height: auto;
-  border-top: 2px solid #1b1231;
-  border-bottom: 1px solid #b7c7d8;
-  background: #ffffff;
+  border-top: 2px solid var(--peso-ink);
+  border-bottom: 1px solid var(--peso-line-strong);
+  background: var(--peso-surface);
 }
 
 .portal-shell-applicant .portal-header-inner {
@@ -1444,20 +1480,20 @@
 }
 
 .portal-shell-applicant .portal-brand p {
-  color: #087393;
+  color: var(--peso-body);
   font-size: 18px;
   letter-spacing: 3px;
 }
 
 .portal-shell-applicant .portal-brand h1 {
-  color: #10233c;
+  color: var(--peso-ink);
   font-size: 20px;
 }
 
 .portal-shell-applicant .portal-logout {
-  border-color: #8fa5ba;
-  background: #ffffff;
-  color: #10233c;
+  border-color: var(--peso-line-strong);
+  background: var(--peso-surface);
+  color: var(--peso-ink);
 }
 
 .portal-shell-applicant .portal-layout {
@@ -1469,28 +1505,28 @@
 
 .portal-shell-applicant .portal-sidebar {
   padding: 16px;
-  border-color: #d2dfeb;
+  border-color: var(--peso-line);
   border-radius: 16px;
-  background: #ffffff;
-  box-shadow: 0 2px 6px rgba(34, 67, 100, 0.05);
+  background: var(--peso-surface);
+  box-shadow: 0 2px 6px rgb(36 24 32 / 5%);
 }
 
 .portal-shell-applicant .portal-session {
   padding: 16px;
-  border-color: #d6e1ec;
+  border-color: var(--peso-line);
   border-radius: 16px;
-  background: #eef3f9;
-  color: #5f7590;
+  background: var(--peso-soft);
+  color: var(--peso-muted);
   font-size: 14px;
 }
 
 .portal-shell-applicant .portal-session strong {
-  color: #174a7a;
+  color: var(--peso-body);
   font-size: 16px;
 }
 
 .portal-shell-applicant .portal-eyebrow {
-  color: #1761a1;
+  color: var(--peso-primary);
   font-size: 12px;
 }
 
@@ -1502,13 +1538,13 @@
 .portal-shell-applicant .portal-nav-item {
   padding: 12px 16px;
   border-radius: 12px;
-  background: #f1f5fa;
-  color: #38516c;
+  background: var(--peso-soft);
+  color: var(--peso-muted);
   font-size: 14px;
 }
 
 .portal-shell-applicant .portal-nav-item.is-active {
-  background: #1263a7;
+  background: var(--peso-primary);
   color: #ffffff;
 }
 
@@ -1592,12 +1628,12 @@
 }
 
 :root {
-  --form-control-bg: #f8fafc;
-  --form-control-text: #1e293b;
-  --form-control-border: #cbd5e1;
-  --form-control-focus: #2563eb;
-  --form-control-disabled-bg: #f1f5f9;
-  --form-control-disabled-text: #94a3b8;
+  --form-control-bg: var(--peso-canvas);
+  --form-control-text: var(--peso-ink);
+  --form-control-border: var(--peso-line-strong);
+  --form-control-focus: var(--peso-primary);
+  --form-control-disabled-bg: var(--peso-soft);
+  --form-control-disabled-text: var(--peso-line-strong);
   --form-control-error: #dc2626;
   color-scheme: light;
 }
@@ -1641,12 +1677,12 @@ textarea:disabled,
 input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"])::placeholder,
 textarea::placeholder,
 .shared-form-control::placeholder {
-  color: #64748b;
+  color: var(--peso-muted);
   opacity: 1;
 }
 
 select option {
-  background-color: #ffffff;
+  background-color: var(--peso-surface);
   color: var(--form-control-text);
 }
 
@@ -1660,8 +1696,8 @@ input[type="range"] {
 input[type="file"]::file-selector-button {
   border: 0;
   border-radius: 0.5rem;
-  background: #e2e8f0;
-  color: #1e293b;
+  background: var(--peso-soft);
+  color: var(--peso-ink);
   cursor: pointer;
   margin-right: 0.75rem;
   padding: 0.4rem 0.75rem;
@@ -1700,17 +1736,17 @@ input[type="file"]::file-selector-button {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: #eef5fb;
-  color: #071c35;
+  background: var(--peso-soft);
+  color: var(--peso-ink);
 }
 
 .auth-card {
   width: min(100%, 420px);
   padding: 36px 32px 30px;
-  border: 1px solid #d4e0ed;
+  border: 1px solid var(--peso-line);
   border-radius: 14px;
-  background: #ffffff;
-  box-shadow: 0 12px 30px rgba(27, 66, 101, 0.08);
+  background: var(--peso-surface);
+  box-shadow: 0 12px 30px rgb(36 24 32 / 8%);
 }
 
 .auth-card-wide {
@@ -1739,14 +1775,14 @@ input[type="file"]::file-selector-button {
 
 .auth-heading h1 {
   margin: 0;
-  color: #071c35;
+  color: var(--peso-ink);
   font-size: 24px;
   font-weight: 750;
 }
 
 .auth-heading p {
   margin: 7px 0 0;
-  color: #5c7490;
+  color: var(--peso-muted);
   font-size: 14px;
 }
 
@@ -1757,7 +1793,7 @@ input[type="file"]::file-selector-button {
 
 .auth-form > div > label {
   display: block;
-  color: #071c35;
+  color: var(--peso-ink);
   font-size: 13px;
   font-weight: 600;
 }
@@ -1770,25 +1806,25 @@ input[type="file"]::file-selector-button {
   box-sizing: border-box;
   margin-top: 6px;
   padding: 11px 14px;
-  border: 1px solid #c4d4e5;
+  border: 1px solid var(--peso-line-strong);
   border-radius: 10px;
-  background: #f8fbfe;
-  color: #071c35;
+  background: var(--peso-canvas);
+  color: var(--peso-ink);
   font: inherit;
   outline: none;
 }
 
 .auth-form input:focus {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16);
+  border-color: var(--peso-primary);
+  box-shadow: 0 0 0 3px rgb(173 47 101 / 16%);
 }
 
 .auth-form input::placeholder {
-  color: #66809c;
+  color: var(--peso-muted);
 }
 
 .auth-form textarea::placeholder {
-  color: #66809c;
+  color: var(--peso-muted);
 }
 
 .auth-detail-form {
@@ -1838,10 +1874,10 @@ input[type="file"]::file-selector-button {
   gap: 8px;
   min-height: 38px;
   padding: 8px 10px;
-  border: 1px solid #c4d4e5;
+  border: 1px solid var(--peso-line-strong);
   border-radius: 10px;
-  background: #ffffff;
-  color: #071c35;
+  background: var(--peso-surface);
+  color: var(--peso-ink);
   font-size: 12px;
   font-weight: 500;
 }
@@ -1875,7 +1911,7 @@ input[type="file"]::file-selector-button {
   margin-right: 13px;
   border: 0;
   background: transparent;
-  color: #536d89;
+  color: var(--peso-muted);
   font: inherit;
   cursor: pointer;
 }
@@ -1886,7 +1922,7 @@ input[type="file"]::file-selector-button {
   justify-content: space-between;
   gap: 8px;
   margin-top: 1px;
-  color: #536d89;
+  color: var(--peso-muted);
   font-size: 14px;
 }
 
@@ -1908,7 +1944,7 @@ input[type="file"]::file-selector-button {
   padding: 0;
   border: 0;
   background: transparent;
-  color: #001eff;
+  color: var(--peso-primary);
   font: inherit;
   cursor: pointer;
   text-decoration: underline;
@@ -1925,31 +1961,31 @@ input[type="file"]::file-selector-button {
 }
 
 .auth-primary-button {
-  border: 1px solid #07833f;
-  background: #07833f;
+  border: 1px solid var(--peso-primary);
+  background: var(--peso-primary);
   color: #ffffff;
 }
 
 .auth-primary-button:hover {
-  background: #066b34;
+  background: var(--peso-primary-hover);
 }
 
 .auth-signin-button {
-  border-color: #1263a7;
-  background: #1263a7;
+  border-color: var(--peso-primary);
+  background: var(--peso-primary);
 }
 
 .auth-signin-button:hover {
-  background: #0f5590;
+  background: var(--peso-body);
 }
 
 .auth-account-submit {
-  border-color: #1263a7;
-  background: #1263a7;
+  border-color: var(--peso-primary);
+  background: var(--peso-primary);
 }
 
 .auth-account-submit:hover {
-  background: #0f5590;
+  background: var(--peso-body);
 }
 
 .auth-divider {
@@ -1957,7 +1993,7 @@ input[type="file"]::file-selector-button {
   align-items: center;
   gap: 12px;
   margin: 18px 0 2px;
-  color: #7287a0;
+  color: var(--peso-muted);
   font-size: 11px;
   letter-spacing: 1px;
   white-space: nowrap;
@@ -1968,7 +2004,7 @@ input[type="file"]::file-selector-button {
   content: "";
   height: 1px;
   flex: 1;
-  background: #d4e0ed;
+  background: var(--peso-line);
 }
 
 .auth-account-actions {
@@ -1977,20 +2013,20 @@ input[type="file"]::file-selector-button {
 }
 
 .auth-secondary-button {
-  border: 1px solid #c4d4e5;
-  background: #ffffff;
-  color: #071c35;
+  border: 1px solid var(--peso-line-strong);
+  background: var(--peso-surface);
+  color: var(--peso-ink);
 }
 
 .auth-secondary-button:hover {
-  border-color: #07833f;
-  background: #f4fafd;
+  border-color: var(--peso-primary);
+  background: var(--peso-canvas);
 }
 
 .auth-footer {
   padding-top: 17px;
-  border-top: 1px solid #d4e0ed;
-  color: #07833f;
+  border-top: 1px solid var(--peso-line);
+  color: var(--peso-primary);
   font-size: 12px;
   text-align: center;
 }

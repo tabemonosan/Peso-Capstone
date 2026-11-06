@@ -3,7 +3,7 @@ import { PASSWORD_RULES } from "../utils/passwordPolicy"
 // Live checklist under the password field; ticks each rule as the user types.
 // Also shows a "passwords match" indicator once a confirmation value is entered.
 export default function PasswordChecklist({ password, confirmPassword, dark = false }) {
-  const text = dark ? "text-slate-300" : "text-[#5c7490]"
+  const text = dark ? "text-slate-300" : "text-[var(--peso-muted)]"
   const ok = "text-[#07833f]"
   const bad = dark ? "text-slate-500" : "text-slate-400"
 

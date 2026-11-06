@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react"
 import { createPortal } from "react-dom"
+import { ModalLayerContext, useModalLayer, isTopModal } from '../hooks/useModalLayer'
 
 /**
  * Full-height-safe modal shell.
@@ -10,44 +11,50 @@ import { createPortal } from "react-dom"
  */
 export default function OverlayModal({ onClose, labelledBy, header, footer, children, closeDisabled = false }) {
   const dialogRef = useRef(null)
+  const depth = useModalLayer()
+  const closeRef = useRef(onClose)
+  const disabledRef = useRef(closeDisabled)
+  closeRef.current = onClose
+  disabledRef.current = closeDisabled
 
   useEffect(() => {
     const previousFocus = document.activeElement
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = "hidden"
     const focusable = dialogRef.current?.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])') || []
     if (focusable.length) focusable[0].focus()
     else dialogRef.current?.focus()
     const onKeyDown = (event) => {
-      if (event.key === "Escape" && !closeDisabled) {
+      if (event.key === "Escape" && !event.defaultPrevented && isTopModal(dialogRef.current) && !disabledRef.current) {
         event.preventDefault()
-        onClose?.()
+        closeRef.current?.()
       }
     }
     document.addEventListener("keydown", onKeyDown)
     return () => {
-      document.body.style.overflow = previousOverflow
       document.removeEventListener("keydown", onKeyDown)
       previousFocus?.focus?.()
     }
-  }, [onClose, closeDisabled])
+  }, [])
 
-  return createPortal(
+  return <ModalLayerContext.Provider value={depth}>{createPortal(
     <div
       data-testid="overlay-modal-overlay"
       className="peso-modal-overlay fixed inset-0 z-50 flex items-start justify-center bg-slate-950/70 p-4 sm:items-center"
+      style={{ zIndex: 70 + depth * 10 }}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget && !closeDisabled) onClose?.()
       }}
     >
       <div
         ref={dialogRef}
+        data-modal-layer={depth}
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelledBy}
         tabIndex={-1}
         onKeyDown={(event) => {
+          if (!isTopModal(dialogRef.current)) return
           if (event.key !== "Tab") return
+          event.stopPropagation()
           const focusable = dialogRef.current?.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])') || []
           if (!focusable.length) {
             event.preventDefault()
@@ -78,5 +85,5 @@ export default function OverlayModal({ onClose, labelledBy, header, footer, chil
       </div>
     </div>,
     document.body
-  )
+  )}</ModalLayerContext.Provider>
 }

@@ -25,9 +25,14 @@ export async function storeDocumentFile(applicantId, slot, version, side, file) 
 // Returns null when no externalized file exists (pre-migration records still
 // embed their bytes on the Applicant document; callers fall back to those).
 export async function loadDocumentFile(applicantId, slot, version, side = 'front') {
-  return DocumentFile.findOne({ applicant: applicantId, slot, version, side })
+  const file = await DocumentFile.findOne({ applicant: applicantId, slot, version, side })
     .select('+data')
     .lean()
+  if (file?.data && !Buffer.isBuffer(file.data)) {
+    const raw = file.data
+    file.data = Buffer.from(typeof raw.value === 'function' ? raw.value() : raw.buffer || raw)
+  }
+  return file
 }
 
 export async function deleteApplicantDocumentFiles(applicantId) {

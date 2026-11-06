@@ -6,6 +6,7 @@ const REDACTED = '[redacted]'
 
 // Keys (compared lowercase) whose values must never appear in logs
 const SENSITIVE_KEYS = new Set([
+  'recognizedtext', 'extractedtext', 'ocrtext', 'idnumber', 'passportno', 'tin', 'gsissss', 'pagibig', 'philhealth', 'cellphone', 'dob', 'authorizationcode', 'qrpayload', 'declared', 'explanation',
   'password',
   'confirmpassword',
   'passwordhash',

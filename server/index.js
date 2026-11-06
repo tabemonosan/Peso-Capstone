@@ -1,5 +1,22 @@
-import { matchLocation, getEmployerAddress } from '../shared/phLocations.js'
+import { createActivityReportService } from './services/activityReport.js'
+import { isJobArchived, jobArchiveAt } from '../shared/jobArchive.js'
+import { Interview, ApplicationReport, ApplicationAppeal } from './models/applicationWorkflow.js'
+import { createApplicationWorkflow } from './services/applicationWorkflow.js'
+import { createApplicationWorkflowRouter } from './routes/applicationWorkflow.js'
+import { coveringJobSkill } from '../shared/jobSkills.js'
+import { PHILIPPINE_ID_TYPES } from '../shared/philippineIds.js'
+import { applicantProfileContent } from '../shared/applicantProfile.js'
+import { validatePortfolioLinks } from '../shared/portfolioLinks.js'
+import { resumeError } from '../shared/resume.js'
+import { applicantDegree, recoverApplicantQualifications } from './services/applicantDegree.js'
+import { mergeNsrpIntoProfile } from '../shared/nsrpImport.js'
+import { reviewedImport } from './services/nsrpImport.js'
+import { createNsrpImportRouter } from './routes/nsrpImport.js'
+import { validateJobApplication, RESUME_MAX_BYTES } from '../shared/jobApplication.js'
+import { validateApplicationEmail } from './services/applicationEmail.js'
+import { matchLocation, getEmployerJobAddress as getEmployerAddress, validateApplicantLocation } from '../shared/phLocations.js'
 import 'dotenv/config'
+import { pageGuide } from '../shared/pageGuides.js'
 import express from 'express'
 import mongoose from 'mongoose'
 import bcrypt from 'bcryptjs'
@@ -13,6 +30,25 @@ import path from 'path'
 import { createReport } from 'docx-templates'
 import { Applicant, Employer, Admin, JobTitle, Notification, Referral, HireReport, Rating, DocumentFile, EmailCode, EmailCodeSend, UsedEmailProof, findUserByEmail, emailTakenAcrossRoles, createUserInRole, updateUserProfileByEmail, applicantFullName, applicantDisplayName } from './models/collections.js'
 import { sendEmail, sendVerificationEmail, initMailer } from './mailer.js'
+import { createNsrpAutomation } from './services/nsrpAutomation.js'
+import { createNsrpAutomationRouter } from './routes/nsrpAutomation.js'
+import { verificationVersionFields } from './models/verification.js'
+import { createDocumentVerification } from './services/documentVerification.js'
+import { createDocumentVerificationRouter } from './routes/documentVerification.js'
+import { openFlags } from '../shared/verification.js'
+import { prepareDocument, parseDocumentDetails, saveAuthorization } from './services/documentUpload.js'
+import { EXPLANATION_CATEGORIES } from '../shared/crossChecks.js'
+import { inspectDocument } from './services/imageQuality.js'
+import { validateDeclaredDetails, BIRTH_COPY_TYPES } from '../shared/documentImage.js'
+import { createVerificationEngine } from './services/verificationEngine.js'
+import { createConsistencyWaitlist } from './services/consistencyWaitlist.js'
+import { applicantReviewSummary } from './services/applicantReview.js'
+import { applicantSkillQuery } from './utils/jobSkillMatching.js'
+import { jobSkillMatchCount } from '../shared/jobSkills.js'
+import { rankEmployerReferrals } from './services/applicantRanking.js'
+import { createReferralWorkflow, ApplicationError, WITHDRAWN_REFERRALS } from './services/referralWorkflow.js'
+import { createReferralOversightRouter } from './routes/referralOversight.js'
+import { createApplicationHistoryRouter } from './routes/applicationHistory.js'
 import { EMAIL_CODE_TTL_MS, EMAIL_CODE_MAX_ATTEMPTS, EMAIL_CODE_RESEND_COOLDOWN_MS, EMAIL_CODE_HOURLY_LIMIT, EMAIL_CODE_IP_HOURLY_LIMIT, generateEmailCode, hashEmailCode, emailCodeMatches, signEmailProof, verifyEmailProof } from './utils/emailCode.js'
 import { notify, notifyAdmins } from './services/notify.js'
 import { startHireReportReminders } from './services/hireReminders.js'
@@ -37,20 +73,22 @@ import {
   NSRP_NUMERIC_SPECS, NSRP_FIELD_VALIDATORS, EDUCATION_LEVELS, WORK_STATUS_OPTIONS,
   digitsOnly, trimCollapse, normalizePhMobile, normalizePassportNo,
   isValidCalendarDate, isValidYear, ageFromDob, validateNumericId, validateNsrpBasicInfo, validateNsrpLanguages,
-  EMPLOYED_TYPES, UNEMPLOYED_TYPES, MIN_YEAR, todayInManila,
+  EMPLOYED_TYPES, UNEMPLOYED_TYPES, MIN_YEAR, todayInManila, requiresPassport,
 } from '../shared/nsrpValidation.js'
 import { NSRP_SKILL_LABELS, normalizeSkillLabel } from '../shared/nsrpSkills.js'
 import { NSRP_ROW_LIMITS } from '../shared/nsrpTableLimits.js'
 import { LOCATION_TYPES, EMPLOYMENT_TYPES, LEGACY_EMPLOYMENT_TYPES, PAY_FREQUENCIES, EDUCATION_LEVELS as JOB_EDUCATION_LEVELS, EXPERIENCE_LEVELS, JOB_LIMITS, validateJobPosting, formatSalary, formatLocation, normalizeJobPosting } from '../shared/jobPosting.js'
+import { createJobModeration } from './services/jobModeration.js'
 import { registrationProgress } from './utils/registration.js'
 import { validateReviewTransition } from './utils/docReview.js'
 import { storeDocumentFile, loadDocumentFile, deleteApplicantDocumentFiles } from './utils/documentFiles.js'
 import { redactPath, redactString } from './utils/redact.js'
 // Document slot keys/labels are shared with the frontend; the resume is
 // optional and not part of REQUIRED_DOC_KEYS.
-import { VERIFICATION_DOC_KEYS, REQUIRED_DOC_KEYS, VERIFICATION_DOC_LABELS } from '../shared/verificationDocs.js'
+import { VERIFICATION_DOC_KEYS, REQUIRED_DOC_KEYS, IDENTITY_DOC_KEYS, VERIFICATION_DOC_LABELS, nsrpReferenceLocked } from '../shared/verificationDocs.js'
+import { reopenIdentityDocuments } from './services/nsrpReference.js'
 import { baseApprovedJobFilter, buildJobFilter, countJobFacets } from './utils/jobFilters.js'
-import { EMPLOYER_OUTCOMES, APPLICANT_OUTCOMES, employerApplicantSummary, outcomeLabel } from '../shared/employmentReporting.js'
+import { EMPLOYER_OUTCOMES, APPLICANT_OUTCOMES, outcomeLabel, publicApplicationHistory } from '../shared/employmentReporting.js'
 
 const LOCATION_TYPE_OPTIONS = LOCATION_TYPES
 const EMPLOYMENT_TYPE_OPTIONS = EMPLOYMENT_TYPES
@@ -59,7 +97,7 @@ import { resolveSort } from './utils/sort.js'
 
 // --- Sort whitelists (never trust raw ?sortBy values) ---
 const STATUS_PRIORITY = ['pending', 'under_review', 'approved', 'declined']
-const APPLICANT_STATUS_PRIORITY = ['under_review', 'approved', 'restricted', 'declined']
+const APPLICANT_STATUS_PRIORITY = ['waitlisted', 'under_review', 'approved', 'restricted', 'declined']
 
 const APPLICANT_SORTS = {
   name: { fields: (d) => ({ 'profile.lastName': d, 'profile.firstName': d }), collation: true, defaultOrder: 1 },
@@ -173,6 +211,8 @@ if (!isTestEnv) {
 const { Schema } = mongoose
 
 const jobSchema = new Schema({
+  acceptingApplications: { type: Boolean, default: true },
+  hiredApplicantIds: [{ type: Schema.Types.ObjectId, ref: 'Applicant' }],
   title: { type: String, required: true },
   company: { type: String, required: true },
   location: String,
@@ -190,6 +230,7 @@ const jobSchema = new Schema({
   deadline: Date,
   locationType: { type: String, enum: ['', ...LOCATION_TYPES], default: '' },
   city: { type: String, trim: true, maxlength: JOB_LIMITS.placeMax },
+  barangay: { type: String, trim: true, maxlength: JOB_LIMITS.placeMax },
   province: { type: String, trim: true, maxlength: JOB_LIMITS.placeMax },
   // Legacy values remain valid on save; normalizeJobPosting maps them on read.
   employmentType: { type: String, enum: ['', ...EMPLOYMENT_TYPES, ...Object.keys(LEGACY_EMPLOYMENT_TYPES)], default: '' },
@@ -197,10 +238,18 @@ const jobSchema = new Schema({
   experience: { type: String, enum: ['', ...EXPERIENCE_LEVELS], default: '' },
   notesToAdmin: { type: String, maxlength: JOB_LIMITS.notesMax },
   skills: [String],
+  languageRequirements: [{ _id: false, name: String, read: Boolean, write: Boolean, speak: Boolean, understand: Boolean }],
   status: { type: String, enum: ['pending', 'approved', 'declined'], default: 'pending' },
   reviewReason: String,
   reviewedBy: String,
   reviewedAt: Date,
+  approvedBy: String,
+  approvedAt: Date,
+  moderation: {
+    rulesVersion: String, checkedAt: Date, decision: String,
+    findings: [{ _id: false, code: String, category: String, message: String, field: String }],
+  },
+  moderationHistory: { type: [Schema.Types.Mixed], default: [] },
   reviewHistory: [{
     status: { type: String, enum: ['approved', 'declined'], required: true },
     reason: String,
@@ -222,6 +271,18 @@ jobSchema.index({ status: 1, employmentType: 1 })
 const JobPosting = mongoose.model('JobPosting', jobSchema)
 
 const jobApplicationSchema = new Schema({
+  applicantId: { type: Schema.Types.ObjectId, ref: 'Applicant' },
+  employerId: { type: Schema.Types.ObjectId, ref: 'Employer' },
+  referralId: { type: Schema.Types.ObjectId, ref: 'Referral' },
+  source: { type: String, enum: ['auto', 'admin'] },
+  deliveryStatus: { type: String, enum: ['processing', 'pending_admin', 'delivered', 'withdrawn_by_admin', 'withdrawn', 'declined_by_admin'] },
+  jobTitle: String, employerName: String, lastActivityAt: Date,
+  reviewQueue: { type: String, select: false },
+  sharingConfirmedAt: Date, invitationDeclinedAt: Date,
+  applicationDetails: { email: String, mobile: String, bachelorDegree: { type: String, enum: ['Yes', 'No'] }, hasExperience: { type: String, enum: ['Yes', 'No'] }, experience: { type: String, maxlength: 20 } },
+  resumeFile: { originalName: String, mimetype: String, size: Number, data: { type: Buffer, select: false } },
+  findings: [{ code: String, severity: String, at: Date }],
+  history: [{ action: String, status: String, by: String, reason: String, at: Date }],
   jobId: { type: Schema.Types.ObjectId, ref: 'JobPosting', required: true },
   applicantEmail: { type: String, required: true },
   nsrpFile: {
@@ -236,9 +297,26 @@ const jobApplicationSchema = new Schema({
   submittedAt: { type: Date, default: Date.now },
 })
 jobApplicationSchema.index({ jobId: 1, applicantEmail: 1 }, { unique: true })
+jobApplicationSchema.index({ applicantId: 1, jobId: 1 }, { unique: true, partialFilterExpression: { applicantId: { $type: 'objectId' } } })
 const JobApplication = mongoose.model('JobApplication', jobApplicationSchema)
+export const referralWorkflow = createReferralWorkflow({ Applicant, Employer, JobPosting, JobApplication, Referral, HireReport, Notification, notify, notifyAdmins, loadApplicant: loadApplicantWithCurrentResume, loadEmployerVerification, loadNsrpFile: storedApplicationNsrp })
+export const applicationWorkflow = createApplicationWorkflow({ Applicant, Employer, JobPosting, JobApplication, Referral, HireReport, Interview, ApplicationReport, ApplicationAppeal, notify, notifyAdmins, loadEmployerVerification, referralWorkflow })
+app.use('/api/workflow', createApplicationWorkflowRouter({ service: applicationWorkflow, Applicant, Employer, Admin, JobApplication, Interview, ApplicationReport, ApplicationAppeal, HireReport, authenticate: authenticateRequest, notify, notifyAdmins }))
+app.use('/api/admin/referral-workflow', createReferralOversightRouter({ workflow: referralWorkflow, Applicant, Employer, JobPosting, JobApplication, Referral, authenticate: authenticateRequest }))
+app.use('/api/applications', createApplicationHistoryRouter({ Applicant, Employer, JobApplication, Referral, JobPosting, authenticate: authenticateRequest, notify, notifyAdmins, loadEmployerVerification, applicationWorkflow, Interview, HireReport }))
+
+async function storedApplicationNsrp(applicant) {
+  const saved = await Applicant.findById(applicant._id).select('+verificationDocuments.nsrpForm.versions.data +nsrpVerificationFile.data')
+  const version = latestVersion(saved?.verificationDocuments?.nsrpForm)
+  const stored = version?.version ? await loadDocumentFile(applicant._id, 'nsrpForm', version.version, 'front') : null
+  const snapshot = stored?.data ? { ...version, data: stored.data } : version?.data ? version : saved?.nsrpVerificationFile
+  if (!snapshot?.data) throw new ApplicationError('NSRP_REQUIRED', 'Complete your NSRP form before applying.', 403)
+  const data = Buffer.isBuffer(snapshot.data) ? snapshot.data : Buffer.from(snapshot.data.buffer || snapshot.data)
+  return { originalName: snapshot.originalName || 'NSRP-Registration-Form.pdf', mimetype: snapshot.mimetype || 'application/pdf', size: snapshot.size || data.length, data }
+}
 
 const employerRequestSchema = new Schema({
+  nsrpAutoEnabledAtCreation: { type: Boolean, select: false },
   email: { type: String, required: true, unique: true },
   passwordHash: { type: String, required: true },
   companyName: { type: String, required: true },
@@ -262,10 +340,11 @@ const employerRequestSchema = new Schema({
     data: { type: Buffer, select: false },
     version: Number,
     sourceType: { type: String, enum: ['uploaded', 'generated'] },
-    status: { type: String, enum: ['pending', 'approved', 'rejected', 'superseded'], default: 'pending' },
+    status: { type: String, enum: ['pending', 'approved', 'rejected', 'needs_resubmission', 'superseded'], default: 'pending' },
   },
   requirementsVersions: {
     type: [{
+      ...verificationVersionFields,
       version: { type: Number, required: true },
       originalName: String,
       filename: String,
@@ -273,7 +352,6 @@ const employerRequestSchema = new Schema({
       mimetype: String,
       size: Number,
       sourceType: { type: String, enum: ['uploaded', 'generated'] },
-      status: { type: String, enum: ['pending', 'approved', 'rejected', 'superseded'], default: 'pending' },
       uploadedAt: Date,
       reviewedAt: Date,
       reviewedBy: String,
@@ -296,6 +374,51 @@ const employerRequestSchema = new Schema({
 })
 employerRequestSchema.index({ status: 1, createdAt: -1, _id: 1 })
 const EmployerRequest = mongoose.model('EmployerRequest', employerRequestSchema)
+async function refreshApplicantVerification(id) {
+  const account = await Applicant.findById(id)
+  if (!account) return
+  const previousStatus = account.verificationStatus
+  recomputeVerificationStatus(account)
+  const match = { _id: id, verificationStatus: { $ne: 'restricted' }, deletedAt: { $exists: false } }
+  for (const key of REQUIRED_DOC_KEYS) {
+    const versions = account.verificationDocuments?.[key]?.versions || []
+    match[`verificationDocuments.${key}.versions`] = { $size: versions.length }
+    if (versions.length) match[`verificationDocuments.${key}.versions.${versions.length - 1}.status`] = versions.at(-1).status
+  }
+  const result = await Applicant.updateOne(match, { $set: { verificationStatus: account.verificationStatus, ...(account.verificationReason ? { verificationReason: account.verificationReason } : {}) }, ...(!account.verificationReason ? { $unset: { verificationReason: '' } } : {}) })
+  return { becameVerified: previousStatus !== 'approved' && account.verificationStatus === 'approved' && result.modifiedCount === 1 }
+}
+export const nsrpAutomation = createNsrpAutomation({ Applicant, Employer, EmployerRequest, notify, notifyAdmins, recomputeApplicant: refreshApplicantVerification })
+export const verificationEngine = createVerificationEngine({ Applicant, Employer, EmployerRequest, automation: nsrpAutomation, notify, notifyAdmins, recomputeApplicant: refreshApplicantVerification })
+nsrpAutomation.attachEngine(verificationEngine)
+export const consistencyWaitlist = createConsistencyWaitlist({ Applicant, automation: nsrpAutomation, notify, notifyAdmins, verifyDocument: params => verificationEngine.process(params), recomputeApplicant: refreshApplicantVerification })
+const scheduleConsistency = (id, docKey, reservation, ip) => consistencyWaitlist.begin(id, docKey, reservation, ip).catch(() => console.error('[verification] consistency check unavailable; manual review required'))
+app.use('/api/admin/nsrp-automation', createNsrpAutomationRouter({ automation: nsrpAutomation, authenticate: authenticateRequest, Admin, waitlist: consistencyWaitlist, review: (...args) => documentVerification.act(...args) }))
+export const documentVerification = createDocumentVerification({ Applicant, Employer, EmployerRequest, automation: nsrpAutomation, notify, recomputeApplicant: refreshApplicantVerification })
+app.use('/api/admin/document-verification', createDocumentVerificationRouter({ service: documentVerification, authenticate: authenticateRequest, automation: nsrpAutomation, Admin, Applicant, waitlist: consistencyWaitlist }))
+app.get('/api/profile/consistency', async (req, res) => {
+  try {
+    const actor = authenticateRequest(req)
+    if (actor?.role !== 'Applicant') return res.status(403).json({ error: 'Applicants only.' })
+    const account = await Applicant.findOne({ email: actor.email }).select('_id').lean()
+    if (!account) return res.status(403).json({ error: 'Account unavailable.' })
+    res.set('Cache-Control', 'private, no-store')
+    res.json(await consistencyWaitlist.publicState(account._id, req.ip))
+  } catch { res.status(503).json({ error: 'Document review status is unavailable. Please try again.' }) }
+})
+app.get('/api/profile/review-status', async (req, res) => {
+  try {
+    const actor = authenticateRequest(req)
+    if (actor?.role !== 'Applicant') return res.status(403).json({ error: 'Applicants only.' })
+    let account = await Applicant.findOne({ email: actor.email }).lean()
+    if (!account || account.deletedAt) return res.status(403).json({ error: 'Account unavailable.' })
+    await refreshApplicantVerification(account._id)
+    const consistency = await consistencyWaitlist.publicState(account._id, req.ip)
+    account = await Applicant.findById(account._id).lean()
+    res.set('Cache-Control', 'private, no-store')
+    res.json(await applicantReviewSummary(account, nsrpAutomation, consistency))
+  } catch { res.status(503).json({ error: 'Review details are temporarily unavailable. You can still open My Documents.' }) }
+})
 
 const requirementsDirectory = path.join(process.cwd(), 'server', 'uploads', 'employer-requirements')
 fs.mkdirSync(requirementsDirectory, { recursive: true })
@@ -390,7 +513,7 @@ const applicantSignupUpload = multer({
   },
 })
 
-const VALID_ID_TYPES = ['SSS', 'Passport', 'PRC', 'Pag-IBIG', "Voter's ID", 'Philippine Postal ID', 'UMID']
+const VALID_ID_TYPES = PHILIPPINE_ID_TYPES
 const MAX_UPLOADS_PER_DOC = 5
 // Projection to re-include the select:false buffers when streaming
 const VERIFICATION_DATA_SELECT = VERIFICATION_DOC_KEYS.flatMap((key) => [
@@ -407,6 +530,8 @@ function authenticateRequest(req) {
     return null
   }
 }
+
+app.use('/api', createNsrpImportRouter({ secret: jwtSecret, authenticate: authenticateRequest, verifyEmailProof, UsedEmailProof, Applicant, loadApplicant: loadApplicantWithCurrentResume, loadDocumentFile }))
 
 function nsrpDownloadName(companyName) {
   const safe = String(companyName || 'employer').replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 80)
@@ -479,8 +604,14 @@ async function loadApplicantWithCurrentResume(email) {
   if (!applicant) return null
   const migratedNsrp = await migrateLegacyNsrp(applicant)
   const previousStatus = applicant.verificationStatus
+  const content = applicantProfileContent(applicant.profile)
+  const profileChanged = content.summary !== (applicant.profile?.summary || '') || JSON.stringify(content.skills) !== JSON.stringify(applicant.profile?.skills || [])
+  if (profileChanged) {
+    if (content.summary !== (applicant.profile?.summary || '')) applicant.set('profile.summarySource', 'personal')
+    applicant.set('profile.summary', content.summary); applicant.set('profile.skills', content.skills)
+  }
   recomputeVerificationStatus(applicant)
-  if (migratedNsrp || applicant.verificationStatus !== previousStatus) await applicant.save()
+  if (migratedNsrp || profileChanged || applicant.verificationStatus !== previousStatus) await applicant.save()
   return applicant
 }
 
@@ -518,10 +649,13 @@ function summarizeVerificationDocuments(applicant, { withUrls = false, includeHi
       sourceType: key === 'nsrpForm' ? latest?.sourceType || undefined : undefined,
       idType: slot?.idType || undefined,
       status: currentDocStatus(slot), // missing | pending | approved | rejected
+      referenceOnly: key === 'nsrpForm',
+      locked: key === 'nsrpForm' ? nsrpReferenceLocked(applicant) : currentDocStatus(slot) === 'approved',
       correctionRequest: slot?.correctionRequest?.requestedAt ? slot.correctionRequest : undefined,
       uploadsUsed: slot?.uploads || 0,
       uploadsRemaining: Math.max(0, MAX_UPLOADS_PER_DOC - (slot?.uploads || 0)),
       resubmitted: (slot?.versions?.length || 0) > 1 && currentDocStatus(slot) === 'pending',
+      ...(includeHistory ? { unresolved: openFlags(latest?.findings).length } : {}),
       latest: latest
         ? {
             version: latest.version,
@@ -541,7 +675,7 @@ function summarizeVerificationDocuments(applicant, { withUrls = false, includeHi
           }
         : null,
       history,
-      reviewLog: (slot?.history || []).map((entry) => ({
+      reviewLog: (slot?.history || []).filter((entry) => includeHistory || !['auto-approved', 'revoke-auto-approval'].includes(entry.action)).map((entry) => ({
         action: entry.action,
         reason: entry.reason || undefined,
         by: entry.by,
@@ -554,21 +688,21 @@ function summarizeVerificationDocuments(applicant, { withUrls = false, includeHi
 // Count of documents that need the user's attention (rejected or missing required)
 function attentionCount(applicant) {
   const docs = applicant?.verificationDocuments || {}
-  return REQUIRED_DOC_KEYS.filter((key) => ['rejected', 'missing'].includes(currentDocStatus(docs[key]))).length
+  return REQUIRED_DOC_KEYS.filter((key) => key === 'nsrpForm' ? !latestVersion(docs[key]) : ['rejected', 'needs_resubmission', 'missing'].includes(currentDocStatus(docs[key]))).length
 }
 
 // Recompute the account-level status from the latest version of each required document
 function recomputeVerificationStatus(applicant) {
   // Document/profile reads must not silently lift an admin restriction.
-  if (applicant.verificationStatus === 'restricted' || applicant.deletedAt) return
+  if (['restricted', 'waitlisted'].includes(applicant.verificationStatus) || applicant.consistencyDeclined || applicant.deletedAt) return
   const docs = applicant.verificationDocuments || {}
-  const rejected = REQUIRED_DOC_KEYS.filter((key) => currentDocStatus(docs[key]) === 'rejected')
+  const rejected = IDENTITY_DOC_KEYS.filter((key) => currentDocStatus(docs[key]) === 'rejected')
   if (rejected.length > 0) {
     applicant.verificationStatus = 'declined'
     applicant.verificationReason = rejected
       .map((key) => `${VERIFICATION_DOC_LABELS[key]}: ${latestVersion(docs[key])?.reviewReason || 'rejected'}`)
       .join(' | ')
-  } else if (REQUIRED_DOC_KEYS.every((key) => currentDocStatus(docs[key]) === 'approved')) {
+  } else if (latestVersion(docs.nsrpForm) && IDENTITY_DOC_KEYS.every((key) => currentDocStatus(docs[key]) === 'approved')) {
     applicant.verificationStatus = 'approved'
     applicant.verificationReason = undefined
   } else {
@@ -622,7 +756,7 @@ async function loadEmployerVerification(email) {
   if (!employer) return { employer: null, request, status: null, reason: '' }
 
   const latestVersion = request?.requirementsVersions?.at(-1)
-  const documentStatus = request?.requirementsFile?.status || latestVersion?.status
+  const documentStatus = latestVersion?.status === 'approved' && request?.adminDecision !== 'approved' && request?.status !== 'approved' ? 'pending' : request?.requirementsFile?.status || latestVersion?.status
     || (request?.status === EMPLOYER_VERIFICATION_STATUS.APPROVED ? 'approved' : undefined)
   const decision = request?.adminDecision
     || ([EMPLOYER_VERIFICATION_STATUS.APPROVED, EMPLOYER_VERIFICATION_STATUS.DECLINED, EMPLOYER_VERIFICATION_STATUS.NEEDS_RESUBMISSION].includes(request?.status)
@@ -811,6 +945,34 @@ app.post('/api/signup/email-code/verify', async (req, res) => {
   }
 })
 
+app.post('/api/signup/check-documents', rateLimit({ windowMs: 60000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false }), applicantSignupUpload.fields([
+  { name: 'birthCertificate', maxCount: 1 }, { name: 'validId1Front', maxCount: 1 }, { name: 'validId1Back', maxCount: 1 }, { name: 'validId2Front', maxCount: 1 }, { name: 'validId2Back', maxCount: 1 },
+]), async (req, res) => {
+  // Advisory only: quality and declared values, never OCR or account decisions.
+  try {
+    const details = parseDocumentDetails(req.body?.verificationDetails)
+    let nsrp = {}
+    try { nsrp = JSON.parse(req.body?.nsrpAnswers || '{}') } catch { /* Missing typed details are advisory. */ }
+    const issues = []
+    for (const [docKey, fileKey, idType] of [['birthCertificate', 'birthCertificate', ''], ['validId1', 'validId1Front', req.body?.id1Type], ['validId2', 'validId2Front', req.body?.id2Type]]) {
+      const file = req.files?.[fileKey]?.[0]
+      if (!file && docKey === 'validId2' && !idType) continue
+      if (!file) { issues.push({ docKey, message: 'Choose a document file.' }); continue }
+      const checked = validateDeclaredDetails(details[docKey], { docKey, idType })
+      for (const message of Object.values(checked.errors)) issues.push({ docKey, message })
+      if (checked.warnings.includes('id_expired')) issues.push({ docKey, message: 'This ID may have expired. Choose a current ID or explain the difference.' })
+      const nsrpKey = { SSS: 'gsisSss', Passport: 'passportNo', 'Pag-IBIG': 'pagibig', 'PhilHealth ID': 'philhealth', 'TIN ID': 'tin' }[idType]
+      if (nsrpKey && nsrp[nsrpKey] && checked.details.number && String(nsrp[nsrpKey]).replace(/[\s-]/g, '').toUpperCase() !== checked.details.number) issues.push({ docKey, message: 'The ID number you entered may not match your NSRP. Please check your typed details.' })
+      if (idType && !req.files?.[`${docKey}Back`]?.length) issues.push({ docKey, message: 'If your ID has information on the back, add a photo of that side.' })
+      try {
+        const quality = await inspectDocument(file)
+        if (quality.warnings.some(w => ['blur', 'crop', 'dark', 'glare'].includes(w))) issues.push({ docKey, message: 'The photo may be blurry, cropped or difficult to read. Consider taking a clearer photo.' })
+      } catch { issues.push({ docKey, message: 'The file may be tiny, blank, or unreadable. Choose a clearer document.' }) }
+    }
+    res.set('Cache-Control', 'no-store'); res.json({ issues, advisory: true })
+  } catch { res.status(200).json({ advisory: true, issues: [{ docKey: 'document', message: 'The check is unavailable. You can still submit for PESO review.' }] }) }
+})
+
 app.post('/api/signup', applicantSignupUpload.fields([
   { name: 'nsrpAnswers', maxCount: 1 },
   { name: 'nsrpFile', maxCount: 1 },
@@ -879,17 +1041,20 @@ app.post('/api/signup', applicantSignupUpload.fields([
 
     const files = req.files || {}
     const fileFor = (key) => files[key]?.[0]
+    if (!BIRTH_COPY_TYPES.includes(parseDocumentDetails(req.body?.verificationDetails).birthCertificate?.copyType)) fieldErrors.birthCertificate = 'Select the birth certificate copy type.'
     if (!fileFor('birthCertificate')) fieldErrors.birthCertificate = 'Birth certificate is required.'
     if (!VALID_ID_TYPES.includes(id1Type) || !fileFor('validId1Front')) fieldErrors.validId1 = 'Choose a valid type and upload the front of Valid ID #1.'
     if (nsrpMode === 'upload') {
-      if (!fileFor('nsrpFile')) fieldErrors.nsrpFile = 'Upload your filled NSRP form (PDF, JPG, or PNG).'
+      if (!fileFor('nsrpFile')) fieldErrors.nsrpFile = 'Upload your filled NSRP form (PDF only).'
       else if (fileFor('nsrpFile').size > VERIFICATION_MAX_BYTES) fieldErrors.nsrpFile = 'The NSRP form must be 5 MB or smaller.'
-      else if (!['application/pdf', 'image/jpeg', 'image/png'].includes(fileFor('nsrpFile').mimetype) || !fileMatchesDeclaredType(fileFor('nsrpFile'))) {
-        fieldErrors.nsrpFile = 'The NSRP form must be a PDF, JPG, or PNG file.'
+      else if (fileFor('nsrpFile').mimetype !== 'application/pdf' || !fileMatchesDeclaredType(fileFor('nsrpFile'))) {
+        fieldErrors.nsrpFile = 'The NSRP form must be a PDF file.'
       }
     }
-    // The resume is no longer part of the application — reject it explicitly.
-    if (fileFor('resume')) fieldErrors.resume = 'The resume is no longer collected. Remove it and try again.'
+    if (fileFor('resume')) {
+      const error = resumeError(fileFor('resume'))
+      if (error || !fileMatchesDeclaredType(fileFor('resume'))) fieldErrors.resume = error || 'Upload a valid PDF or DOCX resume.'
+    }
     const documentFiles = ['birthCertificate', 'validId1Front', 'validId1Back', 'validId2Front', 'validId2Back']
     if (documentFiles.some((key) => fileFor(key) && fileFor(key).size > VERIFICATION_MAX_BYTES)) {
       fieldErrors.verificationDocuments = 'Verification documents must be 5 MB or smaller.'
@@ -942,6 +1107,18 @@ app.post('/api/signup', applicantSignupUpload.fields([
       }
     }
 
+    const documentReviews = {}
+    const declaredDocuments = parseDocumentDetails(req.body?.verificationDetails)
+    if ((await nsrpAutomation.getSettings()).imageChecks) {
+      for (const [slot, field, idType] of [['birthCertificate', 'birthCertificate', ''], ['validId1', 'validId1Front', id1Type], ['validId2', 'validId2Front', id2Type]]) {
+        if (!fileFor(field)) continue
+        try {
+          documentReviews[slot] = await prepareDocument(fileFor(field), slot, idType, declaredDocuments[slot], slot === 'validId2' ? declaredDocuments.validId1?.number : undefined, answers || {})
+          const back = fileFor(slot + 'Back')
+          if (back) { const backReview = await prepareDocument(back, slot, idType, declaredDocuments[slot]); documentReviews[slot].quality.warnings.push(...backReview.quality.warnings) }
+        } catch (error) { if (error.status) return res.status(422).json({ error: 'Check your document before you upload.', fieldErrors: { [slot]: error.message } }); throw error }
+      }
+    }
     const passwordHash = await bcrypt.hash(password, 10)
     const uploadedAt = new Date()
     // File bytes are stored in the document_files collection after the applicant
@@ -958,6 +1135,7 @@ app.post('/api/signup', applicantSignupUpload.fields([
         version: 1,
         status: 'pending',
         sourceType,
+        ...documentReviews[slot],
       }
     }
     const slotFor = (slot, sourceType) => (file, idType) => ({
@@ -1004,7 +1182,7 @@ app.post('/api/signup', applicantSignupUpload.fields([
     const profileLocation = nsrpMode === 'online'
       ? [answers.addressStreet, answers.addressBarangay, answers.addressCity, answers.addressProvince].filter(Boolean).join(', ')
       : [basicInfo.addressCity, basicInfo.addressProvince].filter(Boolean).join(', ')
-    const profile = nsrpMode === 'online'
+    let profile = nsrpMode === 'online'
       ? (() => {
           const storedAnswers = { ...answers, certified: Boolean(submittedAnswers.certified) }
           delete storedAnswers.signatureDataUrl
@@ -1019,11 +1197,11 @@ app.post('/api/signup', applicantSignupUpload.fields([
             phone: answers.cellphone,
             addressCity: answers.addressCity,
             addressProvince: answers.addressProvince,
-            skills: answers.skills || [],
+            skills: (answers.skills || []).filter(skill => skill !== 'Others'),
             education: answers.education || [],
             technicalTraining: answers.technicalTraining || [],
             workExperience: answers.workExperience || [],
-            summary: [answers.occupation1, ...(answers.skills || [])].filter(Boolean).join(' · '),
+            summary: '',
             nsrp: storedAnswers,
           }
         })()
@@ -1041,10 +1219,19 @@ app.post('/api/signup', applicantSignupUpload.fields([
           skills: [],
           summary: '',
         }
+    if (nsrpMode === 'upload' && req.body.nsrpImportToken) {
+      try {
+        const imported = reviewedImport(jwtSecret, req.body.nsrpImportToken, `signup:${normalizeEmail(email)}`, fileFor('nsrpFile').buffer)
+        profile = mergeNsrpIntoProfile(profile, imported)
+      } catch (err) { return res.status(409).json({ error: err.message }) }
+    }
     stage = 'create-account'
+    const nsrpAutoEnabledAtCreation = await nsrpAutomation.creationEnabled('Applicant')
     let user
     try {
       user = await createUserInRole('Applicant', {
+        pageGuides: { seenPages: [], dismissedAll: false },
+        nsrpAutoEnabledAtCreation,
         sessionVersion: 1,
         email: email.trim(),
         passwordHash,
@@ -1052,6 +1239,7 @@ app.post('/api/signup', applicantSignupUpload.fields([
         phone: nsrpMode === 'online' ? answers.cellphone : basicInfo.cellphone,
         profile,
         verificationDocuments,
+        ...(fileFor('resume') ? { resumeFile: storedResume(fileFor('resume')) } : {}),
         consentGivenAt: new Date(),
         ...(signatureImage && certification.certified ? {
           nsrpSignature: {
@@ -1067,6 +1255,7 @@ app.post('/api/signup', applicantSignupUpload.fields([
       for (const { slot, version, side, file } of filesToStore) {
         await storeDocumentFile(user._id, slot, version, side, file)
       }
+      await saveAuthorization(user._id, 'birthCertificate', 1, declaredDocuments.birthCertificate)
     } catch (err) {
       // Roll back so no half-created account or orphaned files remain
       if (user?._id) await Applicant.deleteOne({ _id: user._id }).catch(() => {})
@@ -1076,6 +1265,10 @@ app.post('/api/signup', applicantSignupUpload.fields([
 
     // Consume the single-use proof token only after the account exists.
     await UsedEmailProof.create({ jti: emailProof.jti, expiresAt: new Date(emailProof.exp * 1000) })
+    await nsrpAutomation.process({ role: 'Applicant', accountId: user._id, ip: req.ip })
+    // Refresh metadata after the atomic automation write; never save a stale user.
+    user = await Applicant.findById(user._id)
+    await scheduleConsistency(user._id, 'signup', undefined, req.ip)
 
     // No link-verification email is sent: these accounts are verified by code.
     // The link-based flow (verify-email / resend) stays for older accounts.
@@ -1096,12 +1289,13 @@ app.post('/api/signup', applicantSignupUpload.fields([
       metadata: { applicantId: String(user._id) },
     })
 
-    const safe = { id: String(user._id), email: user.email, role: 'Applicant', emailVerified: true, registration: registrationProgress(user, 'Applicant'), profile: user.profile, verificationDocuments: summarizeVerificationDocuments(user), attentionCount: attentionCount(user) }
+    const safe = { id: String(user._id), pageGuides: user.pageGuides, email: user.email, role: 'Applicant', emailVerified: true, registration: registrationProgress(user, 'Applicant'), profile: user.profile, verificationDocuments: summarizeVerificationDocuments(user), attentionCount: attentionCount(user) }
     const token = jwt.sign({ sub: String(user._id), sessionVersion: user.sessionVersion, email: user.email, role: 'Applicant' }, jwtSecret, { expiresIn: '7d' })
     res.json({ user: safe, token })
   } catch (err) {
     // One redacted line, matchable by the client-visible errorId. Never log the
     // email, password, code, token, or file contents.
+    if (err.status === 422) return res.status(422).json({ error: err.message, fieldErrors: { verificationDocuments: err.message } })
     const errorId = crypto.randomBytes(6).toString('hex')
     console.error(`signup: failed at ${stage} (errorId=${errorId}) ${err?.name || 'Error'}: ${redactString(String(err?.message || err))}`)
     res.status(500).json({ error: 'Server error', errorId })
@@ -1168,7 +1362,7 @@ app.post('/api/auth/resend-verification', async (req, res) => {
 async function hydrateEmployerAddress(employer, request) {
   const address = getEmployerAddress(employer, request)
   if (!address.city) return
-  if (employer.establishmentAddress?.city !== address.city || employer.establishmentAddress?.province !== address.province) {
+  if (employer.establishmentAddress?.city !== address.city || employer.establishmentAddress?.province !== address.province || employer.establishmentAddress?.barangay !== address.barangay) {
     await Employer.updateOne({ _id: employer._id }, { $set: { establishmentAddress: address } })
   }
   employer.establishmentAddress = address
@@ -1193,7 +1387,7 @@ app.post('/api/login', async (req, res) => {
 
     if (type === 'Employer') await hydrateEmployerAddress(user, requirements)
     const registration = ['Applicant', 'Employer'].includes(type) ? registrationProgress(user, type, { requirementsFile: requirements?.requirementsFile, requestLocation: requirements?.location }) : undefined
-    const safe = { id: String(user._id), email: user.email, role: type, emailVerified: ['Applicant', 'Employer'].includes(type) ? Boolean(user.emailVerified) : undefined, needsNameConfirmation: type === 'Applicant' ? Boolean(user.needsNameConfirmation) : undefined, registration, verificationDocuments: type === 'Applicant' ? summarizeVerificationDocuments(user) : undefined, attentionCount: type === 'Applicant' ? attentionCount(user) : undefined, establishmentAddress: type === 'Employer' ? user.establishmentAddress : undefined, companyName: type === 'Employer' ? (user.companyName || requirements?.companyName) : undefined, contactName: type === 'Employer' ? (user.contactName || requirements?.contactName) : undefined, phone: type === 'Employer' ? (user.phone || requirements?.phone) : undefined, profile: user.profile, verificationStatus: type === 'Employer' ? employerVerification.status : type === 'Applicant' ? (user.verificationStatus || 'approved') : undefined, verificationReason: type === 'Employer' ? employerVerification.reason : type === 'Applicant' ? user.verificationReason : undefined, approvalNoticePending: type === 'Employer' ? Boolean(user.approvalNoticePending) : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size, status: requirements.requirementsFile.status, sourceType: requirements.requirementsFile.sourceType, version: requirements.requirementsFile.version } : undefined, requirementsSubmittedAt: type === 'Employer' ? (requirements?.requirementsSubmittedAt || user.requirementsSubmittedAt) : undefined, nsrpVerificationFile: type === 'Applicant' && user.nsrpVerificationFile?.originalName ? { originalName: user.nsrpVerificationFile.originalName, size: user.nsrpVerificationFile.size, uploadedAt: user.nsrpVerificationFile.uploadedAt } : undefined }
+    const safe = { id: String(user._id), pageGuides: user.pageGuides, email: user.email, role: type, emailVerified: ['Applicant', 'Employer'].includes(type) ? Boolean(user.emailVerified) : undefined, needsNameConfirmation: type === 'Applicant' ? Boolean(user.needsNameConfirmation) : undefined, registration, verificationDocuments: type === 'Applicant' ? summarizeVerificationDocuments(user) : undefined, attentionCount: type === 'Applicant' ? attentionCount(user) : undefined, establishmentAddress: type === 'Employer' ? user.establishmentAddress : undefined, companyName: type === 'Employer' ? (user.companyName || requirements?.companyName) : undefined, contactName: type === 'Employer' ? (user.contactName || requirements?.contactName) : undefined, phone: type === 'Employer' ? (user.phone || requirements?.phone) : undefined, profile: user.profile, verificationStatus: type === 'Employer' ? employerVerification.status : type === 'Applicant' ? (user.verificationStatus || 'approved') : undefined, verificationReason: type === 'Employer' ? employerVerification.reason : type === 'Applicant' ? user.verificationReason : undefined, approvalNoticePending: type === 'Employer' ? Boolean(user.approvalNoticePending) : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size, status: requirements.requirementsFile.status, sourceType: requirements.requirementsFile.sourceType, version: requirements.requirementsFile.version } : undefined, requirementsSubmittedAt: type === 'Employer' ? (requirements?.requirementsSubmittedAt || user.requirementsSubmittedAt) : undefined, nsrpVerificationFile: type === 'Applicant' && user.nsrpVerificationFile?.originalName ? { originalName: user.nsrpVerificationFile.originalName, size: user.nsrpVerificationFile.size, uploadedAt: user.nsrpVerificationFile.uploadedAt } : undefined }
     const token = jwt.sign({ email: user.email, role: type, ...(type === 'Applicant' ? { sub: String(user._id), sessionVersion: user.sessionVersion || 0 } : {}) }, jwtSecret, { expiresIn: '7d' })
     res.json({ user: safe, token })
   } catch (err) {
@@ -1217,22 +1411,39 @@ app.get('/api/profile', async (req, res) => {
     if (type === 'Employer') await hydrateEmployerAddress(user, requirements)
     const employerVerification = type === 'Employer' ? await loadEmployerVerification(user.email) : null
     const registration = ['Applicant', 'Employer'].includes(type) ? registrationProgress(user, type, { requirementsFile: requirements?.requirementsFile, requestLocation: requirements?.location }) : undefined
-    res.json({ id: String(user._id), email: user.email, role: type, emailVerified: ['Applicant', 'Employer'].includes(type) ? Boolean(user.emailVerified) : undefined, needsNameConfirmation: type === 'Applicant' ? Boolean(user.needsNameConfirmation) : undefined, registration, establishmentAddress: type === 'Employer' ? user.establishmentAddress : undefined, companyName: type === 'Employer' ? (user.companyName || requirements?.companyName) : undefined, contactName: type === 'Employer' ? (user.contactName || requirements?.contactName) : undefined, phone: type === 'Employer' ? (user.phone || requirements?.phone) : undefined, profile: user.profile, verificationStatus: type === 'Employer' ? employerVerification.status : type === 'Applicant' ? (user.verificationStatus || 'approved') : undefined, verificationReason: type === 'Employer' ? employerVerification.reason : type === 'Applicant' ? user.verificationReason : undefined, approvalNoticePending: type === 'Employer' ? Boolean(user.approvalNoticePending) : undefined, verificationDocuments: type === 'Applicant' ? summarizeVerificationDocuments(user) : undefined, attentionCount: type === 'Applicant' ? attentionCount(user) : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size, status: requirements.requirementsFile.status, sourceType: requirements.requirementsFile.sourceType, version: requirements.requirementsFile.version } : undefined, requirementsSubmittedAt: type === 'Employer' ? (requirements?.requirementsSubmittedAt || user.requirementsSubmittedAt) : undefined, nsrpVerificationFile: type === 'Applicant' && user.nsrpVerificationFile?.originalName ? { originalName: user.nsrpVerificationFile.originalName, size: user.nsrpVerificationFile.size, uploadedAt: user.nsrpVerificationFile.uploadedAt } : undefined })
+    res.json({ id: String(user._id), pageGuides: user.pageGuides, email: user.email, role: type, emailVerified: ['Applicant', 'Employer'].includes(type) ? Boolean(user.emailVerified) : undefined, needsNameConfirmation: type === 'Applicant' ? Boolean(user.needsNameConfirmation) : undefined, registration, establishmentAddress: type === 'Employer' ? user.establishmentAddress : undefined, companyName: type === 'Employer' ? (user.companyName || requirements?.companyName) : undefined, contactName: type === 'Employer' ? (user.contactName || requirements?.contactName) : undefined, phone: type === 'Employer' ? (user.phone || requirements?.phone) : undefined, profile: user.profile, verificationStatus: type === 'Employer' ? employerVerification.status : type === 'Applicant' ? (user.verificationStatus || 'approved') : undefined, verificationReason: type === 'Employer' ? employerVerification.reason : type === 'Applicant' ? user.verificationReason : undefined, approvalNoticePending: type === 'Employer' ? Boolean(user.approvalNoticePending) : undefined, verificationDocuments: type === 'Applicant' ? summarizeVerificationDocuments(user) : undefined, attentionCount: type === 'Applicant' ? attentionCount(user) : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size, status: requirements.requirementsFile.status, sourceType: requirements.requirementsFile.sourceType, version: requirements.requirementsFile.version } : undefined, requirementsSubmittedAt: type === 'Employer' ? (requirements?.requirementsSubmittedAt || user.requirementsSubmittedAt) : undefined, nsrpVerificationFile: type === 'Applicant' && user.nsrpVerificationFile?.originalName ? { originalName: user.nsrpVerificationFile.originalName, size: user.nsrpVerificationFile.size, uploadedAt: user.nsrpVerificationFile.uploadedAt } : undefined })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Server error' })
   }
 })
 
+app.patch('/api/profile/page-guides', async (req, res) => {
+  try {
+    const actor = authenticateRequest(req)
+    if (!actor) return res.status(401).json({ error: 'Sign in to save your guide preferences.' })
+    const Model = { Applicant, Employer }[actor.role]
+    if (!Model) return res.status(403).json({ error: 'Guide preferences are unavailable for this account.' })
+    const { page, dismissAll } = req.body || {}
+    const guide = typeof page === 'string' ? pageGuide(actor.role, page) : null
+    if (dismissAll !== true && !guide) return res.status(400).json({ error: 'Choose a valid page guide.' })
+    const update = dismissAll === true ? { $set: { 'pageGuides.dismissedAll': true } } : { $addToSet: { 'pageGuides.seenPages': guide.key } }
+    const account = await Model.findOneAndUpdate({ email: actor.email, pageGuides: { $exists: true }, ...(actor.role === 'Applicant' ? { deletedAt: null } : {}) }, update, { returnDocument: 'after' }).select('pageGuides')
+    if (!account) return res.status(404).json({ error: 'Guide preferences are unavailable for this account.' })
+    res.json({ pageGuides: account.pageGuides })
+  } catch { res.status(503).json({ error: 'Could not save your guide preferences. Please try again.' }) }
+})
+
 // Adds a new pending version to a document slot. The file bytes are stored in
 // the document_files collection (see utils/documentFiles.js); only metadata is
 // embedded. Returns a `cleanup` that removes the stored bytes if the caller's
 // save fails, so a failed write never leaves orphaned files behind.
-async function appendVerificationVersion(applicant, docKey, file, idType = '', sourceType) {
+async function appendVerificationVersion(applicant, docKey, file, idType = '', sourceType, backFile) {
+  if (docKey !== 'supportingExplanation' && applicant._id) await consistencyWaitlist.assertSubmission(applicant._id, docKey)
   applicant.verificationDocuments = applicant.verificationDocuments || {}
   const slot = applicant.verificationDocuments[docKey] || { uploads: 0, versions: [] }
   const current = latestVersion(slot)
-  if (current?.status === 'approved') {
+  if ((docKey === 'nsrpForm' ? nsrpReferenceLocked(applicant) : current?.status === 'approved') && docKey !== 'supportingExplanation' && !await consistencyWaitlist.canCorrect(applicant._id, docKey)) {
     const error = new Error(`${VERIFICATION_DOC_LABELS[docKey]} is already approved and locked.`)
     error.status = 409
     throw error
@@ -1243,9 +1454,18 @@ async function appendVerificationVersion(applicant, docKey, file, idType = '', s
     throw error
   }
   const versionNumber = (slot.versions?.length || 0) + 1
-  await storeDocumentFile(applicant._id, docKey, versionNumber, 'front', file)
-  const cleanup = () => DocumentFile.deleteOne({ applicant: applicant._id, slot: docKey, version: versionNumber, side: 'front' }).catch(() => {})
-  if (current && ['pending', 'rejected'].includes(current.status)) current.status = 'superseded'
+  const reservation = docKey === 'supportingExplanation' ? null : await consistencyWaitlist.reserveSubmission(applicant._id, docKey)
+  applicant.$locals.consistencyReservation = reservation
+  const cleanup = async () => {
+    await DocumentFile.deleteMany({ applicant: applicant._id, slot: docKey, version: versionNumber, side: { $in: ['front', 'back'] } }).catch(() => {})
+    await consistencyWaitlist.cancelReservation(applicant._id, reservation)
+  }
+  try {
+    await storeDocumentFile(applicant._id, docKey, versionNumber, 'front', file)
+    if (backFile) await storeDocumentFile(applicant._id, docKey, versionNumber, 'back', backFile)
+  } catch (error) { await cleanup(); throw error }
+  if (docKey === 'nsrpForm') reopenIdentityDocuments(applicant, 'Applicant')
+  if (current && (['pending', 'rejected', 'needs_resubmission'].includes(current.status) || ['supportingExplanation', 'nsrpForm'].includes(docKey))) current.status = 'superseded'
   const version = {
     originalName: file.originalname,
     storedName: crypto.randomBytes(16).toString('hex'),
@@ -1255,6 +1475,14 @@ async function appendVerificationVersion(applicant, docKey, file, idType = '', s
     version: versionNumber,
     status: 'pending',
     sourceType,
+    ...(backFile ? { back: {
+      originalName: backFile.originalname,
+      storedName: crypto.randomBytes(16).toString('hex'),
+      mimetype: backFile.mimetype,
+      size: backFile.size,
+      uploadedAt: new Date(),
+    } } : {}),
+    ...(file.verificationReview || {}),
   }
   slot.uploads = (slot.uploads || 0) + 1
   slot.versions = [...(slot.versions || []), version]
@@ -1264,11 +1492,50 @@ async function appendVerificationVersion(applicant, docKey, file, idType = '', s
   return { slot, version, cleanup }
 }
 
-// Resumes are no longer part of the applicant document system. Stored legacy
-// resume data is kept in the database but unreachable; see
-// server/scripts/cleanup-resumes.js for optional removal.
-app.post('/api/profile/resume', (_req, res) => {
-  res.status(410).json({ code: 'RESUME_REMOVED', error: 'Resumes are no longer part of this system.' })
+// Optional profile resumes are separate from identity verification documents.
+function storedResume(file) {
+  return { originalName: path.basename(file.originalname).replace(/[\r\n]/g, '').slice(0, 180), mimetype: file.mimetype, size: file.size, data: file.buffer, uploadedAt: new Date() }
+}
+function resumeMetadata(file) {
+  return file?.originalName ? { originalName: file.originalName, mimetype: file.mimetype, size: file.size, uploadedAt: file.uploadedAt } : null
+}
+async function resumeOwner(req) {
+  const actor = authenticateRequest(req)
+  if (actor.role !== 'Applicant') throw Object.assign(new Error('Applicants only'), { status: 403 })
+  const owner = await Applicant.findOne({ email: actor.email })
+  if (!owner) throw Object.assign(new Error('Applicant not found'), { status: 404 })
+  return owner
+}
+app.get('/api/profile/resume', async (req, res) => {
+  try { res.json({ resumeFile: resumeMetadata((await resumeOwner(req)).resumeFile) }) }
+  catch (error) { res.status(error.status || 401).json({ error: error.message || 'Could not load resume.' }) }
+})
+app.get('/api/profile/qualifications', async (req, res) => {
+  try { res.json({ bachelorDegree: await applicantDegree(await resumeOwner(req)) }) }
+  catch (error) { res.status(error.status || 401).json({ error: error.message || 'Could not load qualifications.' }) }
+})
+const profileResumeUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: RESUME_MAX_BYTES, files: 1 } }).single('resume')
+app.post('/api/profile/resume', async (req, res) => {
+  let owner
+  try { owner = await resumeOwner(req) }
+  catch (error) { return res.status(error.status || 401).json({ error: error.message || 'Unauthorized' }) }
+  profileResumeUpload(req, res, async error => {
+    if (error) return res.status(422).json({ error: 'Upload one PDF or DOCX resume, up to 5 MB.' })
+    const invalid = resumeError(req.file)
+    if (invalid || !fileMatchesDeclaredType(req.file)) return res.status(422).json({ error: invalid || 'Upload a valid PDF or DOCX resume.' })
+    try {
+      owner.resumeFile = storedResume(req.file)
+      await owner.save()
+      res.json({ ok: true, resumeFile: resumeMetadata(owner.resumeFile) })
+    } catch { res.status(500).json({ error: 'Could not save resume.' }) }
+  })
+})
+app.delete('/api/profile/resume', async (req, res) => {
+  try {
+    const owner = await resumeOwner(req)
+    await Applicant.updateOne({ _id: owner._id }, { $unset: { resumeFile: '' } })
+    res.json({ ok: true, resumeFile: null })
+  } catch (error) { res.status(error.status || 401).json({ error: error.message || 'Could not remove resume.' }) }
 })
 
 // Applicant NSRP verification document upload (separate from jobseeker resume)
@@ -1362,15 +1629,20 @@ app.get('/api/applicants/:id/nsrp-signature', async (req, res) => {
 })
 
 // Upload one verification document (nsrpForm | birthCertificate | validId1 | validId2)
-app.post('/api/profile/verification-documents/:docKey', verificationUpload.single('document'), async (req, res) => {
+app.post('/api/profile/verification-documents/:docKey', verificationUpload.fields([{ name: 'document', maxCount: 1 }, { name: 'documentBack', maxCount: 1 }]), async (req, res) => {
   try {
     const decoded = authenticateRequest(req)
     if (!decoded) return res.status(401).json({ error: 'Missing token' })
     if (decoded.role !== 'Applicant') return res.status(403).json({ error: 'Only applicants can upload verification documents' })
     const { docKey } = req.params
+    const file = req.files?.document?.[0]
+    const backFile = req.files?.documentBack?.[0]
     if (!VERIFICATION_DOC_KEYS.includes(docKey)) return res.status(400).json({ error: 'Unknown document type' })
-    if (!req.file) return res.status(400).json({ error: 'A JPG, PNG, or PDF file is required' })
-    if (!VERIFICATION_DOC_TYPES.includes(req.file.mimetype) || !fileMatchesDeclaredType(req.file)) {
+    if (docKey === 'nsrpForm' && (!file || file.mimetype !== 'application/pdf' || !fileMatchesDeclaredType(file))) return res.status(400).json({ error: 'The NSRP form must be a PDF file.' })
+    if (!file) return res.status(400).json({ error: 'A JPG, PNG, or PDF file is required' })
+    if (docKey.startsWith('validId') && !backFile) return res.status(400).json({ error: 'Upload both the front and back of your ID.' })
+    if (!docKey.startsWith('validId') && backFile) return res.status(400).json({ error: 'A back file is only accepted for valid IDs.' })
+    if ([file, backFile].filter(Boolean).some(side => !VERIFICATION_DOC_TYPES.includes(side.mimetype) || !fileMatchesDeclaredType(side))) {
       return res.status(400).json({ error: 'Upload a genuine JPG, PNG, or PDF document' })
     }
 
@@ -1382,8 +1654,16 @@ app.post('/api/profile/verification-documents/:docKey', verificationUpload.singl
 
     // Ownership + account state checks: restricted accounts cannot upload
     if (applicant.verificationStatus === 'restricted') return res.status(403).json({ error: 'This account is restricted. Please contact PESO support.' })
+    if (currentDocStatus(applicant.verificationDocuments?.[docKey]) === 'approved' && !await consistencyWaitlist.canCorrect(applicant._id, docKey)) return res.status(409).json({ error: 'This document is approved and locked. Request a correction first.' })
 
-    const { slot, version, cleanup } = await appendVerificationVersion(applicant, docKey, req.file, idType, docKey === 'nsrpForm' ? 'uploaded' : undefined)
+    const declared = parseDocumentDetails(req.body?.verificationDetails)
+    if (docKey === 'birthCertificate' && !BIRTH_COPY_TYPES.includes(declared.copyType)) return res.status(422).json({ error: 'Select the birth certificate copy type.' })
+    if (docKey !== 'nsrpForm' && (await nsrpAutomation.getSettings()).imageChecks) {
+      file.verificationReview = docKey === 'supportingExplanation' ? { quality: await inspectDocument(file) } : await prepareDocument(file, docKey, idType, declared, applicant.verificationDocuments?.[docKey === 'validId1' ? 'validId2' : 'validId1']?.versions?.at(-1)?.declaredDetails?.number, applicant.profile?.nsrp)
+      if (backFile) file.verificationReview.quality.warnings.push(...(await inspectDocument(backFile)).warnings)
+    }
+
+    const { slot, version, cleanup } = await appendVerificationVersion(applicant, docKey, file, idType, docKey === 'nsrpForm' ? 'uploaded' : undefined, backFile)
     try {
       await applicant.save()
     } catch (err) {
@@ -1391,20 +1671,67 @@ app.post('/api/profile/verification-documents/:docKey', verificationUpload.singl
       throw err
     }
 
-    await notifyAdmins({
-      type: 'document_resubmitted',
-      title: 'Document awaiting review',
-      message: `${applicantFullName(applicant)} uploaded ${VERIFICATION_DOC_LABELS[docKey]} for review.`,
-      link: '/applicants',
-      metadata: { applicantId: String(applicant._id), docKey },
-    })
+    if (docKey === 'nsrpForm') await nsrpAutomation.process({ role: 'Applicant', accountId: applicant._id, ip: req.ip })
+    await saveAuthorization(applicant._id, docKey, version.version, declared)
+    await scheduleConsistency(applicant._id, docKey, applicant.$locals.consistencyReservation, req.ip)
+
 
     res.json({ ok: true, docKey, version: version.version, status: 'pending', uploadsRemaining: MAX_UPLOADS_PER_DOC - slot.uploads, document: { originalName: version.originalName, size: version.size, uploadedAt: version.uploadedAt } })
   } catch (err) {
-    if (err.status) return res.status(err.status).json({ error: err.message })
+    if (err.status) {
+      if (err.status === 422) {
+        try {
+          const actor = authenticateRequest(req), key = req.params.docKey
+          if (actor?.role === 'Applicant' && ['birthCertificate', 'validId1', 'validId2'].includes(key)) {
+            const account = await Applicant.findOneAndUpdate({ email: actor.email }, { $inc: { [`verificationFailureCounts.${key}`]: 1 } }, { returnDocument: 'after' }).select('+verificationFailureCounts')
+            const attempts = account?.verificationFailureCounts?.[key] || 0
+            if (attempts >= 3) {
+              const versions = account.verificationDocuments?.[key]?.versions || []
+              if (versions.length) await Applicant.collection.updateOne({ _id: account._id }, { $addToSet: { [`verificationDocuments.${key}.versions.${versions.length - 1}.reviewReasons`]: 'Technical attempts: admin review' } })
+              if (attempts === 3) await notifyAdmins({ type: 'document_exception', title: 'Document upload needs review', message: 'An account needs assistance submitting a document.', link: '/verification-flagged', metadata: { applicantId: String(account._id) } })
+            }
+          }
+        } catch { console.error('[verification] upload exception recording unavailable') }
+      }
+      return res.status(err.status).json({ code: err.code, error: err.message, fieldErrors: { [req.params.docKey]: err.message } })
+    }
     console.error(err)
     res.status(500).json({ error: 'Server error' })
   }
+})
+
+app.post('/api/profile/document-explanations/:docKey', verificationUpload.single('supportingDocument'), async (req, res) => {
+  try {
+    const actor = authenticateRequest(req)
+    if (actor?.role !== 'Applicant') return res.status(403).json({ error: 'Applicants only' })
+    if (!(await nsrpAutomation.getSettings()).crossChecks) return res.status(409).json({ error: 'Explanation forms are currently unavailable. Please contact PESO.' })
+    const { category, note = '' } = req.body || {}
+    if (!EXPLANATION_CATEGORIES.includes(category) || typeof note !== 'string' || note.length > 300) return res.status(422).json({ error: 'Choose a category and use a note of at most 300 characters.' })
+    if (!['nsrpForm', 'birthCertificate', 'validId1', 'validId2'].includes(req.params.docKey)) return res.status(400).json({ error: 'Invalid document type' })
+    const applicant = await Applicant.findOne({ email: actor.email })
+    const current = latestVersion(applicant?.verificationDocuments?.[req.params.docKey])
+    if (!current) return res.status(404).json({ error: 'Document unavailable' })
+    let supportingVersion
+    if (req.file) {
+      if (!VERIFICATION_DOC_TYPES.includes(req.file.mimetype) || !fileMatchesDeclaredType(req.file) || req.file.size > VERIFICATION_MAX_BYTES) return res.status(422).json({ error: 'Attach one PDF, JPG or PNG up to 5 MB.' })
+      if ((await nsrpAutomation.getSettings()).imageChecks) await inspectDocument(req.file)
+      const appended = await appendVerificationVersion(applicant, 'supportingExplanation', req.file, '', 'uploaded')
+      appended.version.reviewReasons = ['Explanation supporting document']
+      supportingVersion = appended.version.version
+    }
+    if (req.file) await applicant.save()
+    const index = applicant.verificationDocuments[req.params.docKey].versions.length - 1
+    const base = `verificationDocuments.${req.params.docKey}.versions.${index}`
+    const updated = await Applicant.collection.updateOne({ _id: applicant._id, [`${base}.version`]: current.version, [`${base}.status`]: current.status }, {
+      $set: { [`${base}.explanation`]: { status: 'submitted', category, note: note.trim(), requestedAt: new Date(), ...(supportingVersion ? { supportingVersion } : {}) } },
+      $addToSet: { [`${base}.reviewReasons`]: 'Explanation submitted' }, $inc: { [`${base}.reviewRevision`]: 1 },
+      $push: { [`${base}.verificationAudit`]: { action: 'explanation-submitted', reason: 'Applicant explanation submitted', by: String(applicant._id), at: new Date() } },
+    })
+    if (!updated.modifiedCount) return res.status(409).json({ error: 'The document changed. Please submit the explanation again.' })
+    await consistencyWaitlist.explanation(applicant._id)
+    await notifyAdmins({ type: 'document_explanation', title: 'Document explanation submitted', message: 'An applicant submitted an explanation for PESO review.', link: '/verification-flagged', metadata: { applicantId: String(applicant._id) } })
+    res.json({ ok: true, message: 'Your explanation was sent to PESO. You may continue using your account.' })
+  } catch (error) { res.status(error.status || 503).json({ error: error.status ? error.message : 'Could not save your explanation. Please try again.' }) }
 })
 
 app.post('/api/profile/verification-documents/:docKey/correction-request', async (req, res) => {
@@ -1421,12 +1748,13 @@ app.post('/api/profile/verification-documents/:docKey/correction-request', async
     if (!applicant) return res.status(404).json({ error: 'Applicant not found' })
     const slot = applicant.verificationDocuments?.[docKey]
     const version = latestVersion(slot)
-    if (version?.status !== 'approved') return res.status(409).json({ error: 'Only approved documents need a correction request. Use the upload options for missing or rejected documents.' })
+    if (docKey === 'nsrpForm' ? !nsrpReferenceLocked(applicant) : version?.status !== 'approved') return res.status(409).json({ error: 'Only approved documents need a correction request. Use the upload options for missing or rejected documents.' })
     const requestedAt = new Date()
     const result = await Applicant.updateOne({
       _id: applicant._id,
       [`verificationDocuments.${docKey}.correctionRequest.requestedAt`]: { $exists: false },
-      [`verificationDocuments.${docKey}.versions.${slot.versions.length - 1}.status`]: 'approved',
+      [`verificationDocuments.${docKey}.versions.${slot.versions.length - 1}.status`]: version.status,
+      ...(docKey === 'nsrpForm' ? { verificationStatus: 'approved' } : {}),
     }, { $set: { [`verificationDocuments.${docKey}.correctionRequest`]: { reason, requestedAt } } })
     if (!result.modifiedCount) return res.status(409).json({ error: 'A correction is already pending or the document status changed. Refresh your documents.' })
     await notifyAdmins({
@@ -1450,9 +1778,8 @@ app.put('/api/profile/nsrp', async (req, res) => {
     if (Object.keys(fieldErrors).length) return res.status(422).json({ error: 'Check the highlighted NSRP fields.', fieldErrors })
     const applicant = await Applicant.findOne({ email: decoded.email })
     if (!applicant) return res.status(404).json({ error: 'Applicant not found' })
-    const currentNsrp = latestVersion(applicant.verificationDocuments?.nsrpForm)
-    if (currentNsrp?.status === 'approved') {
-      return res.status(409).json({ code: 'NSRP_LOCKED', error: 'Your approved NSRP form is locked.' })
+    if (nsrpReferenceLocked(applicant) && !await consistencyWaitlist.canCorrect(applicant._id, 'nsrpForm')) {
+      return res.status(409).json({ code: 'NSRP_LOCKED', error: 'Your verified account’s NSRP reference is locked. Request a correction through My Documents.' })
     }
 
     let signatureImage = null
@@ -1477,6 +1804,7 @@ app.put('/api/profile/nsrp', async (req, res) => {
     const storedAnswers = { ...answers, certified: Boolean(req.body?.answers?.certified) }
     delete storedAnswers.signatureDataUrl
     const fullName = [answers.firstName, answers.middleName, answers.surname, answers.suffix].filter(Boolean).join(' ')
+    const personalSummary = applicantProfileContent(applicant.profile).summary
     applicant.set('profile.nsrp', storedAnswers)
     applicant.set('profile.firstName', answers.firstName)
     applicant.set('profile.middleName', answers.middleName)
@@ -1489,8 +1817,9 @@ app.put('/api/profile/nsrp', async (req, res) => {
     applicant.set('profile.addressCity', answers.addressCity)
     applicant.set('profile.addressProvince', answers.addressProvince)
     applicant.set('phone', answers.cellphone)
-    applicant.set('profile.summary', [answers.occupation1, ...(answers.skills || [])].filter(Boolean).join(' · '))
-    applicant.set('profile.skills', answers.skills || [])
+    applicant.set('profile.summary', personalSummary)
+    applicant.set('profile.summarySource', 'personal')
+    applicant.set('profile.skills', (answers.skills || []).filter(skill => skill !== 'Others'))
     applicant.set('profile.education', answers.education || [])
     applicant.set('profile.technicalTraining', answers.technicalTraining || [])
     applicant.set('profile.workExperience', answers.workExperience || [])
@@ -1517,16 +1846,18 @@ app.put('/api/profile/nsrp', async (req, res) => {
       await cleanup()
       throw err
     }
+    await nsrpAutomation.process({ role: 'Applicant', accountId: applicant._id, ip: req.ip })
+    await scheduleConsistency(applicant._id, 'nsrpForm', applicant.$locals.consistencyReservation, req.ip)
     await notifyAdmins({
       type: 'applicant_registration_pending',
       title: 'Applicant NSRP updated',
-      message: `${applicantFullName(applicant)} updated their NSRP form for review.`,
+      message: `${applicantFullName(applicant)} updated their NSRP registration reference. Identity documents will be checked against the updated details.`,
       link: '/applicants',
       metadata: { applicantId: String(applicant._id), nsrpVersion: version.version },
     })
     return res.json({ ok: true, version: version.version, status: version.status })
   } catch (err) {
-    if (err.status) return res.status(err.status).json({ error: err.message })
+    if (err.status) return res.status(err.status).json({ code: err.code, error: err.message })
     console.error(err)
     return res.status(500).json({ error: 'The NSRP form could not be updated.' })
   }
@@ -1542,13 +1873,22 @@ app.get('/api/applicants/:id/verification-documents', async (req, res) => {
     if (!applicant) return res.status(404).json({ error: 'Applicant not found' })
     if (decoded.role === 'Applicant' && applicant.email !== decoded.email) return res.status(403).json({ error: 'Forbidden' })
     const migratedNsrp = await migrateLegacyNsrp(applicant)
-    if (migratedNsrp) {
-      recomputeVerificationStatus(applicant)
-      await applicant.save()
-    }
+    const previousStatus = applicant.verificationStatus
+    recomputeVerificationStatus(applicant)
+    if (migratedNsrp || applicant.verificationStatus !== previousStatus) await applicant.save()
     const nsrp = applicant.profile?.nsrp || {}
+    if (decoded.role === 'Admin') {
+      const current = latestVersion(applicant.verificationDocuments?.nsrpForm)
+      if (current && !current.findings?.length) {
+        const decision = await nsrpAutomation.decisions().findOne({ _id: `Applicant:${applicant._id}:${current.version}` })
+        if (decision?.report?.findings) current.findings = decision.report.findings.map(f => ({ ruleId: f.code, severity: f.severity, fieldGroup: 'registration', evidence: 'self-declared', status: decision.dismissals?.some(d => d.code === f.code) ? 'dismissed' : 'open' }))
+      }
+    }
+    const consistency = applicant.deletedAt ? null : await consistencyWaitlist.publicState(applicant._id, req.ip)
     res.json({
       documents: summarizeVerificationDocuments(applicant, { withUrls: true, includeHistory: decoded.role === 'Admin' }),
+      consistency,
+      review: applicant.deletedAt ? null : await applicantReviewSummary(applicant, nsrpAutomation, consistency),
       verificationStatus: applicant.verificationStatus,
       verificationReason: applicant.verificationReason,
       attentionCount: attentionCount(applicant),
@@ -1636,12 +1976,23 @@ app.put('/api/applicants/:id/verification-documents/:docKey', async (req, res) =
     // Guards: approve/reject only from pending; revert only from approved with a reason
     const guard = validateReviewTransition({
       action: isRevert ? 'revert' : status,
-      currentStatus: current.status,
+      currentStatus: isRevert && docKey === 'nsrpForm' && nsrpReferenceLocked(applicant) ? 'approved' : current.status,
       reason,
     })
     if (guard) return res.status(guard.status).json({ code: guard.code, error: guard.message })
 
+    if ((await nsrpAutomation.getSettings()).reviewToolsEnabled) {
+      const admin = await Admin.findOne({ email: decoded.email }).select('_id').lean()
+      await documentVerification.act({ role: 'Applicant', accountId: String(applicant._id), docKey }, { ...decoded, ...(admin ? { id: String(admin._id) } : {}) }, {
+        action: isRevert ? 'revoke' : status === 'approved' ? 'approve' : 'decline', reason,
+        version: current.version, unresolved: req.body?.unresolved ?? 0, checklist: req.body?.checklist,
+      })
+      const fresh = await Applicant.findById(applicant._id)
+      return res.json({ id: String(fresh._id), verificationStatus: fresh.verificationStatus, verificationReason: fresh.verificationReason, documents: summarizeVerificationDocuments(fresh) })
+    }
+
     if (isRevert) {
+      if (docKey === 'nsrpForm') reopenIdentityDocuments(applicant, decoded.email)
       slot.correctionRequest = undefined
       current.status = 'pending'
       current.reviewedAt = undefined
@@ -1694,15 +2045,35 @@ app.put('/api/applicants/:id/verification-documents/:docKey', async (req, res) =
     }
     res.json({ id: String(applicant._id), verificationStatus: applicant.verificationStatus, verificationReason: applicant.verificationReason, documents: summarizeVerificationDocuments(applicant) })
   } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message })
     console.error(err)
     res.status(500).json({ error: 'Server error' })
   }
 })
 
-// Resumes were removed from the applicant document system; stored legacy data
-// is kept but unreachable (see server/scripts/cleanup-resumes.js).
-app.get('/api/applicants/:id/resume', (_req, res) => {
-  res.status(410).json({ code: 'RESUME_REMOVED', error: 'Resumes are no longer part of this system.' })
+app.get('/api/applicants/:id/resume', async (req, res) => {
+  try {
+    const actor = authenticateRequest(req)
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).json({ error: 'Applicant not found' })
+    const applicant = await Applicant.findById(req.params.id).select('+resumeFile.data').lean()
+    if (!applicant) return res.status(404).json({ error: 'Applicant not found' })
+    let allowed = actor.role === 'Applicant' && actor.email === applicant.email
+    if (actor.role === 'Admin') allowed = Boolean(await Admin.exists({ email: actor.email }))
+    if (actor.role === 'Employer') {
+      const employer = await Employer.findOne({ email: actor.email, verificationStatus: 'approved' }).lean()
+      allowed = Boolean(employer && await Referral.exists({ employerId: employer._id, applicantId: applicant._id, status: { $nin: WITHDRAWN_REFERRALS }, deliveryState: { $ne: 'processing' } }))
+    }
+    if (!allowed) return res.status(403).json({ error: 'Forbidden' })
+    if (!applicant.resumeFile?.data) return res.status(404).json({ error: 'No resume uploaded' })
+    const raw = applicant.resumeFile.data
+    const buffer = Buffer.isBuffer(raw) ? raw : Buffer.from(typeof raw.value === 'function' ? raw.value() : raw.buffer || raw)
+    if (!buffer.length) return res.status(404).json({ error: 'The saved resume is empty. Upload your resume again.' })
+    res.set('Content-Type', applicant.resumeFile.mimetype)
+    res.set('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(applicant.resumeFile.originalName)}`)
+    res.set('Cache-Control', 'private, no-store')
+    res.set('X-Content-Type-Options', 'nosniff')
+    res.send(buffer)
+  } catch (error) { res.status(error.status || 401).json({ error: error.message || 'Could not load resume.' }) }
 })
 
 // Protected profile update: require valid JWT
@@ -1714,6 +2085,28 @@ app.put('/api/profile', async (req, res) => {
     const decoded = jwt.verify(token, jwtSecret)
     const { profile, companyName, contactName, phone, website } = req.body
     if (!profile) return res.status(400).json({ error: 'Missing profile' })
+    if (decoded.role === 'Applicant' && profile.portfolioLinks !== undefined) {
+      const result = validatePortfolioLinks(profile.portfolioLinks)
+      if (result.error) return res.status(422).json({ error: result.error })
+      profile.portfolioLinks = result.links
+    }
+    let changedIdentity = false, identityAccount
+    if (decoded.role === 'Applicant') {
+      identityAccount = await Applicant.findOne({ email: decoded.email }).lean()
+      if (profile.nsrp !== undefined && JSON.stringify(profile.nsrp) !== JSON.stringify(identityAccount?.profile?.nsrp)) return res.status(422).json({ code: 'NSRP_REFERENCE_UPDATE_REQUIRED', error: 'Use Update NSRP in My Documents to change your registration reference.' })
+      changedIdentity = ['firstName', 'lastName', 'middleName', 'suffix', 'dob', 'nsrp'].some(key => profile[key] !== undefined && JSON.stringify(profile[key]) !== JSON.stringify(identityAccount?.profile?.[key]))
+      // A profile-only edit must not retroactively screen an approved account.
+      if (identityAccount?.verificationStatus === 'approved') changedIdentity = false
+      if (changedIdentity) await consistencyWaitlist.assertSubmission(identityAccount._id, 'nsrpForm')
+    }
+    if (decoded.role === 'Applicant' && profile.skills !== undefined) {
+      if (!Array.isArray(profile.skills) || profile.skills.some(skill => typeof skill !== 'string')) return res.status(422).json({ error: 'Choose skills from the list.', fieldErrors: { skills: 'Skills must be a list of labels.' } })
+      for (const skill of profile.skills) {
+        const parent = coveringJobSkill(skill, profile.skills)
+        if (parent) return res.status(422).json({ error: `${skill} is already covered by ${parent}. Remove the redundant skill.`, fieldErrors: { skills: `${skill} is already covered by ${parent}.` } })
+      }
+    }
+    if (decoded.role === 'Applicant' && typeof profile.summary === 'string') profile.summarySource = 'personal'
     // Applicants edit structured name parts; validate them server-side too
     if (decoded.role === 'Applicant' && (profile.firstName !== undefined || profile.lastName !== undefined || profile.middleName !== undefined || profile.suffix !== undefined)) {
       const { values: nameValues, fieldErrors: nameErrors } = validateNameFields(profile, { noMiddleName: profile.noMiddleName === true || !sanitizeName(profile.middleName) })
@@ -1734,8 +2127,12 @@ app.put('/api/profile', async (req, res) => {
         return res.status(413).json({ error: 'Image is too large. Please use an image under 2 MB.' })
       }
     }
-    const updated = await updateUserProfileByEmail(decoded.email, profile)
+    const profileReservation = changedIdentity ? await consistencyWaitlist.reserveSubmission(identityAccount._id, 'nsrpForm') : null
+    let updated
+    try { updated = await updateUserProfileByEmail(decoded.email, profile) }
+    catch (error) { if (profileReservation) await consistencyWaitlist.cancelReservation(identityAccount._id, profileReservation); throw error }
     if (!updated) return res.status(404).json({ error: 'Not found' })
+    if (changedIdentity) await scheduleConsistency(identityAccount._id, 'basic', profileReservation, req.ip)
 
     // Persist editable top-level employer fields as well
     if (updated.type === 'Employer') {
@@ -1750,6 +2147,7 @@ app.put('/api/profile', async (req, res) => {
     }
     res.json({ profile: updated.user.profile })
   } catch (err) {
+    if (err.status) return res.status(err.status).json({ code: err.code, error: err.message })
     console.error(err)
     res.status(500).json({ error: 'Server error' })
   }
@@ -1799,6 +2197,33 @@ async function resolveJobTitle(title, customTitle) {
 }
 
 const JOB_FIELD_ERRORS_MESSAGE = 'Check the highlighted job posting fields.'
+export const jobModeration = createJobModeration({ JobPosting, Employer })
+async function applyJobScreening(job) {
+  const screening = await jobModeration.assess(job, job.createdBy, job.isNew ? undefined : job._id)
+  job.moderation = screening
+  job.moderationHistory.push(screening)
+  if (job.moderationHistory.length > 20) job.moderationHistory.splice(0, job.moderationHistory.length - 20)
+  job.status = job.moderation.decision === 'auto_approved' ? 'approved' : 'pending'
+  if (job.status === 'approved') {
+    job.approvedBy = job.reviewedBy = 'System (job safety screening)'
+    job.approvedAt = job.reviewedAt = new Date()
+    job.reviewReason = undefined
+    job.reviewHistory.push({ status: 'approved', reason: `Passed job policy ${job.moderation.rulesVersion}`, reviewedBy: job.reviewedBy, reviewedAt: job.reviewedAt })
+  } else {
+    // Earlier approvals stay in history, but cannot authorize edited content.
+    job.approvedBy = job.approvedAt = undefined
+    job.reviewedBy = job.reviewedAt = undefined
+    job.reviewReason = undefined
+  }
+}
+for (const method of ['get', 'put']) app[method]('/api/admin/job-moderation/settings', async (req, res) => {
+  let actor
+  try { actor = authenticateRequest(req) } catch { return res.status(403).json({ error: 'Admins only.' }) }
+  try {
+    if (actor?.role !== 'Admin' || !await Admin.exists({ email: actor.email })) return res.status(403).json({ error: 'Admins only.' })
+    res.json(method === 'get' ? await jobModeration.getSettings() : await jobModeration.updateSettings(req.body || {}, actor.email))
+  } catch (error) { res.status(method === 'get' ? 503 : 400).json({ error: method === 'get' ? 'Job screening settings unavailable.' : error.message }) }
+})
 
 async function prepareJobPosting(input, options = {}) {
   const { errors, value } = validateJobPosting(input, options)
@@ -1879,16 +2304,18 @@ app.post('/api/jobs', requireVerifiedEmail, requireApprovedEmployer, async (req,
     if (!resolvedCompany) return res.status(400).json({ error: 'A company name is required.' })
     if (Object.keys(errors).length) return res.status(422).json({ error: JOB_FIELD_ERRORS_MESSAGE, fieldErrors: errors })
     const job = new JobPosting({ ...fields, company: resolvedCompany, createdBy: decoded.email })
+    await applyJobScreening(job)
     await job.save()
 
     await notifyAdmins({
-      type: 'job_pending_review',
-      title: 'New job posting pending review',
-      message: `${decoded.email} submitted “${job.title}” for approval.`,
+      type: job.status === 'approved' ? 'job_auto_approved' : 'job_pending_review',
+      title: job.status === 'approved' ? 'Job posting automatically approved' : 'New job posting pending review',
+      message: job.status === 'approved' ? `“${job.title}” passed automatic screening.` : `${decoded.email} submitted “${job.title}” for PESO review.`,
       link: '/jobs',
       metadata: { jobId: String(job._id), jobTitle: job.title },
     })
 
+    if (job.status === 'approved') await notify({ recipient: { role: 'Employer', email: decoded.email }, type: 'job_approved', title: 'Job posting published', message: `Your job posting "${job.title}" passed automatic screening and is now published.`, link: '/jobs', metadata: { jobId: String(job._id) } })
     res.json(job)
   } catch (err) {
     console.error(err)
@@ -1910,14 +2337,17 @@ app.put('/api/jobs/:id', requireVerifiedEmail, requireApprovedEmployer, async (r
     const job = await JobPosting.findById(req.params.id)
     if (!job) return res.status(404).json({ error: 'Job not found' })
     if (job.createdBy !== decoded.email) return res.status(403).json({ error: 'Forbidden' })
-    if (job.status !== 'pending') return res.status(400).json({ error: 'Only pending job postings can be edited' })
 
     const keepDeadline = job.deadline ? new Date(job.deadline).toISOString().slice(0, 10) : ''
     const { errors, fields } = await prepareJobPosting(body, { keepDeadline })
     if (Object.keys(errors).length) return res.status(422).json({ error: JOB_FIELD_ERRORS_MESSAGE, fieldErrors: errors })
 
     job.set({ ...fields, company })
+    await applyJobScreening(job)
     await job.save()
+
+    await notifyAdmins({ type: job.status === 'approved' ? 'job_auto_approved' : 'job_pending_review', title: job.status === 'approved' ? 'Updated job automatically approved' : 'Updated job pending review', message: `Updated posting "${job.title}" completed safety screening.`, link: '/jobs', metadata: { jobId: String(job._id) } })
+    if (job.status === 'approved') await notify({ recipient: { role: 'Employer', email: decoded.email }, type: 'job_approved', title: 'Job posting published', message: `Your updated job posting "${job.title}" passed automatic screening and is now published.`, link: '/jobs', metadata: { jobId: String(job._id) } })
 
     res.json(job)
   } catch (err) {
@@ -1929,9 +2359,24 @@ app.put('/api/jobs/:id', requireVerifiedEmail, requireApprovedEmployer, async (r
 app.get('/api/jobs', requireVerifiedEmail, requireApprovedEmployer, async (req, res) => {
   try {
     const viewer = authenticateRequest(req)
+    const sharedApplicantEmails = new Map()
+    if (viewer?.role === 'Employer') {
+      const owner = await Employer.findOne({ email: viewer.email }).select('_id').lean()
+      const shares = owner ? await Referral.find({ employerId: owner._id, status: { $nin: WITHDRAWN_REFERRALS }, deliveryState: { $ne: 'processing' } }).populate({ path: 'applicantId', select: 'email' }).select('jobId applicantId').lean() : []
+      for (const share of shares) {
+        const key = String(share.jobId)
+        if (!sharedApplicantEmails.has(key)) sharedApplicantEmails.set(key, new Set())
+        if (share.applicantId?.email) sharedApplicantEmails.get(key).add(share.applicantId.email)
+      }
+    }
     const present = (doc) => {
       const job = normalizeJobPosting(typeof doc.toObject === 'function' ? doc.toObject() : doc)
+      job.isArchived = isJobArchived(job)
+      job.archivedAt = job.isArchived ? jobArchiveAt(job) : null
       if (viewer?.role !== 'Admin' && viewer?.email !== job.createdBy) delete job.notesToAdmin
+      if (viewer?.role !== 'Admin' && viewer?.email !== job.createdBy) delete job.moderation
+      if (viewer?.role !== 'Admin' && viewer?.email !== job.createdBy) delete job.moderationHistory
+      if (viewer?.role !== 'Admin') job.applicants = (job.applicants || []).filter((entry) => viewer?.role === 'Applicant' ? entry.email === viewer.email : viewer?.role === 'Employer' && sharedApplicantEmails.get(String(job._id))?.has(entry.email))
       return job
     }
     const attachEmployerBranding = async (jobDocs) => {
@@ -1942,10 +2387,11 @@ app.get('/api/jobs', requireVerifiedEmail, requireApprovedEmployer, async (req, 
           return { ...plain, employerBranding: null }
         })
       }
-      const employers = await Employer.find({ email: { $in: emails.map((email) => new RegExp(`^${String(email).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i')) } }).select('email profile.profileImage profile.bannerImage').lean()
+      const employers = await Employer.find({ email: { $in: emails.map((email) => new RegExp(`^${String(email).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i')) } }).select('email profile.profileImage profile.bannerImage receivingApplicantsSuspendedAt').lean()
       const brandingByEmail = new Map(employers.map((employer) => [employer.email.toLowerCase(), {
         profileImage: employer.profile?.profileImage || '',
         bannerImage: employer.profile?.bannerImage || '',
+        receivingApplicationsSuspended: Boolean(employer.receivingApplicantsSuspendedAt),
       }]))
       return jobDocs.map((job) => {
         const plain = present(job)
@@ -1991,7 +2437,8 @@ app.get('/api/jobs', requireVerifiedEmail, requireApprovedEmployer, async (req, 
     // Paginated mode: ?page=1&limit=10&status=approved&search=...&sortBy=...&order=... -> { items, total, page, limit, totalPages }
     if (req.query.page !== undefined || req.query.limit !== undefined) {
       const { page, limit } = parsePagination(req.query)
-      const status = String(req.query.status || 'approved')
+      const requestedStatus = String(req.query.status || 'approved')
+      const status = ['pending', 'declined', 'mine', 'applied'].includes(requestedStatus) ? requestedStatus : 'approved'
       const auth = req.headers.authorization
       const decoded = auth?.startsWith('Bearer ') ? jwt.verify(auth.split(' ')[1], jwtSecret) : null
       const filter = {}
@@ -2018,7 +2465,13 @@ app.get('/api/jobs', requireVerifiedEmail, requireApprovedEmployer, async (req, 
       // Applicant job board: filters + facets + relevance sort
       if (status === 'approved') {
         const base = baseApprovedJobFilter()
-        const facetDocs = await JobPosting.find(base).select('skills location locationType employmentType').lean()
+        let applicantSkills = []
+        if (decoded?.role === 'Applicant') {
+          const applicant = await Applicant.findOne({ email: decoded.email }).select('profile.skills').lean()
+          applicantSkills = applicant?.profile?.skills || []
+          Object.assign(base, applicantSkillQuery(applicantSkills).filter)
+        }
+        const facetDocs = await JobPosting.find(base).select('skills city location locationType employmentType').lean()
         const facets = countJobFacets(facetDocs)
         const allowedTypes = {
           skills: facets.skills.map((entry) => entry.value),
@@ -2031,26 +2484,13 @@ app.get('/api/jobs', requireVerifiedEmail, requireApprovedEmployer, async (req, 
 
         // "Most relevant" ranks by how many of the applicant's saved skills each job requires
         const sortBy = String(req.query.sortBy || 'relevant')
-        let applicantSkills = []
-        if (decoded?.role === 'Applicant') {
-          const applicant = await Applicant.findOne({ email: decoded.email }).select('profile.skills').lean()
-          applicantSkills = (applicant?.profile?.skills || []).filter((skill) => typeof skill === 'string' && skill.trim())
-        }
         if (sortBy === 'relevant' && applicantSkills.length > 0) {
-          const lowerSkills = applicantSkills.map((skill) => skill.trim().toLowerCase())
           const result = await paginateQuery(JobPosting, finalFilter, {
             page,
             limit,
             sortSpec: {
               computed: {
-                __skillMatch: {
-                  $size: {
-                    $setIntersection: [
-                      { $map: { input: { $ifNull: ['$skills', []] }, as: 'skill', in: { $toLower: '$$skill' } } },
-                      { $literal: lowerSkills },
-                    ],
-                  },
-                },
+                __skillMatch: applicantSkillQuery(applicantSkills).countExpression,
               },
               fields: () => ({ __skillMatch: -1, createdAt: -1 }),
             },
@@ -2072,6 +2512,7 @@ app.get('/api/jobs', requireVerifiedEmail, requireApprovedEmployer, async (req, 
           sortSpec: approvedSortSpec,
           sortDir: approvedSortOrder,
         })
+        if (decoded?.role === 'Applicant') result.items = result.items.map((job) => ({ ...job, skillMatch: jobSkillMatchCount(job.skills, applicantSkills), skillTotal: (job.skills || []).length }))
         result.items = decoded?.role === 'Admin' ? await attachAdminReviewDetails(result.items) : await attachEmployerBranding(result.items)
         return res.json({ ...result, facets, applied })
       }
@@ -2129,13 +2570,22 @@ app.get('/api/jobs', requireVerifiedEmail, requireApprovedEmployer, async (req, 
       const jobs = await JobPosting.find({ status: 'declined' }).sort({ createdAt: -1 })
       return res.json(await attachAdminReviewDetails(jobs))
     }
-    const jobs = await JobPosting.find({ status: 'approved' }).sort({ createdAt: -1 })
     const auth = req.headers.authorization
+    const decoded = auth?.startsWith('Bearer ') ? jwt.verify(auth.split(' ')[1], jwtSecret) : null
+    const approvedFilter = { status: 'approved' }
+    let applicantSkills = []
+    if (decoded?.role === 'Applicant') {
+      const applicant = await Applicant.findOne({ email: decoded.email }).select('profile.skills').lean()
+      applicantSkills = applicant?.profile?.skills || []
+      Object.assign(approvedFilter, baseApprovedJobFilter(), applicantSkillQuery(applicantSkills).filter)
+    }
+    const jobs = await JobPosting.find(approvedFilter).sort({ createdAt: -1 })
     if (auth?.startsWith('Bearer ')) {
       const decoded = jwt.verify(auth.split(' ')[1], jwtSecret)
       if (decoded.role === 'Admin') return res.json(await attachAdminReviewDetails(jobs))
     }
-    res.json(await attachEmployerBranding(jobs))
+    const visibleJobs = decoded?.role === 'Applicant' ? jobs.map((job) => ({ ...job.toObject(), skillMatch: jobSkillMatchCount(job.skills, applicantSkills), skillTotal: job.skills.length })) : jobs
+    res.json(await attachEmployerBranding(visibleJobs))
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Server error' })
@@ -2157,6 +2607,8 @@ app.put('/api/jobs/:id/status', async (req, res) => {
     if (status === 'declined' && !reviewReason) return res.status(400).json({ error: 'A reason is required when declining a job posting.' })
     if (reviewReason.length > 500) return res.status(400).json({ error: 'The decline reason must be 500 characters or fewer.' })
     job.status = status
+    job.reviewedBy = decoded.email
+    job.reviewedAt = new Date()
     if (status === 'approved') {
       job.approvedBy = decoded.email
       job.approvedAt = new Date()
@@ -2238,8 +2690,12 @@ export function validateNsrpAnswers(input) {
   for (const [field, allowed] of Object.entries(NSRP_ALLOWED_VALUES)) {
     if (answers[field] && !allowed.includes(answers[field])) fieldErrors[field] = 'Choose one of the listed options.'
   }
+  Object.assign(fieldErrors, validateApplicantLocation(answers))
   // Shared per-field rules (names, addresses, height, salary, phones, passport)
   for (const [field, validate] of Object.entries(NSRP_FIELD_VALIDATORS)) {
+    // Location names are checked against the shared list, which includes
+    // official labels with punctuation beyond the free-text address rules.
+    if (['addressBarangay', 'addressCity', 'addressProvince'].includes(field)) continue
     if (!fieldErrors[field]) {
       const problem = validate(answers[field])
       if (problem) fieldErrors[field] = problem
@@ -2362,6 +2818,7 @@ export function validateNsrpAnswers(input) {
     const age = ageFromDob(answers.dob)
     if (age !== null && (age < 15 || age > 100)) fieldErrors.dob = 'Applicants must be 15 to 100 years old.'
   }
+  if (requiresPassport(answers) && !answers.passportNo) fieldErrors.passportNo = 'Enter a passport number when an overseas country is specified.'
   // Passport expiry is required when a passport number is given, and must be valid
   if (answers.passportNo && !answers.passportExpiry) fieldErrors.passportExpiry = 'Enter the passport expiry date.'
   validateDate('passportExpiry', answers.passportExpiry, { notPast: true })
@@ -2696,163 +3153,35 @@ app.post('/api/nsrp/generate', async (req, res) => {
   }
 })
 
-app.post('/api/jobs/:id/apply', requireVerifiedEmail, applicationUpload.single('nsrp'), async (req, res) => {
+const jobResumeUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: RESUME_MAX_BYTES, files: 1, fields: 3, fieldSize: 4096 } }).single('resume')
+app.post('/api/jobs/:id/apply', (req, res, next) => jobResumeUpload(req, res, (error) => {
+  if (error) return res.status(403).json({ code: 'INVALID_RESUME', error: error.code === 'LIMIT_FILE_SIZE' ? 'Your resume must be no larger than 5 MB.' : 'Upload one PDF or DOCX resume.', fieldErrors: { resume: 'Upload one PDF or DOCX resume, up to 5 MB.' } })
+  next()
+}), async (req, res) => {
   try {
-    const auth = req.headers.authorization
-    if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
-    const token = auth.split(' ')[1]
-    const decoded = jwt.verify(token, jwtSecret)
-    if (decoded.role !== 'Applicant') return res.status(403).json({ error: 'Forbidden' })
-    const job = await JobPosting.findById(req.params.id)
-    if (!job) return res.status(404).json({ error: 'Job not found' })
-    if (job.status !== 'approved') return res.status(400).json({ error: 'Job is not available' })
-    if (job.deadline && job.deadline.toISOString().slice(0, 10) < todayInManila()) {
-      return res.status(410).json({ code: 'APPLICATION_CLOSED', error: 'The application deadline for this job has passed.' })
+    const decoded = authenticateRequest(req)
+    if (decoded?.role !== 'Applicant') return res.status(403).json({ error: 'Applicants only' })
+    await referralWorkflow.checkEligibility({ email: decoded.email, jobId: req.params.id, sharingConsent: req.body?.sharingConsent })
+    let details = req.body?.applicationDetails
+    if (typeof details === 'string') {
+      try { details = JSON.parse(details) }
+      catch { return res.status(403).json({ code: 'INVALID_APPLICATION_DETAILS', error: 'Check your application details and try again.' }) }
     }
-
-    const applicant = await loadApplicantWithCurrentResume(decoded.email)
-    if (!applicant) return res.status(404).json({ error: 'Applicant not found' })
-    if (applicant.verificationStatus !== 'approved') {
-      return res.status(403).json({ code: 'APPLICANT_NOT_VERIFIED', error: 'PESO must approve your registration and documents before you apply for a job.' })
-    }
-    // A resume is optional and never blocks applying.
-    if (job.applicants.some((existingApplicant) => existingApplicant.email === decoded.email)) {
-      return res.status(409).json({ error: 'You have already applied for this job' })
-    }
-
-    let nsrpFilePayload
-    let nsrpVersionToSave
-    let nsrpVersionCleanup
-    if (req.body?.answers) {
-      const { answers, fieldErrors } = validateNsrpAnswers({ ...req.body.answers, email: req.body.answers.email || decoded.email })
-      if (Object.keys(fieldErrors).length) return res.status(422).json({ error: 'Check the highlighted NSRP fields.', fieldErrors })
-      let signatureImage = null
-      let certification = { certified: false, certificationDate: '' }
-      try {
-        signatureImage = parseSignatureImage(req.body.answers.signatureDataUrl)
-        certification = resolveCertification({ certified: req.body.answers.certified, signature: signatureImage })
-      } catch (err) {
-        if (err instanceof SignatureValidationError) {
-          return res.status(422).json({ error: err.message, fieldErrors: { certified: err.message } })
-        }
-        throw err
-      }
-      let pdfBuffer
-      try {
-        pdfBuffer = await generateNsrpPdf(answers, { signatureImage, certificationDate: certification.certificationDate })
-      } catch (err) {
-        console.error('NSRP application PDF generation failed:', err)
-        return res.status(500).json({ code: 'NSRP_GENERATION_FAILED', error: 'The NSRP PDF could not be generated. Please try again.' })
-      }
-      if (signatureImage && certification.certified) {
-        applicant.set('nsrpSignature', {
-          mimetype: signatureImage.mimetype,
-          size: signatureImage.bytes.length,
-          uploadedAt: new Date(),
-          certifiedAt: certification.certifiedAt,
-          data: signatureImage.bytes,
-        })
-      }
-      const nsrpFile = { originalname: `NSRP-${answers.surname.replace(/\s+/g, '_')}.pdf`, mimetype: 'application/pdf', size: pdfBuffer.length, buffer: pdfBuffer }
-      const { version, cleanup } = await appendVerificationVersion(applicant, 'nsrpForm', nsrpFile, '', 'generated')
-      nsrpVersionToSave = version
-      nsrpVersionCleanup = cleanup
-      nsrpFilePayload = { originalName: nsrpFile.originalname, mimetype: nsrpFile.mimetype, size: nsrpFile.size, data: pdfBuffer }
-      const existingSkills = Array.isArray(applicant.profile?.skills) ? applicant.profile.skills : []
-      const mergedSkills = new Map(existingSkills.map((skill) => [skill.trim().toLocaleLowerCase(), skill.trim()]).filter(([key]) => key))
-      for (const skill of answers.skills) mergedSkills.set(skill.toLocaleLowerCase(), skill)
-      applicant.set('profile.education', answers.education)
-      applicant.set('profile.technicalTraining', answers.technicalTraining)
-      applicant.set('profile.workExperience', answers.workExperience)
-      applicant.set('profile.skills', [...mergedSkills.values()])
-    } else if (req.file) {
-      nsrpFilePayload = { originalName: req.file.originalname, mimetype: req.file.mimetype, size: req.file.size, data: req.file.buffer }
-    } else {
-      const savedApplicant = await Applicant.findOne({ email: decoded.email })
-        .select('+verificationDocuments.nsrpForm.versions.data +nsrpVerificationFile.data')
-      const savedVersion = latestVersion(savedApplicant?.verificationDocuments?.nsrpForm)
-      const storedNsrp = savedVersion?.version
-        ? await loadDocumentFile(savedApplicant._id, 'nsrpForm', savedVersion.version, 'front')
-        : null
-      const savedVersionData = storedNsrp?.data ?? savedVersion?.data
-      const savedNsrp = savedVersionData ? { ...savedVersion, data: savedVersionData } : savedApplicant?.nsrpVerificationFile
-      if (savedNsrp?.data) {
-        const raw = savedNsrp.data
-        const buffer = Buffer.isBuffer(raw) ? raw : (raw?.buffer ? Buffer.from(raw.buffer) : Buffer.from(raw))
-        nsrpFilePayload = {
-          originalName: savedNsrp.originalName || 'NSRP-Registration-Form.pdf',
-          mimetype: savedNsrp.mimetype || 'application/pdf',
-          size: savedNsrp.size || buffer.length,
-          data: buffer,
-        }
-      } else {
-        return res.status(400).json({ error: 'Complete your NSRP form online before applying.' })
-      }
-    }
-
-    if (nsrpVersionToSave) {
-      try {
-        await applicant.save()
-      } catch (err) {
-        if (nsrpVersionCleanup) await nsrpVersionCleanup()
-        throw err
-      }
-    }
-    await JobApplication.create({
-      jobId: job._id,
-      applicantEmail: decoded.email,
-      nsrpFile: nsrpFilePayload,
-    })
-
-    job.applicants.push({ email: decoded.email, appliedAt: new Date() })
-    await job.save()
-
-    const employer = await Employer.findOne({ email: job.createdBy }).lean()
-    const applicantName = applicantFullName(applicant) || applicant.email
-    const employerName = employer?.companyName || job.company || job.createdBy || 'Unknown employer'
-    const applicationMeta = {
-      applicantId: String(applicant._id),
-      jobId: String(job._id),
-      employerId: employer?._id ? String(employer._id) : undefined,
-      applicantName,
-      jobTitle: job.title,
-      employerName,
-    }
-
-    await notify({
-      recipient: { id: applicant._id, role: 'Applicant', email: applicant.email },
-      type: 'application_submitted',
-      title: 'Application submitted',
-      message: `Your application for "${job.title}" at ${employerName} was submitted.`,
-      link: '/jobs',
-      email: true,
-      metadata: applicationMeta,
-    })
-    if (employer) {
-      await notify({
-        recipient: { id: employer._id, role: 'Employer', email: employer.email },
-        type: 'new_applicant',
-        title: 'New applicant',
-        message: `${applicantName} applied to "${job.title}".`,
-        link: '/jobs',
-        email: true,
-        metadata: applicationMeta,
-      })
-    }
-    await notifyAdmins({
-      type: 'new_application',
-      title: 'New applicant needs referral review',
-      message: `${applicantName} applied to "${job.title}" at ${employerName}. Review and decide whether to refer.`,
-      link: '/peso-referrals',
-      metadata: applicationMeta,
-    })
-
-    res.json({ success: true, job })
-  } catch (err) {
-    console.error(err)
-    if (err.status) return res.status(err.status).json({ error: err.message })
-    if (err.code === 11000) return res.status(409).json({ error: 'You have already applied for this job' })
-    res.status(500).json({ error: 'Server error' })
+    const applicant = await Applicant.findOne({ email: decoded.email }).select('profile.nsrp.education profile.education verificationDocuments.nsrpForm.versions.version verificationDocuments.nsrpForm.versions.uploadedAt').lean()
+    const { value, errors } = validateJobApplication(details, req.file, applicant?.profile)
+    value.bachelorDegree = await applicantDegree(applicant)
+    if (Object.keys(errors).length) return res.status(403).json({ code: 'INVALID_APPLICATION_DETAILS', error: 'Check the highlighted application fields.', fieldErrors: errors })
+    const emailCheck = await validateApplicationEmail(value.email)
+    if (!emailCheck.valid) return res.status(emailCheck.status).json({ code: emailCheck.code, error: emailCheck.error, fieldErrors: { email: emailCheck.error } })
+    const signature = req.file.mimetype === 'application/pdf' ? Buffer.from('%PDF-') : Buffer.from([0x50, 0x4b, 0x03, 0x04])
+    if (!req.file.buffer.subarray(0, signature.length).equals(signature)) return res.status(403).json({ code: 'INVALID_RESUME', error: 'The resume contents do not match its file type. Upload a valid PDF or DOCX file.', fieldErrors: { resume: 'Upload a valid PDF or DOCX file.' } })
+    const resumeFile = { originalName: path.basename(req.file.originalname).replace(/[\r\n]/g, '').slice(0, 180), mimetype: req.file.mimetype, size: req.file.size, data: req.file.buffer }
+    res.json(await referralWorkflow.submit({ email: decoded.email, jobId: req.params.id, sharingConsent: req.body.sharingConsent, applicationDetails: value, resumeFile, ip: req.ip }))
+  } catch (error) {
+    if (error instanceof ApplicationError) return res.status(error.status).json({ code: error.code, error: error.message })
+    if (error.status) return res.status(error.status).json({ error: error.message })
+    console.error('[application] submission unavailable')
+    res.status(409).json({ code: 'APPLICATION_UNAVAILABLE', error: 'Your application could not be submitted. Please try again.' })
   }
 })
 
@@ -2860,83 +3189,25 @@ app.post('/api/referrals', async (req, res) => {
   try {
     const auth = req.headers.authorization
     if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
-    const token = auth.split(' ')[1]
-    const decoded = jwt.verify(token, jwtSecret)
-    if (decoded.role !== 'Admin') return res.status(403).json({ error: 'Forbidden' })
+    const decoded = authenticateRequest(req)
+    if (decoded?.role !== 'Admin') return res.status(403).json({ error: 'Forbidden' })
 
-    const { jobId, applicantIds } = req.body || {}
-    if (!jobId || !Array.isArray(applicantIds) || applicantIds.length === 0) {
-      return res.status(400).json({ error: 'jobId and applicantIds are required' })
+    const { jobId, applicantIds, reason } = req.body || {}
+    if (!mongoose.isValidObjectId(jobId) || !Array.isArray(applicantIds) || !applicantIds.length || applicantIds.some((id) => !mongoose.isValidObjectId(id))) return res.status(403).json({ code: 'INVALID_REFERRAL', error: 'Choose a valid job and applicants.' })
+    if (typeof reason !== 'string' || !reason.trim() || reason.length > 500) return res.status(403).json({ code: 'REASON_REQUIRED', error: 'A reason of 1 to 500 characters is required.' })
+    const admin = await Admin.findOne({ email: decoded.email }).select('_id').lean()
+    if (!admin) return res.status(403).json({ error: 'Admin account not found' })
+    const accounts = await Applicant.find({ _id: { $in: applicantIds } }).select('email').lean()
+    if (accounts.length !== new Set(applicantIds.map(String)).size) return res.status(403).json({ error: 'Applicant not found' })
+    const created = []
+    for (const account of accounts) {
+      try {
+        created.push(await referralWorkflow.submit({ email: account.email, jobId, source: 'admin', adminId: admin._id, adminEmail: decoded.email, reason, ip: req.ip }))
+      } catch (error) { if (error.code !== 'ALREADY_APPLIED') throw error }
     }
-
-    const job = await JobPosting.findById(jobId)
-    if (!job) return res.status(404).json({ error: 'Job not found' })
-
-    const employer = await Employer.findOne({ email: job.createdBy }).lean()
-    if (!employer) return res.status(404).json({ error: 'Employer for job not found' })
-    if (job.status !== 'approved') return res.status(409).json({ error: 'PESO must approve the job posting before creating referrals.' })
-
-    const admin = await Admin.findOne({ email: decoded.email }).lean()
-    if (!admin) return res.status(404).json({ error: 'Admin not found' })
-
-    const normalizedApplicantIds = applicantIds
-      .filter((id) => typeof id === 'string' || typeof id === 'number' || (id && typeof id === 'object'))
-      .map((id) => String(id))
-
-    if (normalizedApplicantIds.length === 0) {
-      return res.status(400).json({ error: 'No valid applicantIds provided' })
-    }
-
-    const existingApplicants = await Applicant.find({ _id: { $in: normalizedApplicantIds } }).select('_id verificationStatus deletedAt').lean()
-    if (existingApplicants.some((applicant) => applicant.deletedAt || applicant.verificationStatus !== 'approved')) {
-      return res.status(403).json({ error: 'Only approved applicants with active accounts can be referred. Review the selected applicants before continuing.' })
-    }
-    const existingApplicantIds = new Set(existingApplicants.map((a) => String(a._id)))
-
-    const existingReferrals = await Referral.find({
-      jobId: job._id,
-      applicantId: { $in: normalizedApplicantIds },
-    }).select('applicantId').lean()
-    const alreadyReferredApplicantIds = new Set(existingReferrals.map((referral) => String(referral.applicantId)))
-
-    const referralsPayload = normalizedApplicantIds
-      .filter((applicantId) =>
-        existingApplicantIds.has(applicantId) && !alreadyReferredApplicantIds.has(applicantId),
-      )
-      .map((applicantId) => ({
-        jobId: job._id,
-        applicantId,
-        employerId: employer._id,
-        referredBy: admin._id,
-        status: 'pending',
-      }))
-
-    if (referralsPayload.length === 0) {
-      return res.json({ createdCount: 0, referrals: [], message: 'Applicants already referred for this job' })
-    }
-
-    const created = await Referral.insertMany(referralsPayload)
-
-    await Promise.all(created.map((referral) => notify({
-      recipient: { id: referral.applicantId, role: 'Applicant' },
-      type: 'referral_received',
-      title: 'You were referred to a job',
-      message: `PESO referred you to "${job.title}" at ${employer.companyName || job.company || 'an employer'}.`,
-      link: '/jobs',
-      email: true,
-      metadata: { referralId: String(referral._id), jobId: String(job._id) },
-    })))
-    await notify({
-      recipient: { id: employer._id, role: 'Employer', email: employer.email },
-      type: 'referral_received',
-      title: 'New referral received',
-      message: `PESO referred ${created.length} applicant(s) to "${job.title}".`,
-      link: '/referrals',
-      email: true,
-      metadata: { jobId: String(job._id), count: created.length },
-    })
     res.json({ createdCount: created.length, referrals: created })
   } catch (err) {
+    if (err instanceof ApplicationError) return res.status(err.status).json({ code: err.code, error: err.message })
     console.error(err)
     res.status(500).json({ error: 'Server error' })
   }
@@ -2946,17 +3217,17 @@ app.delete('/api/referrals', async (req, res) => {
   try {
     const auth = req.headers.authorization
     if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
-    const token = auth.split(' ')[1]
-    const decoded = jwt.verify(token, jwtSecret)
-    if (decoded.role !== 'Admin') return res.status(403).json({ error: 'Forbidden' })
+    const decoded = authenticateRequest(req)
+    if (decoded?.role !== 'Admin') return res.status(403).json({ error: 'Forbidden' })
 
-    const { jobId, applicantIds } = req.body || {}
-    const applicantId = Array.isArray(applicantIds) ? applicantIds[0] : null
-    if (!jobId || !applicantId) return res.status(400).json({ error: 'jobId and applicantId are required' })
-
-    const deleted = await Referral.deleteOne({ jobId, applicantId: String(applicantId) })
-    res.json({ deletedCount: deleted.deletedCount || 0 })
+    const { jobId, applicantIds, reason } = req.body || {}
+    if (!mongoose.isValidObjectId(jobId) || !mongoose.isValidObjectId(applicantIds?.[0])) return res.status(403).json({ code: 'INVALID_REFERRAL', error: 'Choose a valid referral.' })
+    const referral = await Referral.findOne({ jobId, applicantId: applicantIds[0] }).select('_id').lean()
+    if (!referral) return res.status(409).json({ error: 'Referral not found' })
+    await referralWorkflow.pullBack(referral._id, decoded.email, reason)
+    res.json({ withdrawnCount: 1 })
   } catch (err) {
+    if (err instanceof ApplicationError) return res.status(err.status).json({ code: err.code, error: err.message })
     console.error(err)
     res.status(500).json({ error: 'Server error' })
   }
@@ -3012,26 +3283,33 @@ app.get('/api/referrals/employer/:employerId', requireApprovedEmployer, async (r
       if (String(employer._id) !== String(req.params.employerId)) return res.status(403).json({ error: 'Forbidden' })
     }
 
-    if (req.query.page !== undefined || req.query.limit !== undefined) {
-      const { page, limit } = parsePagination(req.query)
-      const result = await paginateQuery(Referral, { employerId: req.params.employerId }, { page, limit, sort: { createdAt: -1 } })
-      await Referral.populate(result.items, [
-        { path: 'applicantId', select: 'email phone profile' },
-        { path: 'jobId', model: JobPosting, select: 'title company location description requirements salary locationType employmentType status createdBy createdAt' },
-      ])
-      result.items = result.items.map((item) => ({ ...item, applicantId: employerApplicantSummary(item.applicantId) }))
-      return res.json(result)
-    }
-    const referrals = await Referral.find({ employerId: req.params.employerId })
+    if (!mongoose.isValidObjectId(req.params.employerId)) return res.status(403).json({ code: 'INVALID_EMPLOYER', error: 'Choose a valid employer.' })
+    const referrals = await Referral.find({ employerId: req.params.employerId, deliveryState: { $ne: 'processing' } })
       .sort({ createdAt: -1 })
-      .populate({ path: 'applicantId', select: 'email phone profile' })
+      .populate({ path: 'applicantId', select: 'email phone profile resumeFile.originalName resumeFile.mimetype resumeFile.size verificationDocuments.nsrpForm.versions.version verificationDocuments.nsrpForm.versions.uploadedAt' })
       .populate({
         path: 'jobId',
         model: JobPosting,
-        select: 'title company location description requirements salary locationType employmentType status createdBy createdAt',
+        select: 'title company location description requirements salary locationType employmentType status createdBy createdAt skills experience education deadline languageRequirements',
       })
-
-    res.json(referrals.map((referral) => ({ ...referral.toObject(), applicantId: employerApplicantSummary(referral.applicantId) })))
+      .lean()
+    const employerState = await Employer.findById(req.params.employerId).select('receivingApplicantsSuspendedAt').lean()
+    const applications = await JobApplication.find({ referralId: { $in: referrals.filter((entry) => !WITHDRAWN_REFERRALS.includes(entry.status)).map((entry) => entry._id) }, deliveryStatus: 'delivered' }).select('referralId applicationDetails resumeFile.originalName resumeFile.mimetype resumeFile.size').lean()
+    const applicationByReferral = new Map(applications.map((entry) => [String(entry.referralId), entry]))
+    const enrichedReferrals = await Promise.all(referrals.map(async entry => entry.applicantId && !WITHDRAWN_REFERRALS.includes(entry.status) ? { ...entry, applicantId: await recoverApplicantQualifications(entry.applicantId) } : entry))
+    const degreeByApplicant = new Map(await Promise.all(enrichedReferrals.filter(entry => entry.applicantId && !WITHDRAWN_REFERRALS.includes(entry.status)).map(async entry => [String(entry.applicantId._id), await applicantDegree(entry.applicantId)])))
+    const ranked = rankEmployerReferrals(enrichedReferrals).map((entry) => {
+      const application = applicationByReferral.get(String(entry._id))
+      if (application?.applicationDetails && entry.applicantId) application.applicationDetails.bachelorDegree = degreeByApplicant.get(String(entry.applicantId._id)) || 'No'
+      if (application?.applicationDetails?.email && entry.applicantId) entry.applicantId.email = application.applicationDetails.email
+      if (application?.applicationDetails?.mobile && entry.applicantId) entry.applicantId.phone = application.applicationDetails.mobile
+      return { ...entry, employerSuspended: Boolean(employerState?.receivingApplicantsSuspendedAt), ...(application ? { application: { id: application._id, details: application.applicationDetails, resume: application.resumeFile?.originalName ? { name: application.resumeFile.originalName, size: application.resumeFile.size } : undefined } } : {}) }
+    })
+    if (req.query.page !== undefined || req.query.limit !== undefined) {
+      const { page, limit } = parsePagination(req.query)
+      return res.json({ items: ranked.slice((page - 1) * limit, page * limit), total: ranked.length, page, limit, totalPages: Math.max(1, Math.ceil(ranked.length / limit)) })
+    }
+    res.json(ranked)
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Server error' })
@@ -3042,10 +3320,11 @@ app.put('/api/referrals/:id/respond', requireApprovedEmployer, async (req, res) 
   try {
     const auth = req.headers.authorization
     if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Missing token' })
-    const token = auth.split(' ')[1]
-    const decoded = jwt.verify(token, jwtSecret)
+    const decoded = authenticateRequest(req)
 
+    if (decoded?.role !== 'Employer') return res.status(403).json({ error: 'Employers only' })
     const { status } = req.body || {}
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(403).json({ code: 'INVALID_REFERRAL', error: 'Choose a valid application.' })
     if (!['accepted', 'declined'].includes(status)) return res.status(400).json({ error: 'Invalid status' })
 
     const employer = await Employer.findOne({ email: decoded.email }).lean()
@@ -3054,9 +3333,13 @@ app.put('/api/referrals/:id/respond', requireApprovedEmployer, async (req, res) 
     const referral = await Referral.findById(req.params.id)
     if (!referral) return res.status(404).json({ error: 'Referral not found' })
     if (String(referral.employerId) !== String(employer._id)) return res.status(403).json({ error: 'Forbidden' })
+    if (WITHDRAWN_REFERRALS.includes(referral.status) || referral.deliveryState === 'processing') return res.status(409).json({ code: 'APPLICATION_WITHDRAWN', error: 'This application is no longer available for employer review.' })
 
+    const responseEvent = { action: 'employer_response', status, by: 'Employer', at: new Date() }
+    const responseChange = await Referral.updateOne({ _id: referral._id, status: { $nin: WITHDRAWN_REFERRALS }, deliveryState: { $ne: 'processing' } }, { $set: { status }, $push: { history: responseEvent } })
+    if (!responseChange.modifiedCount) return res.status(409).json({ code: 'APPLICATION_WITHDRAWN', error: 'This application is no longer available for employer review.' })
     referral.status = status
-    await referral.save()
+    await JobApplication.updateOne({ referralId: referral._id }, { $push: { history: responseEvent } })
 
     const respondedJob = await JobPosting.findById(referral.jobId).select('title').lean()
     const respondedTitle = respondedJob?.title || 'a job'
@@ -3064,8 +3347,8 @@ app.put('/api/referrals/:id/respond', requireApprovedEmployer, async (req, res) 
       recipient: { id: referral.applicantId, role: 'Applicant' },
       type: 'application_status_changed',
       title: `Application ${status}`,
-      message: `${employer.companyName || 'The employer'} ${status} your referral for "${respondedTitle}".${status === 'accepted' ? ' You can now report to PESO once you are officially hired or deployed.' : ''}`,
-      link: status === 'accepted' ? '/employment-reports' : '/jobs',
+      message: `${employer.companyName || 'The employer'} ${status} your referral for "${respondedTitle}".${status === 'accepted' ? ' Open My applications to follow your interview and hiring outcome.' : ''}`,
+      link: '/my-applications',
       email: true,
       metadata: { referralId: String(referral._id), jobId: String(referral.jobId), status },
     })
@@ -3077,7 +3360,7 @@ app.put('/api/referrals/:id/respond', requireApprovedEmployer, async (req, res) 
       metadata: { referralId: String(referral._id), jobId: String(referral.jobId), status },
     })
 
-    res.json(referral)
+    res.json({ _id: referral._id, jobId: referral.jobId, applicantId: referral.applicantId, employerId: referral.employerId, source: referral.source, status: referral.status, createdAt: referral.createdAt, history: publicApplicationHistory([...(referral.history || []), responseEvent]) })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Server error' })
@@ -3132,6 +3415,8 @@ app.post('/api/hire-reports', requireVerifiedEmail, requireApprovedEmployer, asy
     if (!referral && !job.applicants.some((entry) => entry.email === applicant.email)) {
       return res.status(403).json({ error: 'A referral or application for this job is required' })
     }
+    if (referral && WITHDRAWN_REFERRALS.includes(referral.status)) return res.status(409).json({ code: 'APPLICATION_WITHDRAWN', error: 'This application has returned to PESO review.' })
+    if (decoded.role === 'Employer' && !referral) return res.status(403).json({ code: 'REFERRAL_REQUIRED', error: 'This applicant is not available for employer review.' })
 
     // Each party maintains its own report. An applicant update never overwrites
     // the employer's statement, and prior outcomes remain available to PESO.
@@ -3139,6 +3424,7 @@ app.post('/api/hire-reports', requireVerifiedEmail, requireApprovedEmployer, asy
       ? { $or: [{ reportedByRole: 'Employer' }, { reportedByRole: { $exists: false } }] }
       : { reportedByRole: 'Applicant' }
     let hireReport = await HireReport.findOne({ applicantId, jobId, employerId: employer._id, ...roleFilter })
+    if (decoded.role === 'Employer' && hireReport) return res.status(409).json({ code: 'EMPLOYER_REPORT_LOCKED', error: 'This employment report has already been submitted and cannot be edited. Contact PESO if a correction is needed.', report: hireReport })
     if (!hireReport) hireReport = new HireReport({ applicantId, jobId, employerId: employer._id })
     if (hireReport.status) {
       hireReport.history.push({ status: hireReport.status, employmentDate: hireReport.employmentDate, notes: hireReport.notes, reportedAt: hireReport.reportedAt })
@@ -3154,7 +3440,22 @@ app.post('/api/hire-reports', requireVerifiedEmail, requireApprovedEmployer, asy
       notes: notes.trim(),
       reportedAt: new Date(),
     })
-    await hireReport.save()
+    if (decoded.role === 'Employer') {
+      await HireReport.init()
+      hireReport.submissionKey = `employer:${employer._id}:job:${job._id}:applicant:${applicant._id}`
+    }
+    if (decoded.role === 'Employer' && ['hired', 'deployed'].includes(status)) await referralWorkflow.reserveHireSlot(job, applicant._id)
+    try { await hireReport.save() }
+    catch (error) {
+      if (decoded.role !== 'Employer' || error.code !== 11000) throw error
+      const saved = await HireReport.findOne({ applicantId, jobId, employerId: employer._id, ...roleFilter })
+      if (!saved) throw error
+      // A concurrent rejection may have won after this request reserved a slot.
+      if (saved.status === 'not_hired' && ['hired', 'deployed'].includes(status)) await JobPosting.updateOne({ _id: job._id }, { $pull: { hiredApplicantIds: applicant._id } })
+      return res.status(409).json({ code: 'EMPLOYER_REPORT_LOCKED', error: 'This employment report has already been submitted and cannot be edited. Contact PESO if a correction is needed.', report: saved })
+    }
+    if (referral) await Referral.updateOne({ _id: referral._id }, { $push: { history: { action: 'employment_update', status, by: decoded.role, at: new Date() } } })
+    if (decoded.role === 'Employer' && status === 'not_hired') await JobPosting.updateOne({ _id: job._id }, { $pull: { hiredApplicantIds: applicant._id } })
 
     await notifyAdmins({
       type: 'hire_report_submitted',
@@ -3166,15 +3467,18 @@ app.post('/api/hire-reports', requireVerifiedEmail, requireApprovedEmployer, asy
     if (decoded.role === 'Employer' && status !== 'not_hired') {
       await notify({
         recipient: { id: applicant._id, role: 'Applicant', email: applicant.email },
-        type: 'employment_update', title: 'Please update PESO',
-        message: `${employer.companyName || 'Your employer'} reported you as ${status} for "${job.title}". Please submit your own update to PESO once official. Coordinate hiring and deployment directly with the employer.`,
-        link: '/employment-reports', email: true,
+        type: 'employment_update', title: 'Employment status updated',
+        message: `${employer.companyName || 'Your employer'} reported you as ${status} for "${job.title}". View the recorded outcome in My applications. Coordinate hiring and deployment directly with the employer.`,
+        link: '/my-applications', email: true,
         metadata: { jobId: String(job._id), status },
       })
     }
 
-    res.json(hireReport)
+    const result = hireReport.toObject()
+    delete result.submissionKey
+    res.json(result)
   } catch (err) {
+    if (err instanceof ApplicationError) return res.status(err.status).json({ code: err.code, error: err.message })
     console.error(err)
     res.status(500).json({ error: 'Server error' })
   }
@@ -3262,15 +3566,18 @@ app.post('/api/ratings', requireApprovedEmployer, async (req, res) => {
     const token = auth.split(' ')[1]
     const decoded = jwt.verify(token, jwtSecret)
 
-    const { toUserId, toRole, hireReportId, score, comment } = req.body || {}
+    const { toUserId, toRole, hireReportId, score, comment = '' } = req.body || {}
     if (!toUserId || !toRole || !hireReportId || score === undefined || score === null) {
       return res.status(400).json({ error: 'toUserId, toRole, hireReportId, and score are required' })
     }
 
     const numericScore = Number(score)
-    if (!Number.isFinite(numericScore) || numericScore < 1 || numericScore > 5) {
+    if (!Number.isInteger(numericScore) || numericScore < 1 || numericScore > 5) {
       return res.status(400).json({ error: 'Invalid score' })
     }
+    if (![toUserId, hireReportId].every(value => typeof value === 'string' && mongoose.isValidObjectId(value))) return res.status(400).json({ error: 'Choose a valid applicant and hire report.' })
+    if (toRole !== (decoded.role === 'Employer' ? 'applicant' : 'employer')) return res.status(400).json({ error: 'Choose the correct rating recipient role.' })
+    if (typeof comment !== 'string' || comment.length > 1000) return res.status(400).json({ error: 'Comments must be at most 1,000 characters.' })
 
     const hireReport = await HireReport.findById(hireReportId)
     if (!hireReport) return res.status(404).json({ error: 'Hire report not found' })
@@ -3294,21 +3601,26 @@ app.post('/api/ratings', requireApprovedEmployer, async (req, res) => {
       return res.status(403).json({ error: 'Forbidden' })
     }
 
-    const existingRating = await Rating.findOne({ fromUserId: fromUser._id, hireReportId })
-    if (existingRating) return res.status(400).json({ error: 'Rating already exists for this hire report' })
+    const existingRating = await Rating.findOne({ fromUserId: fromUser._id, ...(fromRole === 'employer' ? { toUserId } : { hireReportId }) })
+    if (existingRating) return res.status(409).json({ code: 'RATING_ALREADY_EXISTS', error: fromRole === 'employer' ? 'You have already rated this applicant.' : 'You have already rated this hire report.' })
 
+    await Rating.init()
     const rating = await Rating.create({
+      submissionKey: fromRole === 'employer' ? `employer:${fromUser._id}:applicant:${toUserId}` : `applicant:${fromUser._id}:report:${hireReportId}`,
       fromUserId: fromUser._id,
       fromRole,
       toUserId,
       toRole,
       hireReportId,
       score: numericScore,
-      comment,
+      comment: comment.trim(),
     })
 
-    res.json(rating)
+    const result = rating.toObject()
+    delete result.submissionKey
+    res.json(result)
   } catch (err) {
+    if (err?.code === 11000) return res.status(409).json({ code: 'RATING_ALREADY_EXISTS', error: 'A rating has already been submitted.' })
     console.error(err)
     res.status(500).json({ error: 'Server error' })
   }
@@ -3324,7 +3636,14 @@ app.get('/api/ratings/:userId', async (req, res) => {
         return res.status(403).json({ code: 'EMPLOYER_NOT_VERIFIED', status: verification.status })
       }
     }
-    const ratings = await Rating.find({ toUserId: req.params.userId }).sort({ createdAt: -1 })
+    if (!decoded || !mongoose.isValidObjectId(req.params.userId)) return res.status(403).json({ error: 'Please sign in and choose a valid recipient.' })
+    const filter = { toUserId: req.params.userId }
+    if (decoded.role !== 'Admin') {
+      const account = await (decoded.role === 'Applicant' ? Applicant : Employer).findOne({ email: decoded.email }).select('_id').lean()
+      if (!account) return res.status(403).json({ error: 'Account unavailable.' })
+      if (String(account._id) !== req.params.userId) filter.fromUserId = account._id
+    }
+    const ratings = await Rating.find(filter).sort({ createdAt: -1 })
     const total = ratings.reduce((sum, item) => sum + Number(item.score || 0), 0)
     const averageScore = ratings.length > 0 ? total / ratings.length : 0
 
@@ -3340,7 +3659,7 @@ app.get('/api/ratings/:userId', async (req, res) => {
   }
 })
 
-const dashboardService = createDashboardService({ Applicant, Employer, JobPosting, JobApplication, Referral, HireReport, Notification })
+const dashboardService = createDashboardService({ Applicant, Employer, JobPosting, JobApplication, Referral, HireReport, Notification, Interview, ApplicationReport })
 
 // Read-only, role-scoped aggregates; the role always comes from the verified token
 app.get('/api/dashboard', requireApprovedEmployer, async (req, res) => {
@@ -3360,6 +3679,20 @@ app.get('/api/dashboard', requireApprovedEmployer, async (req, res) => {
   } catch (err) {
     console.error('Dashboard error:', err)
     res.status(500).json({ error: 'Failed to load dashboard' })
+  }
+})
+
+const makeActivityReport = createActivityReportService({ Applicant, Employer, JobPosting, JobApplication, Referral, Interview, HireReport, ApplicationReport })
+app.get('/api/admin/reports', async (req, res) => {
+  try {
+    const actor = authenticateRequest(req)
+    if (!actor) return res.status(401).json({ error: 'Please sign in again.' })
+    if (actor.role !== 'Admin' || !await Admin.exists({ email: actor.email })) return res.status(403).json({ error: 'Admin account required.' })
+    const report = await makeActivityReport(req.query)
+    res.set('Cache-Control', 'private, no-store')
+    res.json(report)
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.status ? error.message : 'Could not generate the report. Please try again.' })
   }
 })
 
@@ -3513,8 +3846,10 @@ app.post('/api/employer-requests', requirementsUpload.single('requirements'), as
       fieldErrors: { city: 'Choose a city/municipality from the location list.', province: 'Province must match the selected city/municipality.' },
     })
     const passwordHash = await bcrypt.hash(password, 10)
+    const nsrpAutoEnabledAtCreation = await nsrpAutomation.creationEnabled('Employer')
     try {
       createdEmployer = await createUserInRole('Employer', {
+        pageGuides: { seenPages: [], dismissedAll: false },
         email: email.trim(),
         passwordHash,
         emailVerified: true,
@@ -3542,6 +3877,7 @@ app.post('/api/employer-requests', requirementsUpload.single('requirements'), as
       uploadedAt: submittedAt,
     }
     const request = new EmployerRequest({
+      nsrpAutoEnabledAtCreation,
       email: email.trim(),
       passwordHash,
       companyName: companyName.trim(),
@@ -3575,6 +3911,7 @@ app.post('/api/employer-requests', requirementsUpload.single('requirements'), as
     }
     await UsedEmailProof.create({ jti: emailProof.jti, expiresAt: new Date(emailProof.exp * 1000) })
     await Employer.updateOne({ email: email.trim() }, { $set: { requirementsSubmittedAt: request.requirementsSubmittedAt } })
+    await nsrpAutomation.process({ role: 'Employer', accountId: createdEmployer._id, ip: req.ip })
     await notify({
       recipient: { id: createdEmployer._id, role: 'Employer', email: createdEmployer.email },
       type: 'employer_registration_review',
@@ -3781,6 +4118,7 @@ app.post('/api/employer-requirements', requirementsUpload.single('requirements')
     request.reviewedBy = undefined
     if (versionNumber > 1) request.resubmittedAt = submittedAt
     await request.save()
+    await nsrpAutomation.process({ role: 'Employer', accountId: verification.employer._id, ip: req.ip })
     uploadedPath = null
     await Employer.updateOne({ email: decoded.email }, {
       $set: {
@@ -3888,6 +4226,8 @@ app.put('/api/employer-requests/:id/status', async (req, res) => {
     const request = await EmployerRequest.findById(req.params.id)
     if (!request) return res.status(404).json({ error: 'Request not found' })
     const reviewReason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : ''
+    const foundationReview = (await nsrpAutomation.getSettings()).reviewToolsEnabled
+    if (foundationReview && !reviewReason) return res.status(400).json({ error: 'A reason is required for every review decision.' })
     if (status !== EMPLOYER_VERIFICATION_STATUS.APPROVED && !reviewReason) {
       return res.status(400).json({ error: 'A reason is required when declining or requesting a new document.' })
     }
@@ -3897,9 +4237,20 @@ app.put('/api/employer-requests/:id/status', async (req, res) => {
       return res.status(400).json({ error: 'Request already processed' })
     }
     const reviewedAt = new Date()
+    const reviewingAdmin = await Admin.findOne({ email: decoded.email }).select('_id').lean()
+    const reviewingAdminId = String(reviewingAdmin?._id || decoded.email)
+    if (foundationReview && status === 'approved') {
+      const version = request.requirementsVersions?.at(-1)
+      const legacy = version && await nsrpAutomation.decisions().findOne({ _id: `Employer:${verification.employer._id}:${version.version}` })
+      const unresolved = version?.findings?.length ? openFlags(version.findings).length : (legacy?.report?.findings || []).filter(f => ['warning', 'critical'].includes(f.severity) && !legacy.dismissals?.some(d => d.code === f.code)).length
+      if ((req.body?.unresolved ?? 0) !== unresolved) return res.status(409).json({ error: 'Flags changed; confirm the unresolved flag count again' })
+    }
+    const publicReason = foundationReview
+      ? status === 'approved' ? '' : status === 'needs_resubmission' ? 'Please submit a clearer or corrected NSRP Form 2 for PESO review.' : 'PESO could not approve this registration. Please contact the office for assistance.'
+      : reviewReason
     request.status = status
     request.adminDecision = status
-    request.reviewReason = reviewReason || undefined
+    request.reviewReason = publicReason || undefined
     request.reviewedBy = decoded.email
     request.reviewedAt = reviewedAt
     request.reviewHistory = [...(request.reviewHistory || []), { decision: status, reason: reviewReason || undefined, by: decoded.email, at: reviewedAt }]
@@ -3917,7 +4268,12 @@ app.put('/api/employer-requests/:id/status', async (req, res) => {
       latestVersion.status = status === EMPLOYER_VERIFICATION_STATUS.APPROVED ? 'approved' : 'rejected'
       latestVersion.reviewedAt = reviewedAt
       latestVersion.reviewedBy = decoded.email
-      latestVersion.reviewReason = reviewReason || undefined
+      latestVersion.reviewReason = publicReason || undefined
+      if (foundationReview) {
+        latestVersion.verificationAudit.push({ action: status === 'approved' ? 'approve' : status === 'needs_resubmission' ? 'resubmit' : 'decline', reason: reviewReason, by: reviewingAdminId, at: reviewedAt })
+        if (status === 'approved' && !latestVersion.autoApproved) latestVersion.approvedBy = reviewingAdminId
+        latestVersion.reviewRevision = (latestVersion.reviewRevision || 0) + 1
+      }
     }
     if (status === EMPLOYER_VERIFICATION_STATUS.APPROVED
       && !request.requirementsFile?.data
@@ -3931,7 +4287,7 @@ app.put('/api/employer-requests/:id/status', async (req, res) => {
       {
         $set: {
           verificationStatus: status,
-          verificationReason: reviewReason || undefined,
+          verificationReason: publicReason || undefined,
           approvalNoticePending: status === EMPLOYER_VERIFICATION_STATUS.APPROVED,
         },
         $push: { verificationHistory: { status, reason: reviewReason || undefined, by: decoded.email, at: reviewedAt } },
@@ -3945,15 +4301,13 @@ app.put('/api/employer-requests/:id/status', async (req, res) => {
       await notify({
         recipient: { id: employerAccount._id, role: 'Employer', email: employerAccount.email },
         type: approved ? 'employer_approved' : needsResubmission ? 'employer_resubmission_requested' : 'employer_declined',
-        title: approved ? 'Account approved' : needsResubmission ? 'Document needs resubmission' : `Account declined: ${reviewReason}`,
+        title: approved ? 'Account approved' : needsResubmission ? 'Document needs resubmission' : 'Registration review update',
         message: approved
           ? 'Your employer account is approved. You can now post jobs.'
-          : needsResubmission
-            ? `Please submit a new NSRP Form 2. Reason: ${reviewReason}`
-            : `Your employer account was declined. Reason: ${reviewReason}`,
+          : publicReason,
         link: '/verification',
         email: true,
-        metadata: { status, reason: reviewReason || undefined },
+        metadata: { status, ...(!foundationReview ? { reason: reviewReason || undefined } : {}) },
       })
     }
 
@@ -3982,6 +4336,7 @@ app.put('/api/applicants/:id/verification', async (req, res) => {
     const applicant = await Applicant.findById(req.params.id)
     if (!applicant) return res.status(404).json({ error: 'Applicant not found' })
     if (applicant.deletedAt) return res.status(409).json({ error: 'This account is closed. A new registration is required.' })
+    if (applicant.verificationStatus === 'waitlisted' && status !== 'restricted') return res.status(409).json({ code: 'WAITLIST_REVIEW_REQUIRED', error: 'Use the waitlist review actions with a reason and document comparison confirmation.' })
 
     const reviewReason = typeof reason === 'string' ? reason.trim() : ''
     if (unrestrict) {
@@ -4273,7 +4628,7 @@ export async function purgeExpiredVerificationDocuments() {
     })
     for (const applicant of stale) {
       const unset = {}
-      for (const key of ['birthCertificate', 'validId1', 'validId2', 'resume']) {
+      for (const key of ['birthCertificate', 'validId1', 'validId2', 'supportingExplanation', 'resume']) {
         const versions = applicant.verificationDocuments?.[key]?.versions || []
         versions.forEach((_, index) => {
           unset[`verificationDocuments.${key}.versions.${index}.data`] = 1
@@ -4291,6 +4646,9 @@ export async function purgeExpiredVerificationDocuments() {
   }
 }
 if (!isTestEnv) {
+  setInterval(() => consistencyWaitlist.daily().catch(() => console.error('[verification] waitlist reminder unavailable')), 60 * 60 * 1000).unref()
+  setInterval(() => verificationEngine.digest(), 24 * 60 * 60 * 1000).unref()
+  verificationEngine.digest()
   setInterval(purgeExpiredVerificationDocuments, 24 * 60 * 60 * 1000).unref()
   purgeExpiredVerificationDocuments()
 

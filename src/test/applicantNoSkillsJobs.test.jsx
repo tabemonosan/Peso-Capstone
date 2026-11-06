@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../App'
 
@@ -70,20 +70,20 @@ afterEach(() => {
 async function loginAsApplicant() {
   render(<App />)
   fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: 'noskills@peso.gov' } })
-  fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'Password123!' } })
+  fireEvent.change(screen.getByLabelText(/^Password$/i, { selector: 'input' }), { target: { value: 'Password123!' } })
   fireEvent.submit(screen.getByRole('button', { name: /Sign in/i }).closest('form'))
   await screen.findByRole('heading', { name: 'Home', exact: true })
 }
 
 describe('Job listings for an applicant with no skills', () => {
-  it('loads job listings and shows the dismissible skills hint without blocking', async () => {
+  it('shows no jobs until the applicant has saved matching skills', async () => {
     await loginAsApplicant()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Jobs' }))
 
-    // Jobs render normally even with an empty skills list
-    await waitFor(() => expect(screen.getAllByText('Cashier').length).toBeGreaterThan(0))
-    expect(screen.getAllByText('Encoder').length).toBeGreaterThan(0)
+    await screen.findByText('Add skills to your profile to see matching job offers.')
+    expect(screen.queryByText('Cashier')).not.toBeInTheDocument()
+    expect(screen.queryByText('Encoder')).not.toBeInTheDocument()
 
     // The hint is shown and does not block the listings
     const hint = screen.getByText('Add your skills to see jobs that match you.')
@@ -92,7 +92,7 @@ describe('Job listings for an applicant with no skills', () => {
     // Dismissing hides it (and persists via localStorage)
     fireEvent.click(screen.getByRole('button', { name: /Dismiss skills hint/i }))
     expect(screen.queryByText('Add your skills to see jobs that match you.')).not.toBeInTheDocument()
-    expect(screen.getAllByText('Cashier').length).toBeGreaterThan(0)
+    expect(screen.queryByText('Cashier')).not.toBeInTheDocument()
   })
 
   it('does not show the registration gate when all 7 required steps are done', async () => {

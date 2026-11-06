@@ -1,9 +1,13 @@
 import mongoose from 'mongoose'
+import { APPLICANT_STATUSES } from '../../shared/consistencyWaitlist.js'
 import { normalizeEmail } from '../utils/emailVerification.js'
 import { formatFullName, formatDisplayName } from '../../shared/nameFields.js'
 import { EMPLOYER_VERIFICATION_STATUSES, EMPLOYER_VERIFICATION_STATUS } from '../../shared/employerVerification.js'
+import { verificationVersionFields, verificationAccountFields } from './verification.js'
 
 const { Schema } = mongoose
+// Only new registrations receive this subdocument. Legacy accounts stay quiet.
+const pageGuidesSchema = new Schema({ seenPages: { type: [String], default: [] }, dismissedAll: { type: Boolean, default: false } }, { _id: false })
 
 // Shared email-verification fields (applicants and employers only; admins are provisioned)
 const emailVerificationFields = {
@@ -33,7 +37,7 @@ const verificationDocVersionSchema = new Schema({
     data: { type: Buffer, select: false },
   },
   version: { type: Number, required: true },
-  status: { type: String, enum: ['pending', 'approved', 'rejected', 'superseded'], default: 'pending' },
+  ...verificationVersionFields,
   // nsrpForm only: whether the document was generated from online answers or
   // uploaded as a pre-filled form.
   sourceType: { type: String, enum: ['generated', 'uploaded'], default: undefined },
@@ -77,12 +81,23 @@ const nsrpWorkExperienceSchema = new Schema({
 }, { _id: false })
 
 const applicantSchema = new Schema({
+  pageGuides: { type: pageGuidesSchema, default: undefined },
+  ...verificationAccountFields,
+  nsrpAutoEnabledAtCreation: { type: Boolean, select: false },
   sessionVersion: { type: Number, default: 0 },
   deletedAt: Date,
+  applyingSuspendedAt: Date,
+  applyingSuspensionReason: { type: String, select: false },
+  applyingSuspensionHistory: { type: [{ action: String, reason: String, by: String, at: Date }], select: false },
+  trustValue: { type: Number, default: 100, min: 0, max: 100, select: false },
+  trustRevision: { type: Number, default: 0, select: false },
+  trustEvents: { type: [Schema.Types.Mixed], select: false },
   retainedEmail: { type: String, select: false },
   email: { type: String, required: true, unique: true },  passwordHash: { type: String, required: true },
   ...emailVerificationFields,
-  verificationStatus: { type: String, enum: ['under_review', 'approved', 'declined', 'restricted'], default: 'under_review' },
+  verificationStatus: { type: String, enum: APPLICANT_STATUSES, default: 'under_review' },
+  consistencyState: { type: Schema.Types.Mixed, select: false },
+  consistencyDeclined: { type: Boolean, default: false },
   verificationReason: String,
   consentGivenAt: Date, // RA 10173 consent recorded at sign up
   verificationDocuments: {
@@ -90,6 +105,7 @@ const applicantSchema = new Schema({
     birthCertificate: verificationDocSlotSchema,
     validId1: verificationDocSlotSchema,
     validId2: verificationDocSlotSchema,
+    supportingExplanation: verificationDocSlotSchema,
     resume: verificationDocSlotSchema,
   },
   documentsPurgedAt: Date,
@@ -115,7 +131,9 @@ const applicantSchema = new Schema({
     workExperience: { type: [nsrpWorkExperienceSchema], default: [] },
     nsrp: { type: Schema.Types.Mixed, default: undefined },
     traits: String,
+    portfolioLinks: { type: [new Schema({ label: String, url: String }, { _id: false })], default: [] },
     summary: String,
+    summarySource: { type: String, enum: ['personal'] },
     profileImage: String,
     bannerImage: String,
   },
@@ -168,6 +186,11 @@ export function applicantDisplayName(applicant) {
 }
 
 const employerSchema = new Schema({
+  pageGuides: { type: pageGuidesSchema, default: undefined },
+  ...verificationAccountFields,
+  receivingApplicantsSuspendedAt: Date,
+  receivingApplicantsSuspensionReason: String,
+  applicationAccessHistory: [{ action: String, reason: String, by: String, at: Date }],
   email: { type: String, required: true, unique: true },
   passwordHash: { type: String, required: true },
   ...emailVerificationFields,
@@ -185,6 +208,7 @@ const employerSchema = new Schema({
   },
   approvalNoticePending: { type: Boolean, default: false },
   establishmentAddress: {
+    barangay: { type: String, trim: true, maxlength: 80 },
     city: { type: String, trim: true, maxlength: 80 },
     province: { type: String, trim: true, maxlength: 80 },
   },
@@ -243,14 +267,20 @@ const referralSchema = new Schema({
   jobId: { type: Schema.Types.ObjectId, ref: 'Job', required: true },
   applicantId: { type: Schema.Types.ObjectId, ref: 'Applicant', required: true },
   employerId: { type: Schema.Types.ObjectId, ref: 'Employer', required: true },
-  referredBy: { type: Schema.Types.ObjectId, ref: 'Admin', required: true },
-  status: { type: String, enum: ['pending', 'accepted', 'declined'], default: 'pending' },
+  referredBy: { type: Schema.Types.ObjectId, ref: 'Admin' },
+  applicationId: { type: Schema.Types.ObjectId, ref: 'JobApplication' },
+  source: { type: String, enum: ['auto', 'admin'], default: 'admin' },
+  deliveryState: { type: String, enum: ['processing', 'ready'], default: 'ready' },
+  status: { type: String, enum: ['pending', 'accepted', 'declined', 'withdrawn_by_admin', 'withdrawn'], default: 'pending' },
+  history: [{ action: String, status: String, by: String, reason: String, at: Date }],
   createdAt: { type: Date, default: Date.now },
 }, { collection: 'referrals', timestamps: true })
 referralSchema.index({ employerId: 1, createdAt: -1, _id: 1 })
 referralSchema.index({ createdAt: -1, _id: 1 })
+referralSchema.index({ applicantId: 1, jobId: 1 }, { unique: true })
 
 const hireReportSchema = new Schema({
+  submissionKey: { type: String, select: false },
   referralId: { type: Schema.Types.ObjectId, ref: 'Referral' },
   applicantId: { type: Schema.Types.ObjectId, ref: 'Applicant', required: true },
   employerId: { type: Schema.Types.ObjectId, ref: 'Employer', required: true },
@@ -264,6 +294,8 @@ const hireReportSchema = new Schema({
 }, { collection: 'hire_reports', timestamps: true })
 hireReportSchema.index({ reportedAt: -1, _id: 1 })
 hireReportSchema.index({ employerId: 1, reportedAt: -1 })
+// Legacy statements without a key remain untouched, including historical duplicates.
+hireReportSchema.index({ submissionKey: 1 }, { unique: true, sparse: true })
 
 // Binary content of applicant verification documents lives here, NOT inside the
 // Applicant document: a full set of 5 MB files would exceed MongoDB's 16 MB
@@ -271,7 +303,7 @@ hireReportSchema.index({ employerId: 1, reportedAt: -1 })
 // `data` is select:false so queries must opt in explicitly.
 const documentFileSchema = new Schema({
   applicant: { type: Schema.Types.ObjectId, ref: 'Applicant', required: true, index: true },
-  slot: { type: String, enum: ['nsrpForm', 'birthCertificate', 'validId1', 'validId2', 'resume'], required: true },
+  slot: { type: String, enum: ['nsrpForm', 'birthCertificate', 'validId1', 'validId2', 'supportingExplanation', 'reputationReview', 'resume'], required: true },
   version: { type: Number, required: true },
   side: { type: String, enum: ['front', 'back'], default: 'front' },
   mimetype: String,
@@ -282,6 +314,7 @@ const documentFileSchema = new Schema({
 documentFileSchema.index({ applicant: 1, slot: 1, version: 1, side: 1 }, { unique: true })
 
 const ratingSchema = new Schema({
+  submissionKey: { type: String, select: false },
   fromUserId: { type: Schema.Types.ObjectId, required: true },
   fromRole: { type: String, enum: ['employer', 'applicant'], required: true },
   toUserId: { type: Schema.Types.ObjectId, required: true },
@@ -291,6 +324,7 @@ const ratingSchema = new Schema({
   comment: String,
   createdAt: { type: Date, default: Date.now },
 }, { collection: 'ratings', timestamps: true })
+ratingSchema.index({ submissionKey: 1 }, { unique: true, sparse: true })
 
 // 6-digit signup email verification codes. Only the HMAC-SHA256 hash of the
 // code is stored; the TTL index matches the 10-minute code lifetime.
@@ -389,12 +423,15 @@ async function createUserInRole(role, data) {
 }
 
 async function updateUserProfileByEmail(email, profile) {
+  // Patch editable values without replacing NSRP answers or qualifications
+  // that were not part of the profile editor's request.
+  const fields = Object.fromEntries(Object.entries(profile).filter(([key]) => !key.includes('.') && !key.startsWith('$')).map(([key, value]) => [`profile.${key}`, value]))
   // Try updating in each collection; return updated doc if found
-  let user = await Applicant.findOneAndUpdate({ email }, { profile }, { new: true })
+  let user = await Applicant.findOneAndUpdate({ email }, { $set: fields }, { returnDocument: 'after' })
   if (user) return { user, type: 'Applicant' }
-  user = await Employer.findOneAndUpdate({ email }, { profile }, { new: true })
+  user = await Employer.findOneAndUpdate({ email }, { $set: fields }, { returnDocument: 'after' })
   if (user) return { user, type: 'Employer' }
-  user = await Admin.findOneAndUpdate({ email }, { profile }, { new: true })
+  user = await Admin.findOneAndUpdate({ email }, { $set: fields }, { returnDocument: 'after' })
   if (user) return { user, type: 'Admin' }
   return null
 }

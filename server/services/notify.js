@@ -35,7 +35,8 @@ export function createNotifier({
     return { id, role, email, firstName }
   }
 
-  // Saves the notification and optionally emails it. Never throws, so callers' request flows are not broken.
+  // Persist in-app notifications first. Optional best-effort email must not
+  // hold approval/acceptance HTTP requests open while SMTP is unavailable.
   async function notify({ recipient, type, title, message, link = '', email = false, metadata = {} } = {}) {
     try {
       if (!title || !message) return null
@@ -59,14 +60,11 @@ export function createNotifier({
       })
 
       if (email === true && resolved.email) {
-        try {
-          // Greet applicants by first name when we have it
-          const greeting = resolved.firstName ? `Hi ${resolved.firstName},\n\n` : ''
-          const body = `${greeting}${message}`
-          await mail(resolved.email, title, link ? `${body}\n\nOpen: ${link}` : body)
-        } catch (err) {
-          logger.error?.('notify: email failed', err?.message || err)
-        }
+        const greeting = resolved.firstName ? `Hi ${resolved.firstName},\n\n` : ''
+        const body = `${greeting}${message}`
+        void Promise.resolve().then(() => mail(resolved.email, title, link ? `${body}\n\nOpen: ${link}` : body)).catch(() => {
+          logger.error?.('notify: email failed')
+        })
       }
       return doc
     } catch (err) {

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react"
+import { useBodyScrollLock } from '../hooks/useModalLayer'
 
 // LinkedIn-style filter bar for the applicant job board: pill buttons that open
 // checkbox popovers, active-filter chips, and a mobile bottom sheet.
@@ -67,25 +68,11 @@ function Popover({ title, onClear, onClose, children }) {
   )
 }
 
-function SkillChips({ skills, onToggle }) {
-  if (skills.length === 0) return null
-  return (
-    <div className="mb-2 flex flex-wrap gap-1.5">
-      {skills.map((skill) => (
-        <span key={skill} className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-xs text-black">
-          {skill}
-          <button type="button" aria-label={`Remove ${skill}`} onClick={() => onToggle(skill)} className="hover:text-blue-700">×</button>
-        </span>
-      ))}
-    </div>
-  )
-}
-
-export default function JobFiltersBar({ filters, facets, resultCount, mySkills = [], onToggle, onDatePosted, onKeyword, onClearGroup, onClearAll }) {
-  const [openPill, setOpenPill] = useState(null) // 'skills' | 'locations' | 'locationTypes' | 'employmentTypes' | 'posted' | null
-  const [skillQuery, setSkillQuery] = useState('')
+export default function JobFiltersBar({ filters, facets, resultCount, onToggle, onDatePosted, onKeyword, onClearGroup, onClearAll }) {
+  const [openPill, setOpenPill] = useState(null) // 'locations' | 'locationTypes' | 'employmentTypes' | 'posted' | null
   const [locationQuery, setLocationQuery] = useState('')
   const [sheetOpen, setSheetOpen] = useState(false)
+  useBodyScrollLock(sheetOpen)
   const barRef = useRef(null)
 
   // Esc / click outside closes the open popover
@@ -105,10 +92,8 @@ export default function JobFiltersBar({ filters, facets, resultCount, mySkills =
     if (!sheetOpen) return undefined
     const onKeyDown = (event) => { if (event.key === 'Escape') setSheetOpen(false) }
     document.addEventListener('keydown', onKeyDown)
-    document.body.style.overflow = 'hidden'
     return () => {
       document.removeEventListener('keydown', onKeyDown)
-      document.body.style.overflow = ''
     }
   }, [sheetOpen])
 
@@ -127,15 +112,12 @@ export default function JobFiltersBar({ filters, facets, resultCount, mySkills =
           : 'border-slate-300 bg-white text-black hover:border-blue-500 hover:bg-blue-50'
     }`
 
-  const skillOptions = facets.skills
-    .filter((entry) => !skillQuery.trim() || entry.value.toLowerCase().includes(skillQuery.trim().toLowerCase()))
   const locationOptions = facets.locations
     .filter((entry) => !locationQuery.trim() || entry.value.toLowerCase().includes(locationQuery.trim().toLowerCase()))
 
   const postedLabel = filters.datePosted ? `Posted · ${DATE_POSTED_LABELS[filters.datePosted] || filters.datePosted}` : 'Posted'
 
   const activeChips = [
-    ...filters.skills.map((value) => ({ group: 'skills', value })),
     ...filters.locations.map((value) => ({ group: 'locations', value })),
     ...filters.locationTypes.map((value) => ({ group: 'locationTypes', value })),
     ...filters.employmentTypes.map((value) => ({ group: 'employmentTypes', value })),
@@ -144,8 +126,7 @@ export default function JobFiltersBar({ filters, facets, resultCount, mySkills =
   ]
 
   const sections = [
-    { id: 'skills', title: 'Skills', options: skillOptions, selected: filters.skills, searchable: true },
-    { id: 'locations', title: 'Location', options: locationOptions, selected: filters.locations, searchable: true },
+    { id: 'locations', title: 'City/Municipality', options: locationOptions, selected: filters.locations, searchable: true },
     { id: 'locationTypes', title: 'Location type', options: facets.locationTypes, selected: filters.locationTypes },
     { id: 'employmentTypes', title: 'Employment type', options: facets.employmentTypes, selected: filters.employmentTypes },
   ]
@@ -183,27 +164,11 @@ export default function JobFiltersBar({ filters, facets, resultCount, mySkills =
                   onClear={() => onClearGroup(section.id)}
                   onClose={() => setOpenPill(null)}
                 >
-                  {section.id === 'skills' && (
-                    <>
-                      <SkillChips skills={filters.skills} onToggle={(value) => onToggle('skills', value)} />
-                      {mySkills.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            mySkills.forEach((skill) => { if (!filters.skills.includes(skill)) onToggle('skills', skill) })
-                          }}
-                          className="mb-2 w-full rounded-xl border border-blue-200 bg-white px-2 py-1.5 text-xs font-semibold text-black hover:bg-blue-50"
-                        >
-                          Use my skills ({mySkills.length})
-                        </button>
-                      )}
-                    </>
-                  )}
                   {section.searchable && (
                     <input
                       type="text"
-                      value={section.id === 'skills' ? skillQuery : locationQuery}
-                      onChange={(event) => (section.id === 'skills' ? setSkillQuery(event.target.value) : setLocationQuery(event.target.value))}
+                      value={locationQuery}
+                      onChange={(event) => setLocationQuery(event.target.value)}
                       placeholder={`Search ${section.title.toLowerCase()}…`}
                       aria-label={`Search ${section.title}`}
                       className="mb-2 w-full rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-black"

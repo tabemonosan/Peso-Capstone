@@ -25,18 +25,23 @@ export default function ConfirmDialog({
   busy = false,
   requireReason = false,
   reasonMinLength = 5,
+  reasonMaxLength,
   quickReasons = [],
   initialReason = "",
   error = "",
   onConfirm,
   onCancel,
+  children,
+  confirmDisabled = false,
+  automatic = false,
 }) {
   const [reason, setReason] = useState(initialReason)
   const cancelRef = useRef(null)
   // Captured during render, before the Modal child moves focus into the dialog
   const openerRef = useRef(null)
   if (openerRef.current === null) openerRef.current = document.activeElement
-  const reasonError = requireReason && reason.trim().length < reasonMinLength
+  const reasonTooLong = reasonMaxLength !== undefined && reason.length > reasonMaxLength
+  const reasonError = requireReason && (reason.trim().length < reasonMinLength || reasonTooLong)
 
   // Default focus lands on Cancel so a quick Enter never confirms;
   // when the dialog closes, focus returns to the button that opened it.
@@ -51,9 +56,10 @@ export default function ConfirmDialog({
 
   return (
     <Modal onClose={busy ? undefined : onCancel} labelledBy="confirm-dialog-title" describedBy="confirm-dialog-note" maxWidth="max-w-md" role="alertdialog">
-      <div>
+      <div data-action-confirmation={automatic ? 'automatic' : 'manual'}>
         <h3 id="confirm-dialog-title" className="text-lg font-bold text-slate-900">{title}</h3>
         {note && <p id="confirm-dialog-note" className="mt-1 text-sm text-slate-600">{note}</p>}
+        {children}
 
         {requireReason && (
           <div className="mt-3">
@@ -76,14 +82,15 @@ export default function ConfirmDialog({
               value={reason}
               onChange={(event) => setReason(event.target.value)}
               rows={3}
+              maxLength={reasonMaxLength}
               disabled={busy}
-              placeholder={`Reason (at least ${reasonMinLength} characters)`}
+              placeholder={reasonMaxLength !== undefined ? `Reason (${reasonMinLength}-${reasonMaxLength} characters)` : `Reason (at least ${reasonMinLength} characters)`}
               aria-label="Reason"
               aria-invalid={reason.length > 0 && reasonError}
               className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
             />
             {reason.length > 0 && reasonError && (
-              <p className="mt-1 text-xs text-rose-600">Reason must be at least {reasonMinLength} characters.</p>
+              <p className="mt-1 text-xs text-rose-600">{reasonTooLong ? `Use ${reasonMaxLength} characters or fewer.` : `Reason must be at least ${reasonMinLength} characters.`}</p>
             )}
           </div>
         )}
@@ -106,7 +113,7 @@ export default function ConfirmDialog({
             <button
               type="button"
               onClick={() => onConfirm(reason)}
-              disabled={busy || (requireReason && reasonError)}
+              disabled={busy || confirmDisabled || (requireReason && reasonError)}
               className={`rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40 ${confirmTone === 'danger' ? 'bg-red-600' : 'bg-green-600'}`}
             >
               Retry
@@ -115,7 +122,7 @@ export default function ConfirmDialog({
             <button
               type="button"
               onClick={() => onConfirm(reason)}
-              disabled={busy || (requireReason && reasonError)}
+              disabled={busy || confirmDisabled || (requireReason && reasonError)}
               className={`rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40 ${confirmTone === 'danger' ? 'bg-red-600' : 'bg-green-600'}`}
             >
               {busy ? busyLabel : confirmLabel}

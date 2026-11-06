@@ -1,4 +1,4 @@
-import { encodeLocationFilters, decodeLocationFilters } from '../../shared/phLocations.js'
+import { encodeLocationFilters, decodeLocationFilters, normalizeCityFilters } from '../../shared/phLocations.js'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 // Applicant job-board filter state.
@@ -25,8 +25,8 @@ const readUrlState = () => {
     if (!hasAny) return null
     return {
       filters: {
-        skills: list('skills'),
-        locations: decodeLocationFilters(params.get('locations')),
+        skills: [],
+        locations: normalizeCityFilters(decodeLocationFilters(params.get('locations'))),
         locationTypes: list('types'),
         employmentTypes: list('employment'),
         datePosted: params.get('posted') || '',
@@ -46,7 +46,7 @@ const readStoredState = () => {
     const parsed = JSON.parse(raw)
     if (!parsed || typeof parsed !== 'object') return null
     return {
-      filters: { ...EMPTY_FILTERS, ...(parsed.filters || {}) },
+      filters: { ...EMPTY_FILTERS, ...(parsed.filters || {}), skills: [], locations: normalizeCityFilters(Array.isArray(parsed.filters?.locations) ? parsed.filters.locations : []) },
       sortId: typeof parsed.sortId === 'string' ? parsed.sortId : 'relevant',
     }
   } catch {
@@ -62,7 +62,7 @@ const writeUrl = (filters, sortId) => {
       if (text) url.searchParams.set(key, text)
       else url.searchParams.delete(key)
     }
-    set('skills', filters.skills)
+    set('skills', '')
     set('locations', encodeLocationFilters(filters.locations))
     set('types', filters.locationTypes)
     set('employment', filters.employmentTypes)
@@ -74,6 +74,22 @@ const writeUrl = (filters, sortId) => {
 }
 
 export function useJobFilters({ onResetPage } = {}) {
+  useEffect(() => {
+    // Retire explicit skills filters without changing profile-based job matching.
+    const url = new URL(window.location.href)
+    if (url.searchParams.has('skills')) {
+      url.searchParams.delete('skills')
+      window.history.replaceState({}, '', url)
+    }
+    try {
+      const stored = JSON.parse(sessionStorage.getItem(STORAGE_KEY))
+      if (stored?.filters?.skills?.length) {
+        stored.filters.skills = []
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(stored))
+      }
+    } catch { /* Storage is optional. */ }
+  }, [])
+
   const [initial] = useState(() => (typeof window !== 'undefined' ? (readUrlState() || readStoredState()) : null))
   const [filters, setFilters] = useState(initial?.filters || EMPTY_FILTERS)
   const [sortId, setSortId] = useState(initial?.sortId || 'relevant')
@@ -87,6 +103,7 @@ export function useJobFilters({ onResetPage } = {}) {
   }, [onResetPage])
 
   const toggleValue = useCallback((group, value) => {
+    if (group === 'skills') return
     const current = filters[group] || []
     const next = current.includes(value) ? current.filter((entry) => entry !== value) : [...current, value]
     commit({ ...filters, [group]: next }, sortId)
@@ -124,13 +141,13 @@ export function useJobFilters({ onResetPage } = {}) {
     return () => window.removeEventListener('popstate', onPopState)
   }, [])
 
-  const activeCount = filters.skills.length + filters.locations.length + filters.locationTypes.length
+  const activeCount = filters.locations.length + filters.locationTypes.length
     + filters.employmentTypes.length + (filters.datePosted ? 1 : 0) + (filters.keyword ? 1 : 0)
 
   const queryParams = useMemo(() => {
     const sortOption = JOB_SORT_OPTIONS.find((option) => option.id === sortId) || JOB_SORT_OPTIONS[0]
     return {
-      skills: filters.skills.join(','),
+      skills: '',
       locations: encodeLocationFilters(filters.locations),
       locationTypes: filters.locationTypes.join(','),
       employmentTypes: filters.employmentTypes.join(','),

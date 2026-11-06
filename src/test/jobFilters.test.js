@@ -18,6 +18,27 @@ describe('splitParam', () => {
 })
 
 describe('buildJobFilter', () => {
+  it('extracts only the municipality from full-address filters and facet labels', () => {
+    for (const locations of ['Calpi, Oas, Albay', JSON.stringify(['Calpi, Oas, Albay'])]) {
+      const result = buildJobFilter({ locations })
+      expect(result.applied.locations).toEqual(['Oas'])
+      expect(result.groups[0].$or[0].city.test('Oas')).toBe(true)
+    }
+    expect(countJobFacets([{ location: 'Calpi, Oas, Albay' }, { location: 'Balogo, Oas, Albay' }]).locations).toEqual([{ value: 'Oas', count: 2 }])
+  })
+
+  it('keeps supported cities with no jobs as actual filters and matches legacy branch addresses', () => {
+    const empty = buildJobFilter({ locations: 'Tiwi' })
+    expect(empty.applied.locations).toEqual(['Tiwi'])
+    expect(empty.groups).toHaveLength(1)
+    const { groups } = buildJobFilter({ locations: 'Oas' })
+    expect(groups[0].$or[0].city.test('Oas')).toBe(true)
+    const pattern = groups[0].$or[1].$and[1].location
+    expect(pattern.test('Calpi, Oas, Albay')).toBe(true)
+    expect(pattern.test('Oas, Albay')).toBe(true)
+    expect(pattern.test('Manito, Albay')).toBe(false)
+  })
+
   it('ORs within one filter group', () => {
     const { groups } = buildJobFilter({ employmentTypes: 'Full-time,Part-time' }, ALLOWED)
     expect(groups).toHaveLength(1)
@@ -28,7 +49,7 @@ describe('buildJobFilter', () => {
     const { groups } = buildJobFilter({ employmentTypes: 'Full-time', locations: 'Legazpi City', skills: 'Cooking' }, ALLOWED)
     expect(groups).toHaveLength(3)
     expect(groups.some((g) => g.employmentType)).toBe(true)
-    expect(groups.some((g) => g.location)).toBe(true)
+    expect(groups.some((g) => g.location || g.$or)).toBe(true)
     expect(groups.some((g) => g.skills)).toBe(true)
   })
 

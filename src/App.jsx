@@ -1,7 +1,26 @@
-import { PH_LOCATIONS as albayLocations, getEmployerAddress } from '../shared/phLocations.js'
-import { useCallback, useEffect, useRef, useState } from "react"
-import { createPortal } from "react-dom"
+import AdminReportMaker from './components/AdminReportMaker'
+import { partitionJobArchive } from '../shared/jobArchive.js'
+import PasswordInput from './components/PasswordInput'
+import SkillTagPicker from './components/SkillTagPicker'
+import LandingPage from './components/LandingPage'
+import ProfileDropdown from './components/ProfileDropdown'
+import PortfolioLinksEditor from './components/PortfolioLinksEditor'
+import PortfolioLinks from './components/PortfolioLinks'
+import ResumeUploader from './components/ResumeUploader'
+import NsrpImportReview from './components/NsrpImportReview'
+import PageGuide from './components/PageGuide'
+import MyApplicationsPage from './components/MyApplicationsPage'
+import ApplicantReputationPage from './components/ApplicantReputationPage'
+import PortalNotice from './components/PortalNotice'
+import { showNotice } from './utils/portalNotice'
+import { fetchWithTimeout } from './utils/fetchWithTimeout'
+import JobScreeningSummary from './components/JobScreeningSummary'
+import { applicantProfileContent } from '../shared/applicantProfile.js'
+import EditableProfileCover from './components/EditableProfileCover'
+import { PH_LOCATIONS as albayLocations, getEmployerJobAddress as getEmployerAddress } from '../shared/phLocations.js'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { API_URL } from "./config"
+import { JOB_SKILL_OPTIONS as availableSkills } from '../shared/jobSkills.js'
 import JobsView from "./components/JobsView"
 import VerificationDocumentsForm, { emptyVerificationDocs, validateVerificationDocs } from "./components/VerificationDocumentsForm"
 import VerificationDocsReviewModal from "./components/VerificationDocsReviewModal"
@@ -10,17 +29,20 @@ import VerifyEmailPage from "./components/VerifyEmailPage"
 import EmailVerificationBanner from "./components/EmailVerificationBanner"
 import CompleteRegistrationPage from "./components/CompleteRegistrationPage"
 import JobPostingFields from "./components/JobPostingFields"
-import { emptyJobPosting, normalizeJobPosting, validateJobPosting } from "../shared/jobPosting.js"
+import EmployerJobBrowser from './components/EmployerJobBrowser'
+import { notificationDestination, notificationViewFromQuery } from './utils/notificationLinks'
+import { emptyJobPosting, normalizeJobPosting, validateJobPosting, formatLocation } from "../shared/jobPosting.js"
 import AdminJobTitlesPage from "./components/AdminJobTitlesPage"
 import PasswordChecklist from "./components/PasswordChecklist"
 import ApplicantSignupWizard from "./components/ApplicantSignupWizard"
 import EmployerSignupWizard from "./components/EmployerSignupWizard"
+import AdminNsrpAutomation, { AdminNsrpAccountDecision } from './components/AdminNsrpAutomation'
+import AdminDocumentVerification from './components/AdminDocumentVerification'
 import EmployerVerificationPage from "./components/EmployerVerificationPage"
 import { validatePassword } from "./utils/passwordPolicy"
 import { SUFFIX_OPTIONS, capitalizeName, validateNameField, formatFullName, formatDisplayName } from "../shared/nameFields.js"
 import { EMPLOYER_VERIFICATION_STATUS as EMPLOYER_STATUS } from "../shared/employerVerification.js"
 import ReferralList from "./components/ReferralList"
-import ApplicantEmploymentReports from "./components/ApplicantEmploymentReports"
 import ApplicantAccountSettings from "./components/ApplicantAccountSettings"
 import AdminAccountDeletionRequests from "./components/AdminAccountDeletionRequests"
 import AdminEmploymentUpdatesPage from "./components/AdminEmploymentUpdatesPage"
@@ -36,7 +58,8 @@ import { usePagination, useDebouncedValue } from "./hooks/usePagination"
 import { useSort } from "./hooks/useSort"
 import { sortItems } from "./utils/sortItems"
 import RoleDashboard from "./components/AllDashboard"
-import PesoReferralPanel from "./components/PesoReferralPanel"
+import ApplicantReviewStatus from './components/ApplicantReviewStatus'
+import AdminReferralsPage from './components/AdminReferralsPage'
 
 const focusJobError = (form) => requestAnimationFrame(() => {
   const input = form?.querySelector('[aria-invalid="true"]')
@@ -61,6 +84,7 @@ function formatApplicantPhone(phone) {
 const navigationByRole = {
   Admin: [
     { id: "dashboard", label: "Dashboard" },
+    { id: "report-maker", label: "Report maker" },
     { id: "employers", label: "Employers" },
     { id: "applicants", label: "Applicants" },
     { id: "requests", label: "Employer Requests" },
@@ -68,7 +92,7 @@ const navigationByRole = {
     { id: "jobs", label: "Job Postings" },
     { id: "job-titles", label: "Job Titles" },
     { id: "employment-updates", label: "Hiring Updates" },
-    { id: "peso-referrals", label: "Reports" },
+    { id: "peso-referrals", label: "Referrals and applications" },
   ],
   Employer: [
     { id: "complete", label: "Complete Registration" },
@@ -82,90 +106,15 @@ const navigationByRole = {
   Applicant: [
     { id: "complete", label: "Complete Registration" },
     { id: "dashboard", label: "Home" },
-    { id: "employment-reports", label: "Employment updates" },
+    { id: "my-applications", label: "My applications" },
+    { id: "my-reputation", label: "My reputation" },
     { id: "jobs", label: "Jobs" },
     { id: "reputation", label: "Reviews" },
     { id: "notify", label: "Notifications" },
   ],
 }
 
-const availableSkills = [
-  "Software Engineer",
-  "Frontend Developer",
-  "Backend Developer",
-  "Full-Stack Developer",
-  "Web Developer",
-  "Mobile Developer",
-  "DevOps Engineer",
-  "Data Analyst",
-  "Data Scientist",
-  "Machine Learning Engineer",
-  "Cybersecurity Analyst",
-  "IT Support Specialist",
-  "Network Engineer",
-  "Database Administrator",
-  "QA Engineer",
-  "UI/UX Designer",
-  "Product Manager",
-  "Project Manager",
-  "Business Analyst",
-  "Accountant",
-  "Financial Analyst",
-  "Bookkeeper",
-  "Human Resources Specialist",
-  "Recruiter",
-  "Sales Representative",
-  "Account Manager",
-  "Marketing Specialist",
-  "Digital Marketing Specialist",
-  "Social Media Manager",
-  "Content Writer",
-  "Copywriter",
-  "Graphic Designer",
-  "Video Editor",
-  "Customer Service Representative",
-  "Call Center Agent",
-  "Virtual Assistant",
-  "Administrative Assistant",
-  "Executive Assistant",
-  "Office Clerk",
-  "Data Entry Specialist",
-  "Operations Manager",
-  "Supply Chain Specialist",
-  "Logistics Coordinator",
-  "Warehouse Associate",
-  "Delivery Driver",
-  "Professional Driver",
-  "Security Guard",
-  "Cashier",
-  "Retail Associate",
-  "Store Manager",
-  "Chef",
-  "Cook",
-  "Baker",
-  "Waiter / Waitress",
-  "Barista",
-  "Housekeeper",
-  "Janitor",
-  "Caregiver",
-  "Nurse",
-  "Medical Technologist",
-  "Pharmacist",
-  "Teacher",
-  "Tutor",
-  "Electrician",
-  "Plumber",
-  "Carpenter",
-  "Welder",
-  "Mechanic",
-  "Construction Worker",
-  "Civil Engineer",
-  "Mechanical Engineer",
-  "Electrical Engineer",
-  "Architect",
-  "Landscaper",
-  "Farm Worker",
-]
+
 
 // Municipalities/Cities of Albay with their barangays
 
@@ -229,12 +178,18 @@ function App() {
   const [activeRole, setActiveRole] = useState(() => typeof window !== "undefined" ? (localStorage.getItem('peso-active-role') || 'Applicant') : 'Applicant')
   const [activeView, setActiveView] = useState(() => {
     const saved = typeof window !== 'undefined' ? localStorage.getItem('peso-active-view') : null
-    return saved === 'all-dashboard' ? 'dashboard' : (saved || 'dashboard')
+    return saved === 'employment-reports' ? 'my-applications' : saved === 'all-dashboard' ? 'dashboard' : (saved || 'dashboard')
   })
   const [currentUser, setCurrentUser] = useState(null)
   const [showProfileDocuments, setShowProfileDocuments] = useState(() => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('editNsrp') === '1')
   const documentLinkHandled = useRef(false)
   const [isLoggedIn, setIsLoggedIn] = useState(false)
+  useLayoutEffect(() => {
+    if (!isLoggedIn) return
+    const page = document.scrollingElement || document.documentElement
+    page.scrollTop = 0
+    page.scrollLeft = 0
+  }, [isLoggedIn])
   const [userAccounts, setUserAccounts] = useState(initialAccounts)
   const [formData, setFormData] = useState(() => ({
     email: typeof window !== "undefined" ? localStorage.getItem("peso-portal-remembered-email") || "" : "",
@@ -243,8 +198,6 @@ function App() {
   const [rememberMe, setRememberMe] = useState(() =>
     typeof window !== "undefined" && Boolean(localStorage.getItem("peso-portal-remembered-email")),
   )
-  const [showPassword, setShowPassword] = useState(false)
-  const [showSignupPassword, setShowSignupPassword] = useState(false)
   const [profileData, setProfileData] = useState({
     name: "",
     firstName: "",
@@ -262,6 +215,11 @@ function App() {
     website: "",
   })
   const [isEditingProfile, setIsEditingProfile] = useState(false)
+  const [showPortfolioLinks, setShowPortfolioLinks] = useState(false)
+  const [showResumeUploader, setShowResumeUploader] = useState(false)
+  const [confirmLogout, setConfirmLogout] = useState(false)
+  const [profileSaving, setProfileSaving] = useState(false)
+  const profilePhotoInputRef = useRef(null)
   const [resumeFile, setResumeFile] = useState(null)
   const [resumeInfo, setResumeInfo] = useState(null)
   const [nsrpVerificationInfo, setNsrpVerificationInfo] = useState(null)
@@ -288,6 +246,7 @@ function App() {
       }
     }
     // Applicant/Admin default mapping
+    const content = applicantProfileContent(base)
     return {
       name: formatFullName(base) || base.name || '',
       firstName: base.firstName || '',
@@ -296,9 +255,9 @@ function App() {
       suffix: base.suffix || '',
       noMiddleName: !base.middleName,
       location: base.location || '',
-      skills: normalizeSkills(base.skills),
+      skills: normalizeSkills(content.skills),
       traits: base.traits || '',
-      summary: base.summary || '',
+      summary: content.summary,
       companyName: base.companyName || '',
       contactName: base.contactName || '',
       phone: base.phone || '',
@@ -314,74 +273,6 @@ const toggleSkill = (selected, skill) => {
     return normalized.filter((item) => item !== skill)
   }
   return [...normalized, skill]
-}
-
-// Tag-style skill/title picker: selected items as removable chips + "Add title" search input
-function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }) {
-  const [query, setQuery] = useState('')
-  const normalized = Array.isArray(selected) ? selected : []
-  const trimmed = query.trim()
-  const suggestions = trimmed
-    ? availableSkills.filter((skill) => skill.toLowerCase().includes(trimmed.toLowerCase()) && !normalized.includes(skill)).slice(0, 8)
-    : []
-  const inputCls = 'shared-form-control w-full rounded-2xl px-3 py-2 text-sm'
-  const suggestionCls = theme === 'dark'
-    ? 'cursor-pointer px-3 py-2 text-sm text-slate-200 hover:bg-slate-700'
-    : 'cursor-pointer px-3 py-2 text-sm text-black hover:bg-slate-100'
-  const chipCls = theme === 'dark'
-    ? 'inline-flex items-center gap-2 rounded-full border border-cyan-500/40 bg-cyan-500/10 px-3 py-1 text-sm font-medium text-cyan-200'
-    : 'inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1 text-sm font-medium text-black'
-  return (
-    <div className="skill-tag-picker mt-2 space-y-2">
-      {normalized.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {normalized.map((skill) => (
-            <span key={skill} className={`skill-tag-chip ${chipCls}`}>
-              {skill}
-              {!disabled && (
-                <button
-                  type="button"
-                  aria-label={`Remove ${skill}`}
-                  onClick={() => onChange(normalized.filter((item) => item !== skill))}
-                  className={`skill-tag-remove ${theme === 'dark' ? 'text-cyan-300 hover:text-white' : 'text-slate-500 hover:text-black'}`}
-                >
-                  ×
-                </button>
-              )}
-            </span>
-          ))}
-        </div>
-      )}
-      {!disabled && (
-        <div className="relative">
-          <input
-            type="text"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Add title"
-            className={`skill-tag-input ${inputCls}`}
-          />
-          {suggestions.length > 0 && (
-            <div className={`skill-tag-suggestions absolute z-20 mt-1 w-full overflow-hidden rounded-xl border ${theme === 'dark' ? 'border-slate-700 bg-slate-900' : 'border-slate-300 bg-white'} shadow-lg`}>
-              {suggestions.map((skill) => (
-                <button
-                  key={skill}
-                  type="button"
-                  onClick={() => {
-                    onChange([...normalized, skill])
-                    setQuery('')
-                  }}
-                  className={`skill-tag-suggestion block w-full text-left ${suggestionCls}`}
-                >
-                  {skill}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
 }
 
   const [authView, setAuthView] = useState(() => {
@@ -452,6 +343,15 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
   const [declinedJobs, setDeclinedJobs] = useState([])
   const [referredApplicantIdsByJob, setReferredApplicantIdsByJob] = useState({})
   const [myJobs, setMyJobs] = useState([])
+  const [jobArchiveClock, setJobArchiveClock] = useState(Date.now)
+  useEffect(() => {
+    if (!isLoggedIn || activeRole !== 'Employer') return undefined
+    const refresh = () => setJobArchiveClock(Date.now())
+    refresh()
+    const timer = setInterval(refresh, 60000)
+    window.addEventListener('focus', refresh)
+    return () => { clearInterval(timer); window.removeEventListener('focus', refresh) }
+  }, [isLoggedIn, activeRole])
   const [jobSearchTerm, setJobSearchTerm] = useState('')
   const [adminJobSearchTerm, setAdminJobSearchTerm] = useState('')
   const [adminEmployerSearchTerm, setAdminEmployerSearchTerm] = useState('')
@@ -466,7 +366,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
   const [selectedJob, setSelectedJob] = useState(null)
   const [selectedNotification, setSelectedNotification] = useState(null)
   const [referralPrefill, setReferralPrefill] = useState({ jobId: '', applicantIds: [] })
-  const [appMessage, setAppMessage] = useState(null)
+  const setAppMessage = useCallback(message => { if (message) showNotice(message.text, message.type) }, [])
   const [approvalNotice, setApprovalNotice] = useState(false)
   // Promise-based confirm dialog (one instance, used by every approve/decline flow)
   const [confirmDialog, setConfirmDialog] = useState(null)
@@ -496,13 +396,13 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
     if (!confirmDialog?.onConfirm || confirmBusy) return
     setConfirmBusy(true)
     setConfirmError('')
-    const result = await confirmDialog.onConfirm(reason)
-    setConfirmBusy(false)
-    if (result?.error) {
-      setConfirmError(result.error)
-      return
-    }
-    closeConfirmDialog({ confirmed: true, reason })
+    try {
+      const result = await confirmDialog.onConfirm(reason)
+      if (result?.error) { setConfirmError(result.error); return }
+      closeConfirmDialog({ confirmed: true, reason })
+    } catch (error) {
+      setConfirmError(error?.message || 'This action could not be completed. Please try again.')
+    } finally { setConfirmBusy(false) }
   }, [confirmDialog, confirmBusy, closeConfirmDialog])
   const [showVerificationModal, setShowVerificationModal] = useState(false)
   const [reviewDocsApplicant, setReviewDocsApplicant] = useState(null)
@@ -525,7 +425,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
   const [adminEmployersData, setAdminEmployersData] = useState({ items: [], total: 0, totalPages: 1 })
   const [adminEmployersLoading, setAdminEmployersLoading] = useState(false)
   // Other long lists share the same hook with client-side slicing (no URL sync)
-  const myJobsPagination = usePagination({ resetDeps: [employerJobStatusFilter], syncUrl: false })
+  const myJobsPagination = usePagination({ resetDeps: [employerJobStatusFilter, partitionJobArchive(myJobs, jobArchiveClock).archived.length], syncUrl: false })
   const myJobsSort = useSort({ options: MY_JOBS_SORT_OPTIONS, defaultId: 'createdAt:desc', urlSync: false, onChange: () => myJobsPagination.setPage(1) })
   const notifPagination = usePagination({ urlKey: 'notifPage' })
   const [notifTotal, setNotifTotal] = useState(0)
@@ -540,28 +440,28 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
     .map((part) => part[0]?.toUpperCase() || '')
     .join('') || 'A'
 
-  const saveProfile = (nextProfile) => {
+  const saveProfile = (nextProfile, extra = {}) => {
     const token = currentUser?.token || localStorage.getItem('peso-token')
     if (!token) return Promise.resolve({ ok: false })
 
     return fetch(`${API_URL}/api/profile`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ profile: nextProfile }),
+      body: JSON.stringify({ profile: nextProfile, ...extra }),
     })
       .then((r) => r.json())
       .then((data) => {
         if (data.error) {
-          alert(data.error)
+          showNotice(data.error)
           return { ok: false }
         }
         // Saving the profile confirms the (possibly migrated) name
-        setCurrentUser((current) => current ? { ...current, needsNameConfirmation: false } : current)
+        setCurrentUser((current) => current ? { ...current, ...extra, profile: data.profile || nextProfile, needsNameConfirmation: false } : current)
         return { ok: true, data }
       })
       .catch((err) => {
         console.error(err)
-        alert('Save failed')
+        showNotice('Save failed')
         return { ok: false }
       })
   }
@@ -586,7 +486,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
     currentUser?.token || (typeof window !== "undefined" ? localStorage.getItem('peso-token') : null)
   const openApplicantDocuments = () => {
     setShowProfileDocuments(true)
-    setActiveView('profile')
+    setActiveView('account-settings')
   }
 
   const updateRegistrationUser = useCallback((data) => {
@@ -614,17 +514,29 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
 
   const handleImageFile = (file, field) => {
     if (!file) return
-    if (file.size > 2 * 1024 * 1024) return alert('Image must be under 2 MB')
+    if (!file.type.startsWith('image/')) return showNotice('Choose an image file.')
+    if (file.size > 2 * 1024 * 1024) return showNotice('Image must be under 2 MB')
     const reader = new FileReader()
-    reader.onload = () => setProfileData((current) => ({ ...current, [field]: reader.result }))
+    reader.onload = () => { setProfileData((current) => ({ ...current, [field]: reader.result })); setIsEditingProfile(true) }
+    reader.onerror = () => showNotice('The image could not be read. Please select it again.')
     reader.readAsDataURL(file)
   }
+  const saveProfileEdits = async () => {
+    setProfileSaving(true)
+    try {
+      const extra = activeRole === 'Employer' ? { companyName: profileData.companyName, contactName: profileData.contactName, phone: profileData.phone, website: profileData.website } : {}
+      const profile = activeRole === 'Employer' ? { ...(currentUser?.profile || {}), location: profileData.location, website: profileData.website, summary: profileData.summary, profileImage: profileData.profileImage || '', bannerImage: profileData.bannerImage || '' } : profileData
+      const result = await saveProfile(profile, extra)
+      if (result.ok) { setProfileData(normalizeProfile({ ...currentUser, ...extra, profile: result.data.profile || profile }, activeRole)); setIsEditingProfile(false); showNotice('Profile saved!', 'success') }
+    } finally { setProfileSaving(false) }
+  }
+  const cancelProfileEdits = () => { setProfileData(normalizeProfile(currentUser, currentUser?.role)); setIsEditingProfile(false) }
 
   const handleViewResume = async () => {
     const token = getToken()
-    if (!token) return alert('Not authenticated')
+    if (!token) return showNotice('Not authenticated')
     const applicantId = currentUser?.id || currentUser?._id
-    if (!applicantId) return alert('Applicant record not found')
+    if (!applicantId) return showNotice('Applicant record not found')
     const preview = window.open('', '_blank')
     try {
       const response = await fetch(`${API_URL}/api/applicants/${applicantId}/resume`, {
@@ -633,7 +545,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
       if (!response.ok) {
         preview?.close()
         const data = await response.json().catch(() => null)
-        return alert(data?.error || 'Resume could not be opened')
+        return showNotice(data?.error || 'Resume could not be opened')
       }
       const blob = await response.blob()
       const url = URL.createObjectURL(blob)
@@ -643,7 +555,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
     } catch (err) {
       preview?.close()
       console.error(err)
-      alert('Failed to open resume')
+      showNotice('Failed to open resume')
     }
   }
 
@@ -931,7 +843,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
     setJobFieldErrors(errors)
     if (Object.keys(errors).length) { focusJobError(form); return }
     const token = getToken()
-    if (!token) return alert('Not authenticated')
+    if (!token) return showNotice('Not authenticated')
     setJobSubmitting(true)
     try {
       const response = await fetch(`${API_URL}/api/jobs`, {
@@ -940,17 +852,17 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
       const data = await response.json()
       if (!response.ok || data.error) {
         if (data.fieldErrors) { setJobFieldErrors(data.fieldErrors); focusJobError(form) }
-        else alert(data.error || 'Failed to submit job request')
+        else showNotice(data.error || 'Failed to submit job request')
         return
       }
       setJobForm(emptyJobPosting())
       setShowCreateJobPosting(false)
       fetchJobs()
       fetchNotifications()
-      setJobSubmittedOpen(true)
+      setJobSubmittedOpen({ status: data.status, moderation: data.moderation })
     } catch (err) {
       console.error(err)
-      alert('Failed to submit job request')
+      showNotice('Failed to submit job request')
     } finally { setJobSubmitting(false) }
   }
 
@@ -991,7 +903,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
     if (Object.keys(errors).length) { focusJobError(form); return }
 
     const token = getToken()
-    if (!token) return alert('Not authenticated')
+    if (!token) return showNotice('Not authenticated')
 
     setJobSubmitting(true)
     try {
@@ -1007,10 +919,10 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
       setEditingJob(null)
       fetchJobs()
       fetchNotifications()
-      alert('Job posting updated successfully')
+      showNotice(data.status === 'approved' ? 'Changes passed safety screening. Your job posting is published.' : 'Changes saved for PESO review. This posting is hidden from applicants until approved.', 'success')
     } catch (err) {
       console.error(err)
-      alert(err?.message || 'Failed to update job posting')
+      showNotice(err?.message || 'Failed to update job posting')
     } finally { setJobSubmitting(false) }
   }
 
@@ -1036,7 +948,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
       if (!confirmation.confirmed) return { ok: false, cancelled: true }
     }
 
-    return fetch(`${API_URL}/api/jobs/${jobId}/status`, {
+    return fetchWithTimeout(`${API_URL}/api/jobs/${jobId}/status`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ status, reason: status === 'declined' ? declineReasonValue : '' }),
@@ -1053,22 +965,22 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
         fetchJobs()
         fetchNotifications()
         setSelectedNotification(null)
-        if (!options.silent) alert(`Job ${status}`)
+        if (!options.silent) showNotice(`Job ${status}`, 'success')
         return { ok: true, job: data }
       })
       .catch((err) => {
         console.error(err)
         const error = err?.message || 'Failed to update job status'
-        if (!options.silent) alert(error)
+        if (!options.silent) showNotice(error)
         return { error }
       })
   }
 
   const handleBulkReviewJobs = async (jobIds, status) => {
     const token = getToken()
-    if (!token) return alert('Not authenticated')
+    if (!token) return showNotice('Not authenticated')
     const ids = Array.isArray(jobIds) ? jobIds : []
-    if (ids.length === 0) return alert('Select at least one job posting first')
+    if (ids.length === 0) return showNotice('Select at least one job posting first')
 
     const isApprove = status === 'approved'
     const confirmation = await requestConfirm({
@@ -1083,7 +995,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
         if (!isApprove && reason.trim().length > 500) return { error: 'The decline reason must be 500 characters or fewer' }
         try {
           const results = await Promise.all(ids.map((jobId) =>
-            fetch(`${API_URL}/api/jobs/${jobId}/status`, {
+            fetchWithTimeout(`${API_URL}/api/jobs/${jobId}/status`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
               body: JSON.stringify({ status, reason: reason || '' }),
@@ -1104,16 +1016,21 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
     return confirmation
   }
 
-  const handleApplyJob = async (jobId, nsrpAnswers) => {
+  const handleApplyJob = async (jobId, application) => {
     const token = getToken()
     if (!token) {
       return { error: 'Your session has expired. Sign in again to continue.' }
     }
     try {
+      const body = new FormData()
+      const { resume, ...details } = application
+      body.append('applicationDetails', JSON.stringify(details))
+      body.append('sharingConsent', 'true')
+      body.append('resume', resume)
       const response = await fetch(`${API_URL}/api/jobs/${jobId}/apply`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ answers: nsrpAnswers }),
+      headers: { Authorization: `Bearer ${token}` },
+      body,
       })
       const data = await response.json().catch(() => null)
       if (!response.ok || data?.error) {
@@ -1129,7 +1046,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
         setCurrentUser((current) => ({ ...current, profile: profile.profile }))
         setProfileData((current) => ({ ...current, skills: profile.profile?.skills || [] }))
       }
-      alert('Application submitted')
+      showNotice(data?.deliveryStatus === 'pending_admin' ? 'Application submitted. PESO will review the referral.' : 'Application submitted and shared with the employer.', 'success')
       return { ok: true }
     } catch (err) {
       console.error(err)
@@ -1141,7 +1058,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
     const token = getToken()
     if (!token) return { error: 'Not authenticated' }
     try {
-      const response = await fetch(`${API_URL}/api/applicants/${applicantId}/verification`, {
+      const response = await fetchWithTimeout(`${API_URL}/api/applicants/${applicantId}/verification`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(status === 'unrestrict' ? { action: 'unrestrict' } : { status }),
@@ -1158,14 +1075,14 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
     }
   }
 
-  const handleReviewEmployerRequest = async (requestId, status, reason = '') => {
+  const handleReviewEmployerRequest = async (requestId, status, reason = '', unresolved = 0) => {
     const token = getToken()
     if (!token) return { error: 'Not authenticated' }
     try {
-      const response = await fetch(`${API_URL}/api/employer-requests/${requestId}/status`, {
+      const response = await fetchWithTimeout(`${API_URL}/api/employer-requests/${requestId}/status`, {
         method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ status, reason: status === 'approved' ? '' : reason.trim() }),
+      body: JSON.stringify({ status, reason: reason.trim(), unresolved }),
     })
     const data = await response.json().catch(() => null)
     if (!response.ok || data?.error) return { error: data?.error || 'Failed to update employer request' }
@@ -1181,20 +1098,30 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
   }
 
   // All employer request decisions go through the shared confirm dialog
-  const confirmEmployerRequest = (requestId, companyName, status) => {
+  const confirmEmployerRequest = async (requestId, companyName, status) => {
     if (status === 'approved') {
+      let unresolved = 0
+      try {
+        const response = await fetch(`${API_URL}/api/admin/document-verification/queue?recordId=${encodeURIComponent(requestId)}&docKey=employerNsrpForm`, { headers: { Authorization: `Bearer ${getToken()}` } })
+        // The original account review remains available when the new tools are disabled.
+        if (response.status !== 409) {
+          if (!response.ok) throw new Error('Could not load the current document flags')
+          unresolved = (await response.json()).items?.[0]?.unresolved || 0
+        }
+      } catch (error) { setAppMessage({ type: 'error', text: error.message }); return }
       return requestConfirm({
         title: `Approve ${companyName || 'this employer'}?`,
-        note: 'The employer will be notified and gain access to employer features.',
+        note: `${unresolved} flags unresolved. Approve anyway? The employer will be notified and gain access to employer features.`,
         confirmLabel: 'Yes, approve',
         busyLabel: 'Approving...',
-        onConfirm: () => handleReviewEmployerRequest(requestId, 'approved'),
+        requireReason: true,
+        onConfirm: reason => handleReviewEmployerRequest(requestId, 'approved', reason, unresolved),
       })
     }
     const needsResubmission = status === 'needs_resubmission'
     return requestConfirm({
       title: `${needsResubmission ? 'Request a new document from' : 'Decline'} ${companyName || 'this employer'}?`,
-      note: 'The employer will be notified with your reason.',
+      note: 'The employer will receive a neutral review update. Your reason is kept in the PESO audit.',
       confirmLabel: needsResubmission ? 'Request new document' : 'Confirm decline',
       confirmTone: 'danger',
       busyLabel: needsResubmission ? 'Requesting...' : 'Declining...',
@@ -1261,7 +1188,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
     const token = getToken()
     if (!token) {
       if (isReferred) return setAppMessage({ type: 'error', text: 'Not authenticated. Please sign in again.' })
-      return alert('Not authenticated')
+      return showNotice('Not authenticated')
     }
 
     const applicant = adminUsers.find(
@@ -1271,18 +1198,19 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
     if (!applicant) {
       fetchAdminUsers()
       if (isReferred) return setAppMessage({ type: 'error', text: 'Applicant record not found yet. Please try again in a moment.' })
-      return alert('Applicant record not found yet. Please try again in a moment.')
+      return showNotice('Applicant record not found yet. Please try again in a moment.')
     }
 
     const applicantId = String(applicant.id || applicant._id)
     const applicantName = formatFullName(applicant.profile) || applicant.email
-    if (!window.confirm(`${isReferred ? 'Cancel referral for' : 'Refer'} ${applicantName}${isReferred ? '?' : ' to this job?'}`)) return
+    const confirmation = await requestConfirm({ title: isReferred ? 'Pull back application' : 'Create referral', note: `${applicantName}: this action is recorded in the timeline.`, requireReason: true, reasonMinLength: 1, onConfirm: async () => ({ ok: true }) })
+    if (!confirmation.confirmed) return
 
     try {
       const response = await fetch(`${API_URL}/api/referrals`, {
         method: isReferred ? 'DELETE' : 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ jobId, applicantIds: [applicantId] }),
+        body: JSON.stringify({ jobId, applicantIds: [applicantId], reason: confirmation.reason }),
       })
       const data = await response.json().catch(() => null)
       if (!response.ok || data?.error) throw new Error(data?.error || `Request failed: ${response.status}`)
@@ -1292,38 +1220,39 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
       if (isReferred) {
         setAppMessage({ type: 'success', text: 'Referral cancelled successfully.' })
       } else {
-        alert(data?.createdCount === 0 ? 'Applicant was already referred' : 'Applicant referred successfully')
+        showNotice(data?.createdCount === 0 ? 'Applicant was already referred' : 'Applicant referred successfully', data?.createdCount === 0 ? 'info' : 'success')
       }
     } catch (err) {
       console.error(err)
       if (isReferred) {
         setAppMessage({ type: 'error', text: err?.message || 'Failed to cancel referral.' })
       } else {
-        alert(err?.message || 'Failed to create referral')
+        showNotice(err?.message || 'Failed to create referral')
       }
     }
   }
 
   const handleBulkReferApplicants = async (jobId, applicantIdsArray) => {
     const token = getToken()
-    if (!token) return alert('Not authenticated')
-    if (!Array.isArray(applicantIdsArray) || applicantIdsArray.length === 0) return alert('Select at least one applicant to refer.')
-    if (!window.confirm(`Refer ${applicantIdsArray.length} selected applicant${applicantIdsArray.length === 1 ? '' : 's'} to this job?`)) return
+    if (!token) return showNotice('Not authenticated')
+    if (!Array.isArray(applicantIdsArray) || applicantIdsArray.length === 0) return showNotice('Select at least one applicant to refer.')
+    const confirmation = await requestConfirm({ title: 'Create referrals', note: `Refer ${applicantIdsArray.length} selected applicant(s). This action is recorded.`, requireReason: true, reasonMinLength: 1, onConfirm: async () => ({ ok: true }) })
+    if (!confirmation.confirmed) return
 
     try {
       const response = await fetch(`${API_URL}/api/referrals`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ jobId, applicantIds: applicantIdsArray }),
+        body: JSON.stringify({ jobId, applicantIds: applicantIdsArray, reason: confirmation.reason }),
       })
       const data = await response.json().catch(() => null)
       if (!response.ok || data?.error) throw new Error(data?.error || `Request failed: ${response.status}`)
       fetchJobs()
       fetchNotifications()
-      alert(data?.createdCount === 0 ? 'Selected applicants were already referred' : `Referred ${data?.createdCount} applicant${data?.createdCount === 1 ? '' : 's'} successfully`)
+      showNotice(data?.createdCount === 0 ? 'Selected applicants were already referred' : `Referred ${data?.createdCount} applicant${data?.createdCount === 1 ? '' : 's'} successfully`, data?.createdCount === 0 ? 'info' : 'success')
     } catch (err) {
       console.error(err)
-      alert(err?.message || 'Failed to refer selected applicants')
+      showNotice(err?.message || 'Failed to refer selected applicants')
     }
   }
 
@@ -1404,7 +1333,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
     }
     if (activeRole === 'Applicant' && (notification?.type === 'employment_update' || (notification?.type === 'application_status_changed' && notification?.metadata?.status === 'accepted'))) {
       setSelectedNotification(null)
-      setActiveView('employment-reports')
+      setActiveView('my-applications')
       return
     }
     if (activeRole === 'Admin' && notification?.type === 'account_deletion_requested') {
@@ -1415,8 +1344,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
     if (activeRole === 'Applicant' && notification?.type === 'account_deletion_declined') {
       setSelectedNotification(null)
       setShowProfileDocuments(false)
-      setActiveView('profile')
-      requestAnimationFrame(() => document.getElementById('account-settings')?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }))
+      setActiveView('account-settings')
       return
     }
     if (activeRole === 'Admin' && notification?.type === 'csm_response_submitted') {
@@ -1432,6 +1360,16 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
     }
     setSelectedNotification(notification)
   }
+
+  useEffect(() => {
+    if (!isLoggedIn) return
+    const url = new URL(window.location.href)
+    if (!url.searchParams.has('notificationView')) return
+    const target = notificationViewFromQuery(activeRole, url.search)
+    if (target) { setSelectedNotification(null); setShowProfileDocuments(false); setActiveView(target) }
+    url.searchParams.delete('notificationView')
+    window.history.replaceState({}, '', url)
+  }, [isLoggedIn, activeRole])
 
   useEffect(() => {
     // Unverified applicants don't fetch job data (the jobs view is hidden anyway)
@@ -1561,7 +1499,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
     })
       .then((r) => r.json())
       .then((data) => {
-        if (data.error) return alert(data.error)
+        if (data.error) return showNotice(data.error)
 
         if (rememberMe) {
           localStorage.setItem('peso-portal-remembered-email', formData.email)
@@ -1585,7 +1523,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
       })
       .catch((err) => {
         console.error(err)
-        alert('Login failed')
+        showNotice('Login failed')
       })
   }
 
@@ -1631,23 +1569,23 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
     if (Object.keys(nameErrors).length > 0) return
     const passwordErrors = validatePassword(signupForm.password)
     if (passwordErrors.length > 0) {
-      alert('Password requirements not met. Check the rules under the password field.')
+      showNotice('Password requirements not met. Check the rules under the password field.')
       return
     }
     if (signupForm.password !== signupForm.confirmPassword) {
-      alert('Passwords do not match')
+      showNotice('Passwords do not match')
       return
     }
     if (!signupConsent) {
-      alert('Please agree to the data privacy consent to continue')
+      showNotice('Please agree to the data privacy consent to continue')
       return
     }
     if (!validateVerificationDocs(signupDocs, signupConsent)) {
-      alert('Please complete all required verification documents (NSRP form, birth certificate, and Valid ID #1 front)')
+      showNotice('Please complete all required verification documents (NSRP form, birth certificate, and Valid ID #1 front)')
       return
     }
     if (!signupResumeFile) {
-      alert('Please upload your resume (PDF, DOCX, JPG, or PNG; maximum 5 MB)')
+      showNotice('Please upload your resume (PDF, DOCX, JPG, or PNG; maximum 5 MB)')
       return
     }
     setSignupUploading(true)
@@ -1659,6 +1597,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
       })
       signupPayload.append('consent', 'true')
       signupPayload.append('id1Type', signupDocs.id1.type)
+      signupPayload.append('verificationDetails', JSON.stringify({ birthCertificate: signupDocs.birthDetails || {}, validId1: { number: signupDocs.id1.number, expiry: signupDocs.id1.expiry, format: signupDocs.id1.format }, validId2: { number: signupDocs.id2.number, expiry: signupDocs.id2.expiry, format: signupDocs.id2.format } }))
       signupPayload.append('nsrpForm', signupDocs.nsrpForm)
       signupPayload.append('birthCertificate', signupDocs.birthCertificate)
       signupPayload.append('validId1Front', signupDocs.id1.front)
@@ -1691,10 +1630,10 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
       setSignupConsent(false)
       setSignupProgress("")
       setAuthView("login")
-      alert('Account created. Your documents were submitted for admin review.')
+      showNotice('Account created. Your documents were submitted for admin review.', 'success')
     } catch (err) {
       console.error(err)
-      alert(err?.message || 'Signup failed')
+      showNotice(err?.message || 'Signup failed')
       setSignupProgress("")
     } finally {
       setSignupUploading(false)
@@ -1710,7 +1649,6 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
     setIsLoggedIn(false)
     setFormData({ email: "", password: "" })
     setRememberMe(false)
-    setShowPassword(false)
     setActiveRole("Applicant")
     setActiveView("home")
   }
@@ -1753,11 +1691,12 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
   const filteredApprovedJobs = approvedJobs.filter((job) => (activeRole === 'Admin' ? matchesAdminJobSearch(job) : true))
   const filteredDeclinedJobs = declinedJobs.filter((job) => (activeRole === 'Admin' ? matchesAdminJobSearch(job) : true))
   const registeredJobAddress = profileData.establishmentAddress || {}
-  const jobSkillSuggestions = [...new Set([...availableSkills, ...myJobs.flatMap((job) => Array.isArray(job.skills) ? job.skills : [])])]
-  const employerPendingJobs = myJobs.filter((job) => job.status === 'pending')
-  const employerDeclinedJobs = myJobs.filter((job) => job.status === 'declined')
-  const employerApprovedJobs = myJobs.filter((job) => job.status === 'approved')
-  const filteredMyJobs = employerJobStatusFilter === 'all' ? myJobs : myJobs.filter((job) => (job.status || 'pending') === employerJobStatusFilter)
+  const jobSkillSuggestions = availableSkills
+  const { active: activeMyJobs, archived: archivedMyJobs } = partitionJobArchive(myJobs, jobArchiveClock)
+  const employerPendingJobs = activeMyJobs.filter((job) => job.status === 'pending')
+  const employerDeclinedJobs = activeMyJobs.filter((job) => job.status === 'declined')
+  const employerApprovedJobs = activeMyJobs.filter((job) => job.status === 'approved')
+  const filteredMyJobs = employerJobStatusFilter === 'archive' ? archivedMyJobs : employerJobStatusFilter === 'all' ? activeMyJobs : activeMyJobs.filter((job) => (job.status || 'pending') === employerJobStatusFilter)
   const sortedMyJobs = sortItems(filteredMyJobs, myJobsSort.sortBy, myJobsSort.order)
   const showPendingAdminSection = activeRole === 'Admin' && (adminJobStatusFilter === 'all' || adminJobStatusFilter === 'pending')
   const showApprovedAdminSection = activeRole === 'Admin' && (adminJobStatusFilter === 'all' || adminJobStatusFilter === 'approved')
@@ -1766,20 +1705,34 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
   const selectedJobIsApplied = Boolean(selectedJob && (appliedJobIds.has(String(selectedJob._id)) || (selectedJob.applicants || []).some((applicant) => applicant.email === currentUser?.email)))
   const selectedNotificationIsPending = selectedNotification?.type === 'job_pending_review'
     && (selectedNotification?.status === 'pending' || (selectedNotification?.title || '').toLowerCase().includes('pending'))
+  const selectedNotificationDestination = notificationDestination(selectedNotification, activeRole)
   const accountNeedsVerification = Boolean(
     currentUser?.verificationStatus && currentUser.verificationStatus !== 'approved',
   )
+  const saveGuideState = (next) => setCurrentUser(current => !current || (current.id || current._id) !== (currentUser?.id || currentUser?._id) ? current : ({ ...current, pageGuides: {
+    ...next,
+    dismissedAll: Boolean(current?.pageGuides?.dismissedAll || next.dismissedAll),
+    seenPages: [...new Set([...(current?.pageGuides?.seenPages || []), ...(next.seenPages || [])])],
+  } }))
+  useEffect(() => {
+    const update = event => { if (activeRole === 'Applicant' && event.detail?.status) setCurrentUser(current => ({ ...current, verificationStatus: event.detail.status })) }
+    window.addEventListener('applicant-consistency', update)
+    return () => window.removeEventListener('applicant-consistency', update)
+  }, [activeRole])
 
   useEffect(() => {
     if (activeView === 'all-dashboard') setActiveView('dashboard')
-  }, [activeView])
+    if (activeRole === 'Applicant' && ['documents', 'nsrp-import'].includes(activeView)) setActiveView('account-settings')
+  }, [activeView, activeRole])
 
-  // Restore older saved document destinations inside the applicant profile.
   useEffect(() => {
-    if (activeRole === 'Applicant' && activeView === 'documents') {
-      setShowProfileDocuments(true)
-      setActiveView('profile')
-    }
+    if (activeRole !== 'Applicant' || !['account-settings', 'documents', 'nsrp-import'].includes(activeView)) return
+    const frame = requestAnimationFrame(() => {
+      const page = document.querySelector('[data-applicant-window]')
+      page?.focus({ preventScroll: true })
+      page?.scrollIntoView?.({ block: 'start' })
+    })
+    return () => cancelAnimationFrame(frame)
   }, [activeRole, activeView])
 
   // Support existing document links and the new profile destination after login.
@@ -1789,13 +1742,13 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
     if (params.get('accountSettings') === '1') {
       documentLinkHandled.current = true
       setShowProfileDocuments(false)
-      setActiveView('profile')
+      setActiveView('account-settings')
       return
     }
     if (window.location.pathname === '/documents' || params.get('documents') === '1' || params.get('editNsrp') === '1') {
       documentLinkHandled.current = true
       setShowProfileDocuments(true)
-      setActiveView('profile')
+      setActiveView('account-settings')
     }
   }, [isLoggedIn, activeRole])
 
@@ -1815,7 +1768,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
 
   // Incomplete accounts can only leave the checklist through its profile/document links.
   useEffect(() => {
-    if (isLoggedIn && currentUser?.registration && !currentUser.registration.complete && ['Applicant', 'Employer'].includes(activeRole) && !['complete', 'profile', 'documents', 'dashboard'].includes(activeView)) {
+    if (isLoggedIn && currentUser?.registration && !currentUser.registration.complete && ['Applicant', 'Employer'].includes(activeRole) && !['complete', 'profile', 'documents', 'dashboard', 'account-settings', 'nsrp-import'].includes(activeView)) {
       setActiveView('complete')
     }
   }, [isLoggedIn, activeRole, currentUser?.registration, activeView])
@@ -1826,7 +1779,8 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
   }
 
   if (!isLoggedIn) {
-    return (
+    const AuthHeading = authView === 'login' ? 'h2' : 'h1'
+    const authentication = (
       <div className={`auth-page ${authView === 'login' ? 'auth-page-login' : 'auth-page-signup'}`}>
         {authView === 'login' && <aside className="auth-intro" aria-labelledby="auth-intro-title">
           <p className="auth-intro-eyebrow"><PortalNavIcon name="jobs" /> PESO · ALBAY</p>
@@ -1839,6 +1793,13 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
           <p className="auth-intro-footer">LOCAL TALENT. SHARED OPPORTUNITY.</p>
         </aside>}
         <div className={`auth-card${authView === 'login' ? '' : ' auth-card-wide'}`}>
+          {authView !== 'login' && (
+            <div className="mb-4 flex justify-start">
+              <button type="button" aria-label="Back to home page" onClick={() => setAuthView('login')} className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-800 transition hover:bg-blue-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">
+                <span aria-hidden="true">←</span> Back to home
+              </button>
+            </div>
+          )}
           <div className="auth-logo" aria-label="Public Employment Service Office">
             <img
               src={pesoLogo}
@@ -1847,17 +1808,21 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
             />
           </div>
           <div className="auth-heading">
-            <h1>{authView === "signup" ? "Sign Up" : authView === "employer" ? "Employer Sign Up" : "Welcome back"}</h1>
-            <p>{authView === "employer" ? "Create your employer account." : "Enter your PESO account credentials to continue."}</p>
+            <AuthHeading>{authView === 'nsrp-applicant' ? 'Applicant NSRP Form 1' : authView === 'nsrp-employer' ? 'Employer NSRP Form 2' : authView === "signup" ? "Sign Up" : authView === "employer" ? "Employer Sign Up" : "Welcome back"}</AuthHeading>
+            <p>{authView.startsWith('nsrp-') ? 'Fill out your form online, preview it, and download a PDF. No account required. Answers are kept only while this form is open.' : authView === "employer" ? "Create your employer account." : "Enter your PESO account credentials to continue."}</p>
           </div>
-          {showSignupRestoreNotice && authView !== 'login' && (
+          {showSignupRestoreNotice && ['signup', 'employer'].includes(authView) && (
             <div role="status" className="mb-4 rounded-xl border border-cyan-300 bg-cyan-50 p-4 text-sm text-cyan-950">
               <p className="font-semibold">Your signup draft has been restored.</p>
               <p className="mt-1">Your saved answers and step are back. Passwords, email verification, uploaded files, and signatures are not saved. Select Account to enter your password and verify your email again, then reselect files and add your signature before submitting.</p>
               <button type="button" onClick={() => setShowSignupRestoreNotice(false)} className="mt-2 rounded-lg border border-cyan-700 px-3 py-1 text-xs font-semibold">Dismiss notice</button>
             </div>
           )}
-          {authView === "signup" ? (
+          {authView === 'nsrp-applicant' ? (
+            <ApplicantSignupWizard key="public-applicant" mode="public" onCancel={() => setAuthView('login')} />
+          ) : authView === 'nsrp-employer' ? (
+            <EmployerSignupWizard key="public-employer" formOnly locations={albayLocations} onCancel={() => setAuthView('login')} />
+          ) : authView === "signup" ? (
             <ApplicantSignupWizard onCancel={() => setAuthView("login")} onComplete={finishSignup} />
           ) : authView === "login" ? (
             <form className="auth-form" onSubmit={handleLogin}>
@@ -1874,21 +1839,14 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
               </div>
               <div>
                 <label htmlFor="password">Password</label>
-                <input
+                <PasswordInput
                   id="password"
-                  type={showPassword ? "text" : "password"}
+
                   value={formData.password}
                   onChange={(event) => setFormData({ ...formData, password: event.target.value })}
                   placeholder="Enter your password"
                   autoComplete="current-password"
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((value) => !value)}
-                  className="auth-password-toggle"
-                >
-                  {showPassword ? "Hide" : "Show"}
-                </button>
               </div>
               <div className="auth-options">
                 <label className="auth-remember">
@@ -1915,14 +1873,14 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
                   onClick={() => setAuthView("signup")}
                   className="auth-secondary-button"
                 >
-                  Create an account (Applicant)
+                  Create an account
                 </button>
                 <button
                   type="button"
                   onClick={() => setAuthView("employer")}
                   className="auth-secondary-button"
                 >
-                  Connect with us (Employer)
+                  Connect with us
                 </button>
               </div>
             </form>
@@ -2046,9 +2004,9 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
                 <label htmlFor="signup-password" className="block text-sm font-medium text-slate-200">
                   Password
                 </label>
-                <input
+                <PasswordInput
                   id="signup-password"
-                  type={showSignupPassword ? "text" : "password"}
+
                   value={signupForm.password}
                   onChange={(e) => setSignupForm({ ...signupForm, password: e.target.value })}
                   className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
@@ -2061,21 +2019,14 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
                 <label htmlFor="signup-confirm-password" className="block text-sm font-medium text-slate-200">
                   Confirm password
                 </label>
-                <input
-                  id="signup-confirm-password"
-                  type={showSignupPassword ? "text" : "password"}
+                <PasswordInput
+                  id="signup-confirm-password" visibilityLabel="confirm password"
+
                   value={signupForm.confirmPassword}
                   onChange={(e) => setSignupForm({ ...signupForm, confirmPassword: e.target.value })}
                   className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                   required
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowSignupPassword((current) => !current)}
-                  className="mt-2 text-sm font-medium text-slate-600 hover:text-black"
-                >
-                  {showSignupPassword ? 'Hide password' : 'Show password'}
-                </button>
               </div>
               <div>
                 <label htmlFor="signup-resume" className="block text-sm font-medium text-slate-200">
@@ -2111,6 +2062,13 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
         </div>
       </div>
     )
+    const openPublicFlow = view => {
+      setAuthView(view)
+      requestAnimationFrame(() => document.querySelector('.auth-page')?.scrollIntoView?.({ block: 'start' }))
+    }
+    return authView === 'login'
+      ? <LandingPage onApplicantSignup={() => openPublicFlow('signup')} onEmployerSignup={() => openPublicFlow('employer')} onApplicantForm={() => openPublicFlow('nsrp-applicant')} onEmployerForm={() => openPublicFlow('nsrp-employer')}>{authentication}</LandingPage>
+      : authentication
   }
 
   const navItems = navigationByRole[activeRole] || []
@@ -2125,7 +2083,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
     if (item.id === 'complete') return ['Applicant', 'Employer'].includes(activeRole) && currentUser?.registration?.complete === false
     if (activeRole === 'Employer') return employerApproved && item.id !== 'verification'
     // Verification details stay in My Documents; the dashboard remains available.
-    if (activeRole === 'Applicant') return applicantApproved || item.id === 'dashboard'
+    if (activeRole === 'Applicant') return applicantApproved || item.id === 'dashboard' || currentUser?.verificationStatus === 'waitlisted' && item.id === 'notifications'
     return true
   })
   // Server state is the source of truth; this is just UI gating
@@ -2166,10 +2124,14 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
               )}
             </button>
             {showProfileTab && (
-              <button
-                type="button"
-                aria-label="Profile"
-                onClick={() => { setShowProfileDocuments(false); setActiveView("profile") }}
+              <ProfileDropdown
+                onProfile={() => { setShowProfileDocuments(false); setActiveView("profile") }}
+                onLinks={activeRole === 'Applicant' ? () => setShowPortfolioLinks(true) : undefined}
+                onResume={activeRole === 'Applicant' ? () => setShowResumeUploader(true) : undefined}
+                onSettings={activeRole === 'Applicant' ? () => {
+                  setShowProfileDocuments(false)
+                  setActiveView('account-settings')
+                } : undefined}
                 className={`portal-profile-button inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-medium transition-colors ${
                   activeView === "profile" ? "bg-cyan-500 text-slate-950" : "text-slate-200"
                 }`}
@@ -2182,11 +2144,11 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
                   )}
                 </span>
                 <span>Profile</span>
-              </button>
+              </ProfileDropdown>
             )}
             <button
               type="button"
-              onClick={handleLogout}
+              onClick={() => setConfirmLogout(true)}
               className="portal-logout"
             >
               Logout
@@ -2196,15 +2158,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
       </header>
 
       <div className="portal-layout">
-        <aside className="portal-sidebar">
-          <div className="portal-session">
-            <p className="portal-eyebrow">Session</p>
-            <p>Signed in as</p>
-            <strong>{currentUser?.email}</strong>
-            <span>Role</span>
-            <strong>{activeRole}</strong>
-          </div>
-
+        <div className="portal-sidebar">
           <nav className="portal-nav" aria-label={`${activeRole} navigation`}>
             {portalNavItems.map((item, index) => (
               <button
@@ -2223,7 +2177,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
               </button>
             ))}
           </nav>
-        </aside>
+        </div>
 
         <div className="portal-content">
           {['Applicant', 'Employer'].includes(activeRole) && currentUser && currentUser.emailVerified === false && (
@@ -2243,26 +2197,9 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
           )}
 
           <main className="space-y-6">
-          {appMessage && createPortal(
-            <div
-              role="status"
-              className={`fixed left-3 right-3 top-3 z-[1000] flex items-center justify-between gap-4 rounded-2xl border px-4 py-3 text-sm shadow-xl sm:left-6 sm:right-6 ${
-                appMessage.type === 'error'
-                  ? 'border-rose-400 bg-rose-950 text-rose-100'
-                  : 'border-cyan-400 bg-cyan-950 text-cyan-100'
-              }`}
-            >
-              <p className="min-w-0 break-words">{appMessage.text}</p>
-              <button
-                type="button"
-                onClick={() => setAppMessage(null)}
-                className="shrink-0 rounded-full border border-current px-3 py-1 text-xs font-semibold"
-              >
-                Dismiss
-              </button>
-            </div>,
-            document.body
-          )}
+          {!showProfileDocuments && <PageGuide key={`${currentUser?.id}:${activeRole}:${activeView}`} role={activeRole} view={activeView} state={currentUser?.pageGuides} token={getToken()} onSaved={saveGuideState} />}
+          {activeRole === 'Admin' && activeView === 'verification-rules' && <AdminNsrpAutomation key={activeView} token={getToken()} />}
+          {activeRole === 'Admin' && ['verification-flagged', 'verification-auto'].includes(activeView) && <AdminDocumentVerification key={activeView} token={getToken()} queue={activeView === 'verification-auto' ? 'auto' : 'flagged'} />}
           {approvalNotice && activeRole === 'Employer' && (
             <section className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-green-300 bg-green-50 p-5 text-green-950" role="status">
               <div>
@@ -2307,7 +2244,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
                   <div>
                     <p className="portal-page-eyebrow">PESO Job Portal</p>
                     <h3 id="applicant-home-welcome-title">Welcome back, {formatFullName(profileData) || profileData.name || currentUser?.email || 'Applicant'}</h3>
-                    <p>{applicantApproved ? 'Discover local opportunities, track your applications, and keep your next step in view.' : 'Your registration is being reviewed by PESO. You can manage your profile while verification is in progress.'}</p>
+                    <p>{currentUser?.verificationStatus === 'waitlisted' ? 'Your account is waitlisted for PESO review. Open My Documents in your profile to correct or explain a difference. You can still view notifications and contact PESO.' : applicantApproved ? 'Discover local opportunities, track your applications, and keep your next step in view.' : 'Your registration is being reviewed by PESO. You can manage your profile while verification is in progress.'}</p>
                   </div>
                   <div className="applicant-home-actions">
                     {applicantApproved && <button type="button" onClick={() => setActiveView('jobs')} className="rounded-full bg-cyan-600 px-5 py-3 text-sm font-semibold text-white">Browse Jobs</button>}
@@ -2315,11 +2252,12 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
                   </div>
                 </section>
               )}
-              <RoleDashboard token={getToken()} applicantOverview={activeRole === 'Applicant' ? { openJobs: availableJobs.length, notifications: notifTotal } : undefined} onNavigate={(target) => {
+              <RoleDashboard key={activeRole === 'Applicant' ? currentUser?.verificationStatus : activeRole} token={getToken()} applicantOverview={activeRole === 'Applicant' ? { openJobs: availableJobs.length, notifications: notifTotal } : undefined} onNavigate={(target) => {
                 if (activeRole === 'Admin' && target === 'employment-updates') setHiringUpdates({})
                 setActiveView(target)
               }} />
-              {activeRole === 'Applicant' && applicantApproved && (
+              {activeRole === 'Applicant' && ['under_review', 'waitlisted'].includes(currentUser?.verificationStatus) && <ApplicantReviewStatus token={getToken()} onManageDocuments={openApplicantDocuments} />}
+              {activeRole === 'Applicant' && applicantApproved && !currentUser?.pageGuides && (
                 <section className="applicant-home-guide" aria-labelledby="applicant-home-guide-title">
                   <div className="applicant-home-guide-icon"><PortalNavIcon name="verification" /></div>
                   <div>
@@ -2340,13 +2278,13 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
                         <h3>Approved Job Postings</h3>
                         <p>All approved vacancies currently visible to applicants.</p>
                       </div>
-                      <span>{myJobs.filter((job) => job.status === 'approved').length} approved</span>
+                      <span>{employerApprovedJobs.length} approved</span>
                     </div>
-                    {myJobs.filter((job) => job.status === 'approved').length === 0 ? (
+                    {employerApprovedJobs.length === 0 ? (
                       <p className="employer-dashboard-empty">No approved job postings yet.</p>
                     ) : (
                       <div className="employer-dashboard-posting-list">
-                        {myJobs.filter((job) => job.status === 'approved').map((job) => (
+                        {employerApprovedJobs.map((job) => (
                           <article
                             key={job._id}
                             className="employer-dashboard-posting cursor-pointer"
@@ -2507,6 +2445,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
                                             ) : (
                                               <strong>{user.companyName || 'Unnamed employer'}</strong>
                                             )}
+                                            <AdminNsrpAccountDecision compact token={getToken()} accountId={user.id} role={directory.role} />
                                           </td>
                                           <td data-label="Email"><span className="portal-cell-truncate" title={user.email}>{user.email}</span></td>
                                           <td data-label={directory.role === 'Employer' ? 'Contact' : 'Location'}>
@@ -2589,11 +2528,39 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
               readOnly={Boolean(reviewDocsApplicant.deletedAt)}
             />
           )}
+          {activeRole === 'Admin' && activeView === 'report-maker' && <AdminReportMaker token={getToken()} />}
+
           {activeRole === 'Admin' && activeView === 'employment-updates' && (
             <AdminEmploymentUpdatesPage key={`${hiringUpdates.applicantId || ''}:${hiringUpdates.jobId || ''}`} token={getToken()} applicantId={hiringUpdates.applicantId} jobId={hiringUpdates.jobId} />
           )}
           {activeRole === 'Admin' && clientFeedbackOpen && <AdminCsmFeedbackModal token={getToken()} onClose={() => setClientFeedbackOpen(false)} />}
-          {jobSubmittedOpen && <Modal onClose={() => setJobSubmittedOpen(false)} labelledBy="job-submitted-title" maxWidth="max-w-md"><h2 id="job-submitted-title" className="text-xl font-bold text-slate-900">Job request submitted for review</h2><p className="mt-3 text-sm text-slate-600">PESO will review your job posting. You can track its status in Job Postings.</p><button type="button" onClick={() => setJobSubmittedOpen(false)} className="mt-5 rounded-full bg-blue-600 px-5 py-2 text-sm font-semibold text-white">Done</button></Modal>}
+          {jobSubmittedOpen && <Modal onClose={() => setJobSubmittedOpen(false)} labelledBy="job-submitted-title" maxWidth="max-w-md"><h2 id="job-submitted-title" className="text-xl font-bold text-slate-900">{jobSubmittedOpen.status === 'approved' ? 'Job posting published' : 'Job request submitted for review'}</h2><p className="mt-3 text-sm text-slate-600">{jobSubmittedOpen.status === 'approved' ? 'Your job posting passed automatic safety screening and is now visible to applicants.' : 'PESO will review your job posting. You can track its status in Job Postings.'}</p><JobScreeningSummary moderation={jobSubmittedOpen.moderation} /><button type="button" onClick={() => setJobSubmittedOpen(false)} className="mt-5 rounded-full bg-blue-600 px-5 py-2 text-sm font-semibold text-white">Done</button></Modal>}
+
+          {activeRole === 'Applicant' && activeView === 'account-settings' && <section data-applicant-window tabIndex={-1} className="scroll-mt-28 space-y-6" aria-label="Account settings window">
+                  {currentUser?.verificationDocuments?.some(doc => doc.docKey === 'nsrpForm' && doc.sourceType === 'uploaded') && <NsrpImportReview key={currentUser.id} token={getToken()} disabled={isEditingProfile || profileSaving} onUse={({ profile }) => {
+                    setCurrentUser(current => ({ ...current, profile }))
+                    setProfileData(normalizeProfile({ ...currentUser, profile }, 'Applicant'))
+                  }} />}
+                  <div id="profile-documents">
+                    <MyDocumentsPage
+                      guideState={currentUser?.pageGuides}
+                      onGuidesSaved={saveGuideState}
+                      applicantId={currentUser?.id || currentUser?._id}
+                      token={getToken()}
+                      open={showProfileDocuments}
+                      onOpenChange={setShowProfileDocuments}
+                      onUpdated={async () => {
+                        const token = getToken()
+                        if (!token) return
+                        const response = await fetch(`${API_URL}/api/profile`, { headers: { Authorization: `Bearer ${token}` } })
+                        const data = await response.json()
+                        if (response.ok && !data.error) setCurrentUser((current) => ({ ...current, registration: data.registration, verificationStatus: data.verificationStatus, verificationReason: data.verificationReason, attentionCount: data.attentionCount, verificationDocuments: data.verificationDocuments }))
+                      }}
+                    />
+                  </div>
+
+                  <ApplicantAccountSettings token={getToken()} onMessage={(text) => setAppMessage({ type: 'success', text })} />
+          </section>}
 
           {activeView === "profile" && (<section className={`${activeRole === 'Employer' ? 'employer-profile-card portal-card' : activeRole === 'Applicant' ? 'applicant-profile-card portal-card' : ''} rounded-2xl border border-slate-800 bg-slate-900/70 p-6`}>
               {activeRole === 'Applicant' ? (
@@ -2601,54 +2568,14 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
                   <h2 className="text-xl font-semibold text-white">Applicant Profile</h2>
                   <p className="mt-3 text-slate-400">Update your traits and personal information.</p>
 
-                  {/* Banner and profile image preview */}
-                  <div className="mt-6 overflow-hidden rounded-2xl border border-slate-700">
-                    <div
-                      className="employer-banner h-36 w-full bg-slate-800 bg-cover bg-center"
-                      style={profileData.bannerImage ? { backgroundImage: `url(${profileData.bannerImage})` } : undefined}
-                    />
-                    <div className="flex items-end gap-4 bg-slate-900/60 px-5 pb-4">
-                      <div className="applicant-profile-avatar -mt-10 flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl border-4 border-slate-900 bg-cyan-500 text-2xl font-bold text-slate-950">
-                        {profileData.profileImage ? (
-                          <img src={profileData.profileImage} alt="Profile" className="h-full w-full object-cover" />
-                        ) : (
-                          applicantProfileInitials
-                        )}
-                      </div>
-                      <p className="pb-1 text-lg font-semibold text-white">{formatFullName(profileData) || profileData.name || 'Your name'}</p>
-                    </div>
-                  </div>
 
-                  {isEditingProfile && (
-                    <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                      <div>
-                        <label htmlFor="applicantProfileImageUpload" className="block text-sm font-medium text-slate-300">Profile Image</label>
-                        <input
-                          id="applicantProfileImageUpload"
-                          type="file"
-                          accept="image/*"
-                          onChange={(event) => handleImageFile(event.target.files?.[0], 'profileImage')}
-                          className="shared-form-control mt-2 block w-full rounded-2xl px-3 py-2 text-sm"
-                        />
-                      </div>
-                      <div>
-                        <label htmlFor="applicantBannerImageUpload" className="block text-sm font-medium text-slate-300">Banner Image</label>
-                        <input
-                          id="applicantBannerImageUpload"
-                          type="file"
-                          accept="image/*"
-                          onChange={(event) => handleImageFile(event.target.files?.[0], 'bannerImage')}
-                          className="shared-form-control mt-2 block w-full rounded-2xl px-3 py-2 text-sm"
-                        />
-                      </div>
-                    </div>
-                  )}
+                  <EditableProfileCover name={formatFullName(profileData) || profileData.name || 'Your name'} initials={applicantProfileInitials} photo={profileData.profileImage} banner={profileData.bannerImage} editing={isEditingProfile} saving={profileSaving} onEdit={() => setIsEditingProfile(true)} onSave={saveProfileEdits} onCancel={cancelProfileEdits} onImage={handleImageFile} photoInputRef={profilePhotoInputRef} />
 
                   <div className="applicant-profile-summary mt-6 rounded-2xl border border-slate-700 bg-slate-950/80 p-4">
                     <div className="flex items-center gap-4">
-                      <div className="applicant-profile-avatar flex h-16 w-16 items-center justify-center rounded-full bg-cyan-500 text-lg font-bold text-slate-950">
-                        {applicantProfileInitials}
-                      </div>
+                      <button type="button" aria-label="Change profile photo from preview" disabled={profileSaving} onClick={() => profilePhotoInputRef.current?.click()} className="applicant-profile-avatar flex h-16 w-16 items-center justify-center overflow-hidden rounded-full bg-cyan-500 text-lg font-bold text-slate-950">
+                        {profileData.profileImage ? <img src={profileData.profileImage} alt="Profile preview" className="h-full w-full object-cover" /> : applicantProfileInitials}
+                      </button>
                       <div className="min-w-0 flex-1">
                         <p className="text-xl font-semibold text-white">{formatFullName(profileData) || profileData.name || 'Your name'}</p>
                         <p className="text-sm text-slate-400">{profileData.location || 'Add your location'}</p>
@@ -2666,6 +2593,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
                         <span className="text-sm text-slate-400">Choose your skills to show on your profile.</span>
                       )}
                     </div>
+                    <PortfolioLinks links={currentUser?.profile?.portfolioLinks} />
                   </div>
 
                   <form className="mt-6 space-y-4" onSubmit={(event) => event.preventDefault()}>
@@ -2677,7 +2605,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
                         id="firstName"
                         type="text"
                         value={profileData.firstName}
-                        disabled={!isEditingProfile}
+                        disabled={!isEditingProfile || profileSaving}
                         onChange={(event) => setProfileData({ ...profileData, firstName: event.target.value })}
                         onBlur={() => isEditingProfile && setProfileData((current) => ({ ...current, firstName: capitalizeName(current.firstName) }))}
                         className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
@@ -2691,7 +2619,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
                         id="middleName"
                         type="text"
                         value={profileData.middleName}
-                        disabled={!isEditingProfile || profileData.noMiddleName}
+                        disabled={!isEditingProfile || profileSaving || profileData.noMiddleName}
                         onChange={(event) => setProfileData({ ...profileData, middleName: event.target.value })}
                         onBlur={() => isEditingProfile && setProfileData((current) => ({ ...current, middleName: capitalizeName(current.middleName) }))}
                         className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
@@ -2715,7 +2643,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
                         id="lastName"
                         type="text"
                         value={profileData.lastName}
-                        disabled={!isEditingProfile}
+                        disabled={!isEditingProfile || profileSaving}
                         onChange={(event) => setProfileData({ ...profileData, lastName: event.target.value })}
                         onBlur={() => isEditingProfile && setProfileData((current) => ({ ...current, lastName: capitalizeName(current.lastName) }))}
                         className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
@@ -2728,7 +2656,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
                       <select
                         id="suffix"
                         value={profileData.suffix}
-                        disabled={!isEditingProfile}
+                        disabled={!isEditingProfile || profileSaving}
                         onChange={(event) => setProfileData({ ...profileData, suffix: event.target.value })}
                         className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                       >
@@ -2745,7 +2673,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
                         id="summary"
                         rows="4"
                         value={profileData.summary}
-                        disabled={!isEditingProfile}
+                        disabled={!isEditingProfile || profileSaving}
                         onChange={(event) => setProfileData({ ...profileData, summary: event.target.value })}
                         className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                         placeholder="Write a brief profile summary."
@@ -2759,7 +2687,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
                         id="location"
                         type="text"
                         value={profileData.location}
-                        disabled={!isEditingProfile}
+                        disabled={!isEditingProfile || profileSaving}
                         onChange={(event) => setProfileData({ ...profileData, location: event.target.value })}
                         className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                       />
@@ -2772,7 +2700,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
                         id="traits"
                         type="text"
                         value={profileData.traits}
-                        disabled={!isEditingProfile}
+                        disabled={!isEditingProfile || profileSaving}
                         onChange={(event) => setProfileData({ ...profileData, traits: event.target.value })}
                         className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                         placeholder="e.g. reliable, detail-oriented, team player"
@@ -2782,129 +2710,19 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
                       <label className="block text-sm font-medium text-slate-300">Skills <span className="text-slate-500">(optional)</span></label>
                       <SkillTagPicker
                         selected={profileData.skills}
-                        disabled={!isEditingProfile}
+                        disabled={!isEditingProfile || profileSaving}
                         onChange={(next) => setProfileData({ ...profileData, skills: next })}
                       />
                     </div>
-                    <div>
-                    </div>
-                    <div className="flex gap-3">
-                      {!isEditingProfile ? (
-                        <button
-                          type="button"
-                          onClick={() => setIsEditingProfile(true)}
-                          className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
-                        >
-                          Edit Profile
-                        </button>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              saveProfile(profileData).then((result) => {
-                                if (result.ok) {
-                                  setIsEditingProfile(false)
-                                  alert('Profile saved!')
-                                }
-                              })
-                            }}
-                            className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
-                          >
-                            Save Profile
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setProfileData(normalizeProfile(currentUser, currentUser?.role))
-                              setIsEditingProfile(false)
-                            }}
-                            className="rounded-2xl border border-slate-600 bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-200"
-                          >
-                            Cancel
-                          </button>
-                        </>
-                      )}
-                    </div>
                   </form>
-                  <div className="mt-6" id="profile-documents">
-                    <MyDocumentsPage
-                      applicantId={currentUser?.id || currentUser?._id}
-                      token={getToken()}
-                      open={showProfileDocuments}
-                      onOpenChange={setShowProfileDocuments}
-                      onUpdated={async () => {
-                        const token = getToken()
-                        if (!token) return
-                        const response = await fetch(`${API_URL}/api/profile`, { headers: { Authorization: `Bearer ${token}` } })
-                        const data = await response.json()
-                        if (response.ok && !data.error) setCurrentUser((current) => ({ ...current, registration: data.registration, verificationStatus: data.verificationStatus, verificationReason: data.verificationReason, attentionCount: data.attentionCount }))
-                      }}
-                    />
-                  </div>
-                  <ApplicantAccountSettings token={getToken()} onMessage={(text) => setAppMessage({ type: 'success', text })} />
+
                 </>
               ) : (
                 <>
                   <h2 className="text-xl font-semibold text-white">Employer Profile</h2>
                   <p className="mt-3 text-slate-400">Update your company details and contact information.</p>
 
-                  {/* Banner and profile image preview */}
-                  <div className="mt-6 overflow-hidden rounded-2xl border border-slate-700">
-                    <div
-                      className="h-36 w-full bg-slate-800 bg-cover bg-center"
-                      style={profileData.bannerImage ? { backgroundImage: `url(${profileData.bannerImage})` } : undefined}
-                    />
-                    <div className="flex items-end gap-4 bg-slate-900/60 px-5 pb-4">
-                      <div className="-mt-10 flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl border-4 border-slate-900 bg-slate-800 text-2xl font-bold text-cyan-300">
-                        {profileData.profileImage ? (
-                          <img src={profileData.profileImage} alt="Company profile" className="h-full w-full object-cover" />
-                        ) : (
-                          (profileData.companyName || 'C').trim().charAt(0).toUpperCase()
-                        )}
-                      </div>
-                      <p className="pb-1 text-lg font-semibold text-white">{profileData.companyName || 'Your company'}</p>
-                    </div>
-                  </div>
-
-                  {isEditingProfile && (
-                    <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                      <div>
-                        <label htmlFor="profileImageUpload" className="block text-sm font-medium text-slate-300">Profile Image</label>
-                        <input
-                          id="profileImageUpload"
-                          type="file"
-                          accept="image/*"
-                          onChange={(event) => {
-                            const file = event.target.files?.[0]
-                            if (!file) return
-                            if (file.size > 2 * 1024 * 1024) return alert('Image must be under 2 MB')
-                            const reader = new FileReader()
-                            reader.onload = () => setProfileData((current) => ({ ...current, profileImage: reader.result }))
-                            reader.readAsDataURL(file)
-                          }}
-                          className="shared-form-control mt-2 block w-full rounded-2xl px-3 py-2 text-sm"
-                        />
-                      </div>
-                      <div>
-                        <label htmlFor="bannerImageUpload" className="block text-sm font-medium text-slate-300">Banner Image</label>
-                        <input
-                          id="bannerImageUpload"
-                          type="file"
-                          accept="image/*"
-                          onChange={(event) => {
-                            const file = event.target.files?.[0]
-                            if (!file) return
-                            if (file.size > 2 * 1024 * 1024) return alert('Image must be under 2 MB')
-                            const reader = new FileReader()
-                            reader.onload = () => setProfileData((current) => ({ ...current, bannerImage: reader.result }))
-                            reader.readAsDataURL(file)
-                          }}
-                          className="shared-form-control mt-2 block w-full rounded-2xl px-3 py-2 text-sm"
-                        />
-                      </div>
-                    </div>
-                  )}
+                  <EditableProfileCover name={profileData.companyName || 'Your company'} initials={(profileData.companyName || 'C').trim().charAt(0).toUpperCase()} photo={profileData.profileImage} banner={profileData.bannerImage} editing={isEditingProfile} saving={profileSaving} onEdit={() => setIsEditingProfile(true)} onSave={saveProfileEdits} onCancel={cancelProfileEdits} onImage={handleImageFile} photoInputRef={profilePhotoInputRef} />
 
                   <form className="mt-6 space-y-4" onSubmit={(event) => event.preventDefault()}>
                     <div>
@@ -2913,7 +2731,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
                         id="companyName"
                         type="text"
                         value={profileData.companyName}
-                        disabled={!isEditingProfile}
+                        disabled={!isEditingProfile || profileSaving}
                         onChange={(e) => setProfileData({ ...profileData, companyName: e.target.value })}
                         className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                       />
@@ -2924,7 +2742,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
                         id="contactName"
                         type="text"
                         value={profileData.contactName}
-                        disabled={!isEditingProfile}
+                        disabled={!isEditingProfile || profileSaving}
                         onChange={(e) => setProfileData({ ...profileData, contactName: e.target.value })}
                         className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                       />
@@ -2935,7 +2753,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
                         id="location"
                         type="text"
                         value={profileData.location}
-                        disabled={!isEditingProfile}
+                        disabled={!isEditingProfile || profileSaving}
                         onChange={(e) => setProfileData({ ...profileData, location: e.target.value })}
                         className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                       />
@@ -2946,7 +2764,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
                         id="phone"
                         type="tel"
                         value={profileData.phone}
-                        disabled={!isEditingProfile}
+                        disabled={!isEditingProfile || profileSaving}
                         onChange={(e) => setProfileData({ ...profileData, phone: e.target.value })}
                         className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                       />
@@ -2957,7 +2775,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
                         id="website"
                         type="text"
                         value={profileData.website}
-                        disabled={!isEditingProfile}
+                        disabled={!isEditingProfile || profileSaving}
                         onChange={(e) => setProfileData({ ...profileData, website: e.target.value })}
                         className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                       />
@@ -2968,62 +2786,11 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
                         id="summary"
                         rows="4"
                         value={profileData.summary}
-                        disabled={!isEditingProfile}
+                        disabled={!isEditingProfile || profileSaving}
                         onChange={(event) => setProfileData({ ...profileData, summary: event.target.value })}
                         className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
                         placeholder="Brief description of company or services"
                       />
-                    </div>
-                    <div className="flex gap-3">
-                      {!isEditingProfile ? (
-                        <button
-                          type="button"
-                          onClick={() => setIsEditingProfile(true)}
-                          className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
-                        >
-                          Edit Profile
-                        </button>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const token = currentUser?.token || localStorage.getItem('peso-token')
-                              if (!token) return alert('Not authenticated. Please log in again.')
-                              // Preserve existing profile fields and update the editable ones, including top-level employer fields.
-                              const editableProfile = { ...(currentUser?.profile || {}), location: profileData.location, website: profileData.website, summary: profileData.summary, profileImage: profileData.profileImage || '', bannerImage: profileData.bannerImage || '' }
-                              fetch(`${API_URL}/api/profile`, {
-                                method: 'PUT',
-                                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                                body: JSON.stringify({ profile: editableProfile, companyName: profileData.companyName, contactName: profileData.contactName, phone: profileData.phone, website: profileData.website }),
-                              })
-                                .then((r) => r.json())
-                                .then((data) => {
-                                  if (data.error) return alert(data.error)
-                                  setIsEditingProfile(false)
-                                  alert('Profile saved!')
-                                })
-                                .catch((err) => {
-                                  console.error(err)
-                                  alert('Save failed')
-                                })
-                            }}
-                            className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
-                          >
-                            Save Profile
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setProfileData(normalizeProfile(currentUser, currentUser?.role))
-                              setIsEditingProfile(false)
-                            }}
-                            className="rounded-2xl border border-slate-600 bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-200"
-                          >
-                            Cancel
-                          </button>
-                        </>
-                      )}
                     </div>
                   </form>
                 </>
@@ -3078,13 +2845,14 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
 
               <div className="employer-pending-panel mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-5">
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <h3 className="text-lg font-semibold text-slate-900">My Job Requests</h3>
+                  <div><h3 className="text-lg font-semibold text-slate-900">My Job Requests</h3><p className="mt-1 text-xs text-slate-600">Expired postings move to Archive three days after their application deadline.</p></div>
                   <div className="flex flex-wrap gap-2">
                     {[
-                      { id: 'all', label: 'All', activeClass: 'bg-slate-200 text-slate-950', count: myJobs.length },
+                      { id: 'all', label: 'All', activeClass: 'bg-slate-200 text-slate-950', count: activeMyJobs.length },
                       { id: 'pending', label: 'Pending', activeClass: 'bg-yellow-400 text-slate-950', count: employerPendingJobs.length },
                       { id: 'approved', label: 'Approved', activeClass: 'bg-green-500 text-slate-900', count: employerApprovedJobs.length },
                       { id: 'declined', label: 'Declined', activeClass: 'bg-red-500 text-slate-900', count: employerDeclinedJobs.length },
+                      { id: 'archive', label: 'Archive', activeClass: 'bg-slate-200 text-slate-950', count: archivedMyJobs.length },
                     ].map((filter) => (
                       <button
                         key={filter.id}
@@ -3102,7 +2870,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
                   </div>
                 </div>
                 {filteredMyJobs.length === 0 ? (
-                  <p className="mt-3 text-slate-600">{myJobs.length === 0 ? 'No job requests submitted yet.' : `No ${employerJobStatusFilter} job requests.`}</p>
+                  <p className="mt-3 text-slate-600">{employerJobStatusFilter === 'archive' ? 'No archived job postings. Expired postings move here three days after their deadline.' : myJobs.length === 0 ? 'No job requests submitted yet.' : `No ${employerJobStatusFilter} job requests.`}</p>
                 ) : (
                   <>
                     <div className="mt-3">
@@ -3114,37 +2882,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
                         ariaLabel="Sort my job requests"
                       />
                     </div>
-                    <div className="mt-4 space-y-4">
-                      {myJobsPagination.paginate(sortedMyJobs).map((job) => (
-                        <div key={job._id}
-                          role={job.status === 'pending' ? 'button' : undefined}
-                          tabIndex={job.status === 'pending' ? 0 : undefined}
-                          aria-label={job.status === 'pending' ? `Edit ${job.title}` : undefined}
-                          onClick={job.status === 'pending' ? () => openEditJob(job, true) : undefined}
-                          onKeyDown={job.status === 'pending' ? (event) => {
-                            if (event.key === 'Enter' || event.key === ' ') {
-                              event.preventDefault()
-                              openEditJob(job, true)
-                            }
-                          } : undefined}
-                          className={`employer-pending-item rounded-2xl border border-slate-200 bg-white p-4 ${job.status === 'pending' ? 'cursor-pointer transition hover:border-cyan-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-500' : ''}`}>
-                          <div className="flex items-center justify-between gap-4">
-                            <div>
-                              <p className="text-lg font-semibold text-slate-900">{job.title}</p>
-                              <p className="text-sm text-slate-600">{job.company} \u2022 {job.location || 'Remote'}</p>
-                            </div>
-                            <span className={`rounded-full px-3 py-1 text-xs uppercase tracking-[0.2em] ${job.status === 'approved' ? 'bg-cyan-500 text-slate-950' : job.status === 'declined' ? 'bg-rose-400 text-slate-950' : 'bg-amber-400 text-slate-950'}`}>
-                              {job.status || 'pending'}
-                            </span>
-                          </div>
-                          <p className="mt-3 text-sm text-slate-700">{job.description}</p>
-                          {job.status === 'pending' && <p className="mt-2 text-xs font-medium text-cyan-700">Click to edit this pending request</p>}
-                          {job.status === 'declined' && (
-                            <p className="mt-2 text-sm text-rose-300">Reason: {job.reviewReason || 'No reason provided.'}</p>
-                          )}
-                        </div>
-                      ))}
-                    </div>
+                    <EmployerJobBrowser jobs={myJobsPagination.paginate(sortedMyJobs)} profileImage={profileData.profileImage} onEdit={(job) => openEditJob(job, true)} />
                     <Pagination
                       page={myJobsPagination.page}
                       pageSize={myJobsPagination.pageSize}
@@ -3160,7 +2898,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
 
               {(employerPendingJobs.length > 0 || employerApprovedJobs.length > 0 || employerDeclinedJobs.length > 0) && (
                 <p className="mt-4 text-xs uppercase tracking-[0.2em] text-slate-600">
-                  Pending: {employerPendingJobs.length} \u2022 Approved: {employerApprovedJobs.length} \u2022 Declined: {employerDeclinedJobs.length}
+                  Pending: {employerPendingJobs.length} {'\u2022'} Approved: {employerApprovedJobs.length} {'\u2022'} Declined: {employerDeclinedJobs.length}
                 </p>
               )}
             </section>
@@ -3222,8 +2960,11 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
             <AdminJobTitlesPage token={getToken()} onChanged={loadJobTitles} />
           )}
 
+          {activeView === "my-applications" && activeRole === "Applicant" && <MyApplicationsPage token={getToken()} onDeclined={() => { fetchJobs(); setActiveView('jobs') }} />}
+          {activeView === 'my-reputation' && activeRole === 'Applicant' && <ApplicantReputationPage token={getToken()} onOpenApplications={applicationId => { const url = new URL(window.location.href); if (applicationId) url.searchParams.set('applicationId', applicationId); else url.searchParams.delete('applicationId'); window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`); setActiveView('my-applications') }} />}
           {activeView === "referrals" && activeRole === "Employer" && (
             <ReferralList
+              profileImage={profileData.profileImage}
               token={getToken()}
               employerId={currentUser?._id || currentUser?.id || currentUser?.employerId}
             />
@@ -3235,10 +2976,6 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
 
           {activeView === 'account-deletions' && activeRole === 'Admin' && (
             <AdminAccountDeletionRequests token={getToken()} onMessage={(text) => { setAppMessage({ type: 'success', text }); fetchAdminUsers(); fetchAdminApplicants() }} onViewRetained={(record) => setReviewDocsApplicant({ id: record.applicantId, email: record.email, displayName: record.applicantName, deletedAt: true })} />
-          )}
-
-          {activeView === "employment-reports" && activeRole === "Applicant" && (
-            <ApplicantEmploymentReports token={getToken()} applicantId={currentUser?._id || currentUser?.id} />
           )}
 
           {activeView === "notify" && (
@@ -3308,6 +3045,9 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
             </section>
           )}
 
+          {showPortfolioLinks && activeRole === 'Applicant' && <PortfolioLinksEditor links={currentUser?.profile?.portfolioLinks} onClose={() => setShowPortfolioLinks(false)} onSave={links => saveProfile({ portfolioLinks: links })} />}
+          {showResumeUploader && activeRole === 'Applicant' && <ResumeUploader token={getToken()} onClose={() => setShowResumeUploader(false)} />}
+          {confirmLogout && <ConfirmDialog title="Log out of your account?" note="You will return to the sign-in page." confirmLabel="Confirm logout" onConfirm={() => { setConfirmLogout(false); handleLogout() }} onCancel={() => setConfirmLogout(false)} />}
           {showSkillPrompt && activeRole === 'Applicant' && (
             <div
               className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4"
@@ -3377,7 +3117,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <h2 id="edit-job-title" className="text-lg font-semibold text-black">{editingJobCanSave ? 'Edit Job Posting' : 'Job Posting Details'}</h2>
-                    <p className="mt-1 text-sm text-black">{editingJobCanSave ? 'Update your pending job request before admin review.' : 'Approved postings are read-only.'}</p>
+                    <p className="mt-1 text-sm text-black">{editingJobCanSave ? 'Every saved change runs through safety screening. Flagged changes are hidden from applicants until PESO approves them.' : 'Review the details of this job posting.'}</p>
                   </div>
                   <button
                     type="button"
@@ -3426,6 +3166,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
               className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4"
               role="dialog"
               aria-modal="true"
+              aria-labelledby="notification-details-title"
               onClick={() => setSelectedNotification(null)}
             >
               <div
@@ -3434,7 +3175,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
               >
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <h3 className="text-lg font-semibold text-black">Notification details</h3>
+                    <h3 id="notification-details-title" className="text-lg font-semibold text-black">Notification details</h3>
                     <p className="mt-2 text-sm font-semibold text-black">{selectedNotification.title}</p>
                   </div>
                   <button
@@ -3450,6 +3191,17 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
                 <p className="mt-2 text-sm text-black">
                   Time: {selectedNotification.createdAt ? new Date(selectedNotification.createdAt).toLocaleString() : 'Just now'}
                 </p>
+                {selectedNotificationDestination && !(activeRole === 'Admin' && selectedNotificationIsPending) && <a
+                  href={selectedNotificationDestination.href}
+                  className="mt-4 inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-800 hover:bg-blue-100"
+                  onClick={(event) => {
+                    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+                    event.preventDefault()
+                    setSelectedNotification(null)
+                    setShowProfileDocuments(false)
+                    setActiveView(selectedNotificationDestination.view)
+                  }}
+                >{selectedNotificationDestination.label}<span aria-hidden="true">→</span></a>}
 
                 {selectedNotification.company && (
                   <p className="mt-2 text-sm text-black">Company: {selectedNotification.company}</p>
@@ -3511,6 +3263,7 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
                         <div>
                           <p className="text-lg font-semibold text-slate-900">{request.companyName}</p>
                           <p className="text-sm text-slate-600">Contact: {request.contactName}</p>
+                          <AdminNsrpAccountDecision token={getToken()} accountId={request._id} role="Employer" />
                           <p className="text-sm text-slate-600">Email: {request.email}</p>
                           <p className="text-sm text-slate-600">Location: {request.location || 'N/A'}</p>
                           <p className="text-sm text-slate-600">Phone: {request.phone || 'N/A'}</p>
@@ -3581,7 +3334,8 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
           )}
 
           {activeView === "peso-referrals" && activeRole === "Admin" && (
-            <PesoReferralPanel
+            <AdminReferralsPage
+              onOpenReviewQueue={() => setActiveView('verification-flagged')}
               token={getToken()}
               adminUsers={adminUsers}
               onLoadApplicants={fetchAdminUsers}
@@ -3600,4 +3354,6 @@ function SkillTagPicker({ selected, onChange, disabled = false, theme = 'dark' }
   )
 }
 
-export default App
+export default function PortalApp() {
+  return <><PortalNotice /><App /></>
+}

@@ -1,4 +1,4 @@
-﻿import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import VerificationDocsReviewModal from '../components/VerificationDocsReviewModal'
 
@@ -54,6 +54,20 @@ async function renderModal(props = {}) {
 }
 
 describe('VerificationDocsReviewModal confirm step', () => {
+  it('shows the current account status without an obsolete NSRP auto-approval banner', async () => {
+    mockFetch.mockImplementation(async (url) => ({
+      ok: true,
+      json: async () => url.includes('/nsrp-automation/decisions')
+        ? { items: [{ result: 'Auto-approved', at: '2026-11-01T10:00:00Z', rulesVersion: '2026-11-01.1' }] }
+        : docsResponse,
+    }))
+    await renderModal()
+    expect(screen.getByText('under review')).toBeInTheDocument()
+    expect(screen.queryByText('Auto-approved')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Revoke auto-approval' })).not.toBeInTheDocument()
+    expect(mockFetch.mock.calls.some(([url]) => url.includes('/nsrp-automation/decisions'))).toBe(false)
+  })
+
   it.each(['restrict', 'unrestrict'])('confirms %s, supports cancellation, and updates the available action', async (action) => {
     let currentStatus = action === 'restrict' ? 'approved' : 'restricted'
     const change = vi.fn(async () => { currentStatus = action === 'restrict' ? 'restricted' : 'approved'; return { ok: true, verificationStatus: currentStatus } })
@@ -220,9 +234,12 @@ describe('VerificationDocsReviewModal confirm step', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
 
     const dialog = await screen.findByRole('alertdialog', { name: 'Approve Valid ID #1 (SSS) for Eliseo Dajac Dioneda III?' })
-    expect(within(dialog).getByText('The applicant will be notified.')).toBeInTheDocument()
+    expect(within(dialog).getByText('0 flags unresolved. Approve anyway? The applicant will be notified.')).toBeInTheDocument()
     expect(mockFetch.mock.calls.filter(([, options]) => options?.method === 'PUT')).toHaveLength(0)
 
+    expect(within(dialog).getByRole('button', { name: 'Yes, approve' })).toBeDisabled()
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Reason' }), { target: { value: 'Document reviewed' } })
+    within(dialog).getAllByRole('checkbox').forEach(checkbox => fireEvent.click(checkbox))
     fireEvent.click(within(dialog).getByRole('button', { name: 'Yes, approve' }))
     await waitFor(() => expect(mockFetch.mock.calls.filter(([, options]) => options?.method === 'PUT')).toHaveLength(1))
     await screen.findByText('Valid ID #1 approved')
@@ -259,6 +276,8 @@ describe('VerificationDocsReviewModal confirm step', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
     const dialog = await screen.findByRole('alertdialog', { name: /Approve Valid ID/ })
     const confirmButton = within(dialog).getByRole('button', { name: 'Yes, approve' })
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Reason' }), { target: { value: 'Document reviewed' } })
+    within(dialog).getAllByRole('checkbox').forEach(checkbox => fireEvent.click(checkbox))
     fireEvent.click(confirmButton)
     fireEvent.click(confirmButton)
     fireEvent.click(confirmButton)
@@ -273,6 +292,8 @@ describe('VerificationDocsReviewModal confirm step', () => {
     await renderModal()
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
     const dialog = await screen.findByRole('alertdialog', { name: /Approve Valid ID/ })
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Reason' }), { target: { value: 'Document reviewed' } })
+    within(dialog).getAllByRole('checkbox').forEach(checkbox => fireEvent.click(checkbox))
     fireEvent.click(within(dialog).getByRole('button', { name: 'Yes, approve' }))
     await within(dialog).findByText('Storage unavailable')
     expect(within(dialog).getByRole('button', { name: 'Retry' })).toBeInTheDocument()
@@ -288,6 +309,8 @@ describe('VerificationDocsReviewModal confirm step', () => {
     const getsBefore = mockFetch.mock.calls.filter(([, o]) => !o?.method).length
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
     const dialog = await screen.findByRole('alertdialog', { name: /Approve Valid ID/ })
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Reason' }), { target: { value: 'Document reviewed' } })
+    within(dialog).getAllByRole('checkbox').forEach(checkbox => fireEvent.click(checkbox))
     fireEvent.click(within(dialog).getByRole('button', { name: 'Yes, approve' }))
     await waitFor(() => expect(screen.queryByRole('alertdialog', { name: /Approve Valid ID/ })).not.toBeInTheDocument())
     await waitFor(() => expect(mockFetch.mock.calls.filter(([, o]) => !o?.method).length).toBeGreaterThan(getsBefore))

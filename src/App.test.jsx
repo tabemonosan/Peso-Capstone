@@ -72,11 +72,11 @@ describe('PESO Portal prototype', () => {
   it('starts applicant sign-up with account credentials and consent before the NSRP steps', () => {
     render(<App />)
 
-    fireEvent.click(screen.getByRole('button', { name: /Create an account \(Applicant\)/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^Create an account$/i }))
 
     expect(screen.getByLabelText(/^Email$/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/^Password$/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/Confirm password/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/^Password$/i, { selector: 'input' })).toBeInTheDocument()
+    expect(screen.getByLabelText(/Confirm password/i, { selector: 'input' })).toBeInTheDocument()
     expect(screen.getByText(/collection and processing/i)).toBeInTheDocument()
     expect(screen.queryByLabelText(/First name/i)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^Create account$/i })).not.toBeInTheDocument()
@@ -85,8 +85,9 @@ describe('PESO Portal prototype', () => {
 
   it('renders the portal after a successful admin login without admin role switching controls', async () => {
     render(<App />)
+    document.documentElement.scrollTop = 1200
     const emailInput = screen.getByLabelText(/Email/i)
-    const passwordInput = screen.getByLabelText(/Password/i)
+    const passwordInput = screen.getByLabelText(/Password/i, { selector: 'input' })
     const submitButton = screen.getByRole('button', { name: /Sign in/i })
 
     fireEvent.change(emailInput, { target: { value: 'admin@peso.gov' } })
@@ -94,6 +95,7 @@ describe('PESO Portal prototype', () => {
     fireEvent.click(submitButton)
 
     expect(await screen.findByText(/Online Employment Services Platform/i)).toBeInTheDocument()
+    expect(document.documentElement.scrollTop).toBe(0)
     expect(screen.queryByText(/Access Control/i)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Apply Role/i })).not.toBeInTheDocument()
     expect(await screen.findByRole('heading', { name: 'Dashboard', exact: true })).toBeInTheDocument()
@@ -154,7 +156,7 @@ describe('PESO Portal prototype', () => {
 
     render(<App />)
     fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: 'admin@peso.gov' } })
-    fireEvent.change(screen.getByLabelText(/Password/i), { target: { value: 'password123' } })
+    fireEvent.change(screen.getByLabelText(/Password/i, { selector: 'input' }), { target: { value: 'password123' } })
     fireEvent.click(screen.getByRole('button', { name: /Sign in/i }))
     fireEvent.click(await screen.findByRole('button', { name: 'Applicants' }))
 
@@ -225,7 +227,7 @@ describe('PESO Portal prototype', () => {
 
     render(<App />)
     fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: 'admin@peso.gov' } })
-    fireEvent.change(screen.getByLabelText(/Password/i), { target: { value: 'password123' } })
+    fireEvent.change(screen.getByLabelText(/Password/i, { selector: 'input' }), { target: { value: 'password123' } })
     fireEvent.click(screen.getByRole('button', { name: /Sign in/i }))
     fireEvent.click(await screen.findByRole('button', { name: 'Job Postings' }))
 
@@ -283,7 +285,7 @@ describe('PESO Portal prototype', () => {
 
     render(<App />)
     fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: 'admin@peso.gov' } })
-    fireEvent.change(screen.getByLabelText(/Password/i), { target: { value: 'password123' } })
+    fireEvent.change(screen.getByLabelText(/Password/i, { selector: 'input' }), { target: { value: 'password123' } })
     fireEvent.click(screen.getByRole('button', { name: /Sign in/i }))
     fireEvent.click(await screen.findByRole('button', { name: 'Job Postings' }))
     const jobRow = await screen.findByRole('button', { name: 'View Office Clerk details' })
@@ -341,7 +343,7 @@ describe('PESO Portal prototype', () => {
 
     render(<App />)
     fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: 'incomplete@peso.gov' } })
-    fireEvent.change(screen.getByLabelText(/Password/i), { target: { value: 'password123' } })
+    fireEvent.change(screen.getByLabelText(/Password/i, { selector: 'input' }), { target: { value: 'password123' } })
     fireEvent.click(screen.getByRole('button', { name: /Sign in/i }))
 
     expect(await screen.findByText(/Complete your registration/i)).toBeInTheDocument()
@@ -356,7 +358,7 @@ describe('PESO Portal prototype', () => {
   it('allows employer login and shows employer module navigation', async () => {
     render(<App />)
     const emailInput = screen.getByLabelText(/Email/i)
-    const passwordInput = screen.getByLabelText(/Password/i)
+    const passwordInput = screen.getByLabelText(/Password/i, { selector: 'input' })
     const submitButton = screen.getByRole('button', { name: /Sign in/i })
 
     fireEvent.change(emailInput, { target: { value: 'employer@peso.gov' } })
@@ -384,7 +386,7 @@ describe('PESO Portal prototype', () => {
           ok: true,
           json: async () => ({
             token: 'token',
-            user: { email: 'applicant@peso.gov', role: 'Applicant', emailVerified: true, verificationStatus: 'approved', profile: { name: 'Applicant One' } },
+            user: { email: 'applicant@peso.gov', role: 'Applicant', emailVerified: true, verificationStatus: 'approved', profile: { name: 'Applicant One', skills: ['Cleaning'] } },
           }),
         })
       }
@@ -436,19 +438,20 @@ describe('PESO Portal prototype', () => {
     render(<App />)
 
     fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: 'applicant@peso.gov' } })
-    fireEvent.change(screen.getByLabelText(/Password/i), { target: { value: 'password123' } })
+    fireEvent.change(screen.getByLabelText(/Password/i, { selector: 'input' }), { target: { value: 'password123' } })
     fireEvent.click(screen.getByRole('button', { name: /Sign in/i }))
 
     fireEvent.click(await screen.findByRole('button', { name: /^Jobs$/i }))
 
-    // Clicking a card opens the job detail modal; Apply starts the wizard from there
+    // Selecting a job shows its details alongside the list; Apply opens the wizard.
     const card = await screen.findByRole('button', { name: /View Warehouse Helper details/i })
     fireEvent.click(card)
-    const detail = await screen.findByRole('dialog', { name: 'Warehouse Helper' })
+    const detail = await screen.findByRole('article', { name: 'Warehouse Helper job details' })
     expect(within(detail).getByText(/Move inventory/)).toBeInTheDocument()
     expect(within(detail).getByText(/Fast learner/)).toBeInTheDocument()
 
     fireEvent.click(within(detail).getByRole('button', { name: /Apply Now/i }))
+    expect(screen.queryByRole('alertdialog', { name: 'Share your profile with this employer?' })).not.toBeInTheDocument()
     expect(await screen.findByText(/Apply for Warehouse Helper/i)).toBeInTheDocument()
     expect(screen.getAllByText(/Acme Logistics/i).length).toBeGreaterThan(0)
   })

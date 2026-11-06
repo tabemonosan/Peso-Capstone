@@ -56,7 +56,7 @@ afterEach(() => {
 
 function openSignup() {
   render(<App />)
-  fireEvent.click(screen.getByRole('button', { name: /Create an account \(Applicant\)/i }))
+  fireEvent.click(screen.getByRole('button', { name: /^Create an account$/i }))
 }
 
 // Completes the step-1 email-code verification via the mocked endpoints.
@@ -83,8 +83,8 @@ async function chooseOnlinePath() {
 async function advanceToDocumentsStep() {
   openSignup()
   await verifyStepOneEmail()
-  fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'Password123!' } })
-  fireEvent.change(screen.getByLabelText(/Confirm password/i), { target: { value: 'Password123!' } })
+  fireEvent.change(screen.getByLabelText(/^Password$/i, { selector: 'input' }), { target: { value: 'Password123!' } })
+  fireEvent.change(screen.getByLabelText(/Confirm password/i, { selector: 'input' }), { target: { value: 'Password123!' } })
   fireEvent.click(screen.getByRole('checkbox', { name: /collection and processing/i }))
   await chooseOnlinePath()
 
@@ -126,7 +126,8 @@ async function advanceToDocumentsStep() {
   const files = docsFieldset.querySelectorAll('input[type="file"]')
   fireEvent.change(files[0], { target: { files: [pdfFile('birth.pdf')] } })
   fireEvent.change(files[1], { target: { files: [pdfFile('id-front.pdf')] } })
-  fireEvent.change(within(docsFieldset).getAllByRole('combobox')[0], { target: { value: 'SSS' } })
+  fireEvent.change(within(docsFieldset).getByLabelText('Valid ID #1 type'), { target: { value: 'SSS' } })
+  fireEvent.change(within(docsFieldset).getByLabelText(/^Birth certificate copy type/), { target: { value: 'PSA copy on security paper' } })
   await screen.findByText('birth.pdf')
   await screen.findByText('id-front.pdf')
 }
@@ -135,8 +136,8 @@ describe('Applicant sign-up wizard', () => {
   it('starts with account credentials and privacy consent, without duplicate profile fields', () => {
     openSignup()
     expect(screen.getByLabelText(/^Email$/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/^Password$/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/Confirm password/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/^Password$/i, { selector: 'input' })).toBeInTheDocument()
+    expect(screen.getByLabelText(/Confirm password/i, { selector: 'input' })).toBeInTheDocument()
     expect(screen.getByText(/collection and processing/i)).toBeInTheDocument()
     expect(screen.queryByLabelText(/^Location$/i)).not.toBeInTheDocument()
     expect(screen.queryByLabelText(/^About me$/i)).not.toBeInTheDocument()
@@ -147,8 +148,8 @@ describe('Applicant sign-up wizard', () => {
   it('does not persist the password or confirmation while saving browser progress', async () => {
     openSignup()
     fireEvent.change(screen.getByLabelText(/^Email$/i), { target: { value: 'draft@peso.gov' } })
-    fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'Password123!' } })
-    fireEvent.change(screen.getByLabelText(/Confirm password/i), { target: { value: 'Password123!' } })
+    fireEvent.change(screen.getByLabelText(/^Password$/i, { selector: 'input' }), { target: { value: 'Password123!' } })
+    fireEvent.change(screen.getByLabelText(/Confirm password/i, { selector: 'input' }), { target: { value: 'Password123!' } })
     await waitFor(() => expect(localStorage.getItem('peso-applicant-signup-draft')).toContain('draft@peso.gov'))
     const savedDraft = localStorage.getItem('peso-applicant-signup-draft')
     expect(savedDraft).not.toContain('Password123!')
@@ -158,8 +159,8 @@ describe('Applicant sign-up wizard', () => {
   it('sends NSRP answers and all signup documents in one multipart request', async () => {
     openSignup()
     await verifyStepOneEmail()
-    fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'Password123!' } })
-    fireEvent.change(screen.getByLabelText(/Confirm password/i), { target: { value: 'Password123!' } })
+    fireEvent.change(screen.getByLabelText(/^Password$/i, { selector: 'input' }), { target: { value: 'Password123!' } })
+    fireEvent.change(screen.getByLabelText(/Confirm password/i, { selector: 'input' }), { target: { value: 'Password123!' } })
     fireEvent.click(screen.getByRole('checkbox', { name: /collection and processing/i }))
     await chooseOnlinePath()
 
@@ -201,9 +202,11 @@ describe('Applicant sign-up wizard', () => {
     const files = docsFieldset.querySelectorAll('input[type="file"]')
     fireEvent.change(files[0], { target: { files: [pdfFile('birth.pdf')] } })
     fireEvent.change(files[1], { target: { files: [pdfFile('id-front.pdf')] } })
-    fireEvent.change(within(docsFieldset).getAllByRole('combobox')[0], { target: { value: 'SSS' } })
+    fireEvent.change(within(docsFieldset).getByLabelText('Valid ID #1 type'), { target: { value: 'SSS' } })
+    fireEvent.change(within(docsFieldset).getByLabelText(/^Birth certificate copy type/), { target: { value: 'PSA copy on security paper' } })
     await screen.findByText('birth.pdf')
     await screen.findByText('id-front.pdf')
+    fireEvent.change(screen.getByLabelText('Resume (optional)'), { target: { files: [pdfFile('resume.pdf')] } })
     const savedDraft = localStorage.getItem('peso-applicant-signup-draft')
     expect(savedDraft).not.toContain('resume.pdf')
     expect(savedDraft).not.toContain('birth.pdf')
@@ -219,8 +222,7 @@ describe('Applicant sign-up wizard', () => {
     expect(JSON.parse(request.body.get('nsrpAnswers')).surname).toBe('Cruz')
     expect(request.body.has('birthCertificate')).toBe(true)
     expect(request.body.has('validId1Front')).toBe(true)
-    // The resume is optional and no longer collected at sign-up
-    expect(request.body.has('resume')).toBe(false)
+    expect(request.body.get('resume').name).toBe('resume.pdf')
     expect(request.body.get('nsrpMode')).toBe('online')
     expect(request.body.has('nsrpForm')).toBe(false)
     expect(request.body.get('emailProof')).toBe('proof-token-123')

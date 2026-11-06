@@ -50,7 +50,7 @@ export default function VerifyEmailPage({ onDone }) {
         <div className="auth-heading">
           <h1>Email verification</h1>
         </div>
-        {state === "loading" && <p className="text-center text-sm text-[#5c7490]">Verifying your email…</p>}
+        {state === "loading" && <p className="text-center text-sm text-[var(--peso-muted)]">Verifying your email…</p>}
         {state === "success" && (
           <div className="text-center">
             <p className="text-sm font-medium text-[#07833f]">Your email has been verified. You can now sign in.</p>
@@ -62,7 +62,7 @@ export default function VerifyEmailPage({ onDone }) {
         {state === "error" && (
           <div className="text-center">
             <p className="text-sm font-medium text-rose-600">{message}</p>
-            <p className="mt-2 text-xs text-[#5c7490]">Sign in and use the Resend button to get a new link.</p>
+            <p className="mt-2 text-xs text-[var(--peso-muted)]">Sign in and use the Resend button to get a new link.</p>
             <button type="button" onClick={onDone} className="auth-secondary-button mt-4">
               Back to sign in
             </button>

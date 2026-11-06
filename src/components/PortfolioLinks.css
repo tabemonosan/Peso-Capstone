@@ -1,0 +1,9 @@
+.portfolio-links-list { display: flex; flex-wrap: wrap; gap: 10px 16px; margin: 12px 0 0; padding: 0; list-style: none; }
+.portfolio-links-list > li { min-width: 0; max-width: 100%; }
+.portfolio-links-list .portfolio-link { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; max-width: 100%; border-radius: 8px; color: var(--peso-primary); text-decoration: none; }
+.portfolio-link-icon { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; flex: 0 0 36px; border: 1px solid var(--peso-line); border-radius: 10px; background: var(--peso-primary-soft); color: var(--peso-primary); transition: background-color 160ms ease, border-color 160ms ease; }
+.portfolio-link-icon svg { display: block; }
+.portfolio-link-label { min-width: 0; overflow-wrap: anywhere; font-size: 13px; line-height: 1.5; }
+.portfolio-link:hover .portfolio-link-label { text-decoration: underline; text-underline-offset: 3px; }
+.portfolio-link:hover .portfolio-link-icon { border-color: var(--peso-primary); background: var(--peso-card); }
+.portfolio-link:focus-visible { outline: 2px solid var(--peso-primary); outline-offset: 4px; }

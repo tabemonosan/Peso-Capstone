@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../App'
 vi.mock('recharts', () => {
@@ -10,18 +10,147 @@ afterEach(() => vi.unstubAllGlobals())
 const dashboard = (role) => ({ role, stats: { applicants: 4, employers: 2, jobs: { pending: 3, approved: 2, declined: 1 }, documentsAwaitingReview: 1, hires: 2, referrals: { total: 3 }, applications: 5, verificationStatus: 'approved' }, charts: { applications: [], registrations: [] }, activity: [] })
 function mockRole(role, overrides = {}) {
   const user = { id: 'user-1', role, email: 'user@example.com', emailVerified: true, verificationStatus: 'approved', registration: { complete: true }, companyName: 'Example Works', profile: {}, ...overrides }
-  vi.stubGlobal('fetch', vi.fn(async (url) => {
+  vi.stubGlobal('fetch', vi.fn(async (url, options) => {
     let data = []
-    if (url.endsWith('/api/login')) data = { token: 'token', user }
+    if (url.endsWith('/api/profile/page-guides')) {
+      const body = JSON.parse(options.body)
+      user.pageGuides = { ...user.pageGuides, ...(body.dismissAll ? { dismissedAll: true } : { seenPages: [...new Set([...(user.pageGuides?.seenPages || []), body.page])] }) }
+      data = { pageGuides: user.pageGuides }
+    }
+    else if (url.endsWith('/api/login')) data = { token: 'token', user }
     else if (url.endsWith('/api/profile')) data = user
+    else if (url.endsWith('/api/profile/review-status')) data = overrides.reviewDetails || { status: user.verificationStatus, checking: false, message: 'Your registration is awaiting PESO review.', documents: [] }
+    else if (url.includes('/verification-documents')) data = overrides.documentInfo || { verificationStatus: user.verificationStatus, documents: [] }
     else if (url.endsWith('/api/dashboard')) data = { ...dashboard(role), stats: { ...dashboard(role).stats, verificationStatus: user.verificationStatus } }
     else if (url.includes('/api/admin/employment-updates')) data = { items: [], total: 0 }
     else if (url.includes('/api/notifications')) data = { items: [], unreadCount: 0 }
+    else if (url.includes('/api/workflow/reputation')) data = { points: 100, policy: [], items: [], total: 0 }
     else if (url.endsWith('/api/employer/verification')) data = { verificationStatus: 'approved' }
     return { ok: true, json: async () => data }
   }))
 }
 describe('one dashboard per role', () => {
+  it('opens the admin report maker from navigation and restores it on reload', async () => {
+    mockRole('Admin')
+    localStorage.setItem('peso-token', 'token')
+    localStorage.setItem('peso-active-role', 'Admin')
+    const app = render(<App />)
+    const navigation = await screen.findByRole('navigation', { name: 'Admin navigation' })
+    fireEvent.click(within(navigation).getByRole('button', { name: 'Report maker', exact: true }))
+    expect(await screen.findByRole('heading', { name: 'Report maker', exact: true })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Report period' })).toBeInTheDocument()
+    expect(localStorage.getItem('peso-active-view')).toBe('report-maker')
+    app.unmount()
+    render(<App />)
+    expect(await screen.findByRole('heading', { name: 'Report maker', exact: true })).toBeInTheDocument()
+  })
+
+  it('replaces the retired applicant employment updates page with My applications', async () => {
+    mockRole('Applicant')
+    localStorage.setItem('peso-token', 'token')
+    localStorage.setItem('peso-active-role', 'Applicant')
+    localStorage.setItem('peso-active-view', 'employment-reports')
+    render(<App />)
+    expect(await screen.findByRole('heading', { name: 'My applications', exact: true })).toBeInTheDocument()
+    const navigation = screen.getByRole('navigation', { name: 'Applicant navigation' })
+    expect(within(navigation).queryByRole('button', { name: 'Employment updates' })).not.toBeInTheDocument()
+    expect(within(navigation).getByRole('button', { name: 'My applications' })).toHaveClass('is-active')
+    expect(localStorage.getItem('peso-active-view')).toBe('my-applications')
+    expect(fetch.mock.calls.some(([url]) => url.includes('/api/hire-reports'))).toBe(false)
+  })
+  it('opens profile options, dismisses them, and opens a separate account settings window', async () => {
+    mockRole('Applicant')
+    localStorage.setItem('peso-token', 'token')
+    localStorage.setItem('peso-active-role', 'Applicant')
+    render(<App />)
+    const profile = await screen.findByRole('button', { name: 'Profile', exact: true })
+    fireEvent.click(profile)
+    expect(profile).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('menuitem', { name: 'View Profile' })).toBeInTheDocument()
+    fireEvent.pointerDown(document.body)
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    profile.focus()
+    fireEvent.keyDown(profile, { key: 'ArrowDown' })
+    await waitFor(() => expect(screen.getByRole('menuitem', { name: 'View Profile' })).toHaveFocus())
+    fireEvent.keyDown(document.activeElement, { key: 'ArrowDown' })
+    expect(screen.getByRole('menuitem', { name: 'Portfolio Links' })).toHaveFocus()
+    fireEvent.keyDown(document.activeElement, { key: 'ArrowDown' })
+    expect(screen.getByRole('menuitem', { name: 'Resume' })).toHaveFocus()
+    fireEvent.keyDown(document.activeElement, { key: 'ArrowDown' })
+    expect(screen.getByRole('menuitem', { name: 'Account Settings' })).toHaveFocus()
+    fireEvent.keyDown(document.activeElement, { key: 'Escape' })
+    expect(profile).toHaveFocus()
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    fireEvent.click(profile)
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Account Settings' }))
+    expect(await screen.findByRole('heading', { name: 'Account settings' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Applicant Profile' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Documents submitted to PESO' })).toBeInTheDocument()
+    expect(localStorage.getItem('peso-active-view')).toBe('account-settings')
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Account settings window' })).toHaveFocus())
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+  })
+
+  it('groups settings separately and includes portfolio links in the profile menu', async () => {
+    mockRole('Applicant', { verificationDocuments: [{ docKey: 'nsrpForm', sourceType: 'uploaded' }] })
+    localStorage.setItem('peso-token', 'token')
+    localStorage.setItem('peso-active-view', 'profile')
+    render(<App />)
+    await screen.findByRole('heading', { name: 'Applicant Profile' })
+    expect(screen.queryByRole('heading', { name: 'Use your completed NSRP' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Account settings' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Profile', exact: true }))
+    expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['View Profile', 'Portfolio Links', 'Resume', 'Account Settings'])
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Account Settings' }))
+    expect(await screen.findByRole('heading', { name: 'Account settings' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Documents submitted to PESO' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Use your completed NSRP' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Retrieve from NSRP' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Applicant Profile' })).not.toBeInTheDocument()
+  })
+
+  it('shows first-visit guides on each page and remembers dismissals after reload', async () => {
+    mockRole('Applicant', { pageGuides: { seenPages: [], dismissedAll: false } })
+    localStorage.setItem('peso-token', 'token')
+    localStorage.setItem('peso-active-role', 'Applicant')
+    const app = render(<App />)
+    expect(await screen.findByRole('complementary', { name: 'Welcome to your workspace' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Got it' }))
+    await waitFor(() => expect(screen.queryByText('Quick guide')).not.toBeInTheDocument())
+    const nav = screen.getByRole('navigation', { name: 'Applicant navigation' })
+    fireEvent.click(within(nav).getByRole('button', { name: 'My reputation', exact: true }))
+    expect(await screen.findByRole('complementary', { name: 'Understand your reputation' })).toBeInTheDocument()
+    app.unmount()
+    render(<App />)
+    const restoredNav = await screen.findByRole('navigation', { name: 'Applicant navigation' })
+    fireEvent.click(within(restoredNav).getByRole('button', { name: 'Home', exact: true }))
+    expect(screen.queryByText('Quick guide')).not.toBeInTheDocument()
+  })
+  it('shows why an applicant is under review on Home and opens pending NSRP corrections directly', async () => {
+    mockRole('Applicant', { verificationStatus: 'under_review', reviewDetails: { status: 'under_review', documents: [{ docKey: 'validId1', label: 'Valid ID #1', reason: 'Your ID is waiting for comparison with your NSRP details.', canUpdate: true, uploadsRemaining: 4 }] }, documentInfo: { verificationStatus: 'under_review', nsrpData: { firstName: 'Sample', surname: 'Example' }, documents: [{ docKey: 'nsrpForm', label: 'NSRP Registration Form', status: 'pending', referenceOnly: true, locked: false, sourceType: 'generated', uploadsRemaining: 4, latest: { version: 1 } }] } })
+    localStorage.setItem('peso-token', 'token')
+    localStorage.setItem('peso-active-view', 'home')
+    render(<App />)
+    expect(await screen.findByText(/ID is waiting for comparison with your NSRP/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Review and update documents' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('Registration reference')).toBeInTheDocument()
+    expect(within(dialog).getByText(/Registration reference for your birth certificate and ID checks/)).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Update NSRP' })).toBeEnabled()
+  })
+
+  it('opens the applicant reputation window without replacing the existing Reviews page', async () => {
+    mockRole('Applicant')
+    localStorage.setItem('peso-token', 'token')
+    localStorage.setItem('peso-active-role', 'Applicant')
+    render(<App />)
+    const nav = await screen.findByRole('navigation', { name: 'Applicant navigation' })
+    fireEvent.click(within(nav).getByRole('button', { name: 'My reputation', exact: true }))
+    expect(await screen.findByRole('heading', { name: 'My reputation' })).toBeInTheDocument()
+    expect(await screen.findByLabelText('100 out of 100 reputation points')).toBeInTheDocument()
+    expect(within(nav).getByRole('button', { name: 'Reviews', exact: true })).toBeInTheDocument()
+    expect(localStorage.getItem('peso-active-view')).toBe('my-reputation')
+  })
   it('opens the admin hiring updates page from the Hires card', async () => {
     mockRole('Admin')
     localStorage.setItem('peso-token', 'token')
@@ -73,26 +202,33 @@ describe('one dashboard per role', () => {
     expect(screen.queryByRole('heading', { name: 'Recent activity' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Browse Jobs' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Profile', exact: true }))
-    expect(await screen.findByRole('heading', { name: 'Documents submitted to PESO' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'View Profile' }))
+    expect(await screen.findByRole('heading', { name: 'Applicant Profile' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Documents submitted to PESO' })).not.toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Profile', exact: true }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Account Settings' }))
+    expect(await screen.findByRole('heading', { name: 'Documents submitted to PESO' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Manage my documents' }))
     expect(screen.getByRole('dialog')).toBeInTheDocument()
   })
-  it.each(['saved', 'link'])('opens the profile documents modal for a %s document destination', async (destination) => {
+  it.each(['saved', 'link'])('opens the documents window for a %s document destination', async (destination) => {
     mockRole('Applicant')
     localStorage.setItem('peso-token', 'token')
     if (destination === 'saved') localStorage.setItem('peso-active-view', 'documents')
     else window.history.replaceState({}, '', '/profile?documents=1')
     render(<App />)
-    expect(await screen.findByRole('heading', { name: 'Applicant Profile' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Documents submitted to PESO' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Applicant Profile' })).not.toBeInTheDocument()
+    if (destination === 'saved') fireEvent.click(screen.getByRole('button', { name: 'Manage my documents' }))
     expect(await screen.findByRole('dialog')).toBeInTheDocument()
-    expect(localStorage.getItem('peso-active-view')).toBe('profile')
+    expect(localStorage.getItem('peso-active-view')).toBe('account-settings')
   })
   it.each(['Admin', 'Employer', 'Applicant'])('gives %s one overview with role-relevant information', async (role) => {
     mockRole(role)
     render(<App />)
     fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: 'user@example.com' } })
-    fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'Password123!' } })
+    fireEvent.change(screen.getByLabelText(/^Password$/i, { selector: 'input' }), { target: { value: 'Password123!' } })
     fireEvent.submit(screen.getByRole('button', { name: /Sign in/i }).closest('form'))
     const nav = await screen.findByRole('navigation', { name: `${role} navigation` })
     const overviewName = role === 'Applicant' ? 'Home' : 'Dashboard'

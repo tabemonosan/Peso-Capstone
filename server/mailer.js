@@ -60,6 +60,9 @@ async function createSmtpTransport() {
     host: process.env.SMTP_HOST,
     port,
     secure: port === 465, // 465 = implicit TLS; 587 = STARTTLS upgrade
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 20000,
     auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
   })
   from = process.env.MAIL_FROM || process.env.SMTP_USER
@@ -78,6 +81,9 @@ async function createEtherealTransport() {
     host: account.smtp.host,
     port: account.smtp.port,
     secure: account.smtp.secure,
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 20000,
     auth: { user: account.user, pass: account.pass },
   })
   from = process.env.MAIL_FROM || account.user

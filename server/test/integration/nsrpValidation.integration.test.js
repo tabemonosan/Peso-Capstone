@@ -5,6 +5,7 @@
 // 3 work/skills/languages, 4 employment/preferences, 5 certification.
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest'
 import request from 'supertest'
+import { PH_LOCATIONS } from '../../../shared/phLocations.js'
 
 vi.mock('../../mailer.js', async (importOriginal) => {
   const actual = await importOriginal()
@@ -31,6 +32,54 @@ beforeEach(async () => {
 // The wizard always includes the account email; add one by default.
 const validate = (step, overrides) => request(app).post('/api/nsrp/validate-signup').send({ step, answers: validNsrpAnswers({ email: 'validator@example.com', ...overrides }) })
 const signup = (email, answers) => signupRequest(request(app).post('/api/signup'), { email, answers })
+
+describe('required signup details', () => {
+  it.each([['religion', 0], ['height', 0], ['employmentTypeDetail', 4]])('requires %s at step validation and final signup', async (field, step) => {
+    const response = await validate(step, { [field]: '   ' })
+    expect(response.status).toBe(422)
+    expect(response.body.fieldErrors[field]).toBeTruthy()
+    const final = await signup(`missing-${field}@example.com`, validNsrpAnswers({ [field]: '' }))
+    expect(final.status).toBe(422)
+    expect(final.body.fieldErrors[field]).toBeTruthy()
+  })
+  it.each(['None', 'Prefer not to say'])('accepts religion choice %s', async religion => {
+    expect((await validate(0, { religion })).status).toBe(200)
+  })
+  it.each(['overseasPref1', 'overseasPref2', 'overseasPref3'])('requires a passport for %s at validation and signup', async field => {
+    const answers = { [field]: 'Japan', passportNo: '' }
+    const response = await validate(4, answers)
+    expect(response.status).toBe(422)
+    expect(response.body.fieldErrors.passportNo).toBeTruthy()
+    const final = await signup(`missing-${field}@example.com`, validNsrpAnswers(answers))
+    expect(final.status).toBe(422)
+    expect(final.body.fieldErrors.passportNo).toBeTruthy()
+    expect((await validate(4, { ...answers, passportNo: 'P1234567A', passportExpiry: '2099-01-01' })).status).toBe(200)
+  })
+})
+
+describe('Albay applicant addresses', () => {
+  it('accepts every listed Albay barangay under its own municipality', () => {
+    for (const [city, barangays] of Object.entries(PH_LOCATIONS)) {
+      for (const barangay of barangays) {
+        const { fieldErrors } = validateNsrpAnswers(validNsrpAnswers({ addressCity: city, addressBarangay: barangay }))
+        expect(fieldErrors.addressCity, city).toBeUndefined()
+        expect(fieldErrors.addressBarangay, `${barangay}, ${city}`).toBeUndefined()
+      }
+    }
+  })
+  it('accepts Nagotgot only under Manito', async () => {
+    expect((await validate(1, { addressCity: 'Manito', addressBarangay: 'Nagotgot' })).status).toBe(200)
+    const response = await validate(1, { addressCity: 'Daraga', addressBarangay: 'Nagotgot' })
+    expect(response.status).toBe(422)
+    expect(response.body.fieldErrors.addressBarangay).toBeTruthy()
+  })
+
+  it('rejects addresses outside Albay at final signup', async () => {
+    const response = await signup('outside-albay@example.com', validNsrpAnswers({ addressProvince: 'Sorsogon' }))
+    expect(response.status).toBe(422)
+    expect(response.body.fieldErrors.addressProvince).toBeTruthy()
+  })
+})
 
 describe('Other language proficiency', () => {
   it.each(['read', 'write', 'speak', 'understand'])('requires a name when %s is selected', async (proficiency) => {

@@ -4,6 +4,10 @@ PESO facilitates employment and retains the applicant's NSRP form. Employers
 receive the referred applicant's name, email, phone, city/province, skills,
 education, training, work experience, and profile summary. They do not receive
 NSRP answers, signatures, birth certificates, or identification documents.
+Applicants also provide contact details, a resume and qualification answers
+through the [four-step application form](job-application-form.md). This resume
+is shared only with the employer of the delivered application and remains
+unavailable to that employer after withdrawal or pull back.
 Existing NSRP document routes remain restricted to PESO administrators and,
 where supported, the applicant who owns the document.
 
@@ -15,6 +19,13 @@ Applicants may apply only after PESO approves their required documents. The API
 also rejects applications after the posting's deadline, using the Philippine
 calendar date (applications remain open throughout the deadline date). Referrals
 require an approved posting and approved applicants with active accounts.
+
+Automatic referral is ON by default: applying immediately creates a pending
+referral for the employer, after the applicant confirms sharing. Admins monitor
+**Referrals and applications**, with timelines, pull back, employer suspension
+and manual referral controls. Switching automatic referral OFF preserves the
+old manual queue for new applications. See [automatic-referrals.md](automatic-referrals.md)
+for statuses, error codes, limits, privacy, changed files and assumptions.
 
 Employers report Hired, Not hired, or Deployed from Reports. Applicants report
 Hired or Deployed from Employment updates only after the employer accepts the

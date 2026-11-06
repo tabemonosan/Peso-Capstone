@@ -1,4 +1,6 @@
-import { matchLocation, parseStoredLocation } from './phLocations.js'
+import { matchLocation, parseStoredLocation, matchBarangay, storedBarangay } from './phLocations.js'
+import { canonicalJobSkill, coveringJobSkill } from './jobSkills.js'
+import { validateJobLanguages } from './jobLanguages.js'
 // Job posting options, validation, and display helpers shared by the employer
 // request form (client) and the /api/jobs routes (server) so both enforce the
 // same rules and return the same field-level messages.
@@ -73,7 +75,10 @@ export function formatSalary(job = {}) {
 }
 
 export function formatLocation(job = {}) {
-  const place = [job.city, job.province].map((part) => (typeof part === 'string' ? part.trim() : '')).filter(Boolean).join(', ')
+  const legacyPlace = parseStoredLocation(job.location)
+  const city = job.city || legacyPlace?.city
+  const barangay = matchBarangay(city, job.barangay) || storedBarangay(job.location || '', city)
+  const place = [barangay, city, job.province || legacyPlace?.province].map((part) => (typeof part === 'string' ? part.trim() : '')).filter(Boolean).join(', ')
   return job.locationType === 'Remote' ? 'Remote' : (place || job.location || '')
 }
 
@@ -87,7 +92,7 @@ export function deriveSalaryFields(salary) {
 const text = (value) => (typeof value === 'string' ? value.trim() : '')
 const oneOf = (value, list) => list.includes(value)
 
-export const emptyJobPosting = () => ({ title: '', customTitle: '', description: '', requirements: '', skills: [], locationType: 'On-site', city: '', province: '', employmentType: 'Full-time', education: 'Not Required', experience: 'No Experience', salaryMin: '', salaryMax: '', payFrequency: 'Monthly', negotiable: false, slots: '', deadline: '', notesToAdmin: '' })
+export const emptyJobPosting = () => ({ title: '', customTitle: '', description: '', requirements: '', skills: [], languageRequirements: [], locationType: 'On-site', city: '', province: '', barangay: '', employmentType: 'Full-time', education: 'Not Required', experience: 'No Experience', salaryMin: '', salaryMax: '', payFrequency: 'Monthly', negotiable: false, slots: '', deadline: '', notesToAdmin: '' })
 
 // Recover legacy fields from the posting itself, preserving a different branch address.
 export function normalizeJobPosting(job = {}) {
@@ -98,9 +103,11 @@ export function normalizeJobPosting(job = {}) {
     && (!text(job.city) || text(job.city).toLowerCase() === legacyPlace.city.toLowerCase())
     && (!text(job.province) || text(job.province).toLowerCase() === legacyPlace.province.toLowerCase())
   const place = job.locationType === 'Remote' ? { city: '', province: '' } : (storedPlace || (consistentLegacyPlace ? legacyPlace : {}))
-  return { ...job, ...place, ...(derived || {}), negotiable: job.negotiable || /^negotiable$/i.test(job.salary || ''),
+  const barangay = job.locationType === 'Remote' ? '' : matchBarangay(place.city, job.barangay) || storedBarangay(job.location || '', place.city)
+  return { ...job, ...place, barangay, ...(derived || {}), negotiable: job.negotiable || /^negotiable$/i.test(job.salary || ''),
     payFrequency: job.payFrequency || 'Monthly', employmentType: mapEmploymentType(job.employmentType),
     education: job.education || 'Not Required', experience: job.experience || 'No Experience',
+    languageRequirements: Array.isArray(job.languageRequirements) ? job.languageRequirements : [],
     skills: Array.isArray(job.skills) ? job.skills : (typeof job.skills === 'string' ? job.skills.split(',').map((s) => s.trim()).filter(Boolean) : []) }
 }
 
@@ -110,6 +117,9 @@ export function normalizeJobPosting(job = {}) {
 export function validateJobPosting(input = {}, { now = new Date(), keepDeadline = '' } = {}) {
   const errors = {}
   const value = {}
+  const languages = validateJobLanguages(input.languageRequirements)
+  if (languages.error) errors.languageRequirements = languages.error
+  value.languageRequirements = languages.value || []
 
   const title = text(input.title)
   const customTitle = text(input.customTitle)
@@ -143,12 +153,21 @@ export function validateJobPosting(input = {}, { now = new Date(), keepDeadline 
   if (!Array.isArray(input.skills) || input.skills.some((skill) => typeof skill !== 'string')) errors.skills = 'Enter skills as a list of text tags.'
   else if (value.skills.length > JOB_LIMITS.skillsMax) errors.skills = `Add no more than ${JOB_LIMITS.skillsMax} skills.`
   else if (value.skills.some((skill) => skill.length > JOB_LIMITS.skillMax)) errors.skills = `Each skill must be ${JOB_LIMITS.skillMax} characters or fewer.`
+  if (!errors.skills) {
+    if (value.skills.some((skill) => !canonicalJobSkill(skill))) errors.skills = 'Choose required skills from the approved list. Custom skills are not allowed.'
+    else {
+      value.skills = [...new Set(value.skills.map(canonicalJobSkill))]
+      const redundant = value.skills.find((skill) => coveringJobSkill(skill, value.skills))
+      if (redundant) errors.skills = `${redundant} is already covered by ${coveringJobSkill(redundant, value.skills)}. Remove the narrower skill.`
+    }
+  }
 
   value.locationType = text(input.locationType)
   if (!oneOf(value.locationType, LOCATION_TYPES)) errors.locationType = 'Choose On-site, Hybrid, or Remote.'
   const needsPlace = value.locationType === 'On-site' || value.locationType === 'Hybrid'
   value.city = needsPlace ? text(input.city).replace(/\s+/g, ' ') : ''
   value.province = needsPlace ? text(input.province).replace(/\s+/g, ' ') : ''
+  value.barangay = needsPlace ? text(input.barangay) : ''
   if (needsPlace) {
     if (!value.city) errors.city = 'Enter the city or municipality.'
     else if (value.city.length > JOB_LIMITS.placeMax) errors.city = `City or municipality must be ${JOB_LIMITS.placeMax} characters or fewer.`
@@ -161,6 +180,12 @@ export function validateJobPosting(input = {}, { now = new Date(), keepDeadline 
         errors.province = 'Province must match the selected city/municipality.'
       } else Object.assign(value, place)
     }
+  }
+
+  if (value.barangay) {
+    const barangay = matchBarangay(value.city, value.barangay)
+    if (!barangay) errors.barangay = 'Choose a barangay belonging to the selected city/municipality.'
+    else value.barangay = barangay
   }
 
   value.employmentType = mapEmploymentType(input.employmentType)

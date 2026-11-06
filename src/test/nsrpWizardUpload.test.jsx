@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ApplicantSignupWizard from '../components/ApplicantSignupWizard'
 
@@ -50,8 +50,8 @@ async function completeAccountStep() {
   for (let i = 1; i <= 6; i += 1) fireEvent.change(screen.getByLabelText(new RegExp(`^Code digit ${i}$`, 'i')), { target: { value: String(i) } })
   fireEvent.click(screen.getByRole('button', { name: /^Verify$/i }))
   await screen.findByText(/Email verified/i)
-  fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'Password123!' } })
-  fireEvent.change(screen.getByLabelText(/Confirm password/i), { target: { value: 'Password123!' } })
+  fireEvent.change(screen.getByLabelText(/^Password$/i, { selector: 'input' }), { target: { value: 'Password123!' } })
+  fireEvent.change(screen.getByLabelText(/Confirm password/i, { selector: 'input' }), { target: { value: 'Password123!' } })
   fireEvent.click(screen.getByRole('checkbox', { name: /collection and processing/i }))
   fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
   await screen.findByRole('radiogroup', { name: /NSRP options/i })
@@ -80,12 +80,37 @@ async function fillDocuments() {
   const files = fieldset.querySelectorAll('input[type="file"]')
   fireEvent.change(files[0], { target: { files: [pdfFile('birth.pdf')] } })
   fireEvent.change(files[1], { target: { files: [pdfFile('id1.pdf')] } })
-  fireEvent.change(fieldset.querySelector('select'), { target: { value: 'SSS' } })
+  fireEvent.change(screen.getByLabelText('Valid ID #1 type'), { target: { value: 'SSS' } })
+  fireEvent.change(screen.getByLabelText(/^Birth certificate copy type/), { target: { value: 'PSA copy on security paper' } })
   await screen.findByText('birth.pdf')
   fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
 }
 
 describe('NSRP path choice', () => {
+  it.each([['image/png', 'nsrp.png'], ['image/jpeg', 'nsrp.jpg'], ['application/pdf', 'nsrp.jpg']])('rejects non-PDF selections (%s, %s)', async (type, name) => {
+    await completeAccountStep()
+    fireEvent.click(screen.getByRole('radio', { name: /I already have a filled NSRP form/i }))
+    const input = screen.getByLabelText(/Filled NSRP form/i)
+    expect(input).toHaveAttribute('accept', 'application/pdf,.pdf')
+    expect(screen.getByText('Upload a PDF only (max 5 MB).')).toBeInTheDocument()
+    fireEvent.change(input, { target: { files: [new File(['test'], name, { type })] } })
+    fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
+    expect(await screen.findByText('The NSRP form must be a PDF file.')).toBeInTheDocument()
+    expect(screen.queryByLabelText(/^First name$/i)).not.toBeInTheDocument()
+  })
+
+  it('offers expanded Philippine IDs in both document dropdowns', async () => {
+    await completeAccountStep()
+    await chooseUpload()
+    await fillBasicInfo()
+    for (const label of ['Valid ID #1 type', 'Valid ID #2 type']) {
+      const select = await screen.findByLabelText(label)
+      for (const name of ["Driver's License", 'PhilHealth ID', 'Digital TIN ID', 'PWD ID', 'Senior Citizen ID', 'Other government-issued ID']) {
+        expect(within(select).getByRole('option', { name, exact: true })).toBeInTheDocument()
+      }
+    }
+  })
+
   it('offers both options after the Account step and adapts the tabs', async () => {
     await completeAccountStep()
     expect(screen.getByRole('radio', { name: /I already have a filled NSRP form/i })).toBeInTheDocument()
@@ -108,7 +133,7 @@ describe('NSRP path choice', () => {
     await screen.findByText('Choose how you want to provide your NSRP.')
     fireEvent.click(screen.getByRole('radio', { name: /I already have a filled NSRP form/i }))
     fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
-    await screen.findByText('Upload your filled NSRP form (PDF, JPG, or PNG).')
+    await screen.findByText('Upload your filled NSRP form (PDF only).')
   })
 
   it('switching paths keeps both drafts and shows the note', async () => {
@@ -141,6 +166,46 @@ describe('NSRP path choice', () => {
 })
 
 describe('upload path end-to-end', () => {
+  it('fills basic details from a reviewed NSRP and sends only its source-bound proof', async () => {
+    const fallback = mockFetch.getMockImplementation()
+    mockFetch.mockImplementation(async (url, options) => url.endsWith('/api/signup/nsrp-import') ? { ok: true, json: async () => ({ answers: { firstName: 'Maria', surname: 'Cruz', dob: '1990-06-11', cellphone: '09171234567', addressCity: 'Manito', addressProvince: 'Albay', skills: ['Gardening'], tin: '987654321' }, warnings: [], importToken: 'reviewed-import-proof' }) } : fallback(url, options))
+    await completeAccountStep()
+    fireEvent.click(screen.getByRole('radio', { name: /I already have a filled NSRP form/i }))
+    fireEvent.change(screen.getByLabelText(/Filled NSRP form/i), { target: { files: [pdfFile('my-nsrp.pdf')] } })
+    fireEvent.click(screen.getByText('Retrieve from NSRP'))
+    await screen.findByText('Maria')
+    fireEvent.click(screen.getByRole('checkbox', { name: /checked these details/i }))
+    fireEvent.click(screen.getByText('Use these details'))
+    fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
+    expect(await screen.findByLabelText(/^First name$/i)).toHaveValue('Maria')
+    expect(screen.getByLabelText(/^Date of birth$/i)).toHaveValue('1990-06-11')
+    expect(screen.getByLabelText(/^City \/ Municipality$/i)).toHaveValue('Manito')
+    fireEvent.click(screen.getByRole('button', { name: /^Next$/i }))
+    await fillDocuments()
+    fireEvent.click(await screen.findByRole('button', { name: /Create account/i }))
+    await waitFor(() => expect(mockFetch.mock.calls.some(([url]) => url.endsWith('/api/signup'))).toBe(true))
+    const body = mockFetch.mock.calls.find(([url]) => url.endsWith('/api/signup'))[1].body
+    expect(body.get('nsrpImportToken')).toBe('reviewed-import-proof')
+    expect(body.get('firstName')).toBe('Maria')
+    const stored = JSON.stringify({ ...localStorage, ...sessionStorage })
+    expect(stored).not.toContain('reviewed-import-proof')
+    expect(stored).not.toContain('987654321')
+  })
+
+  it('clears reviewed results when the applicant replaces the PDF', async () => {
+    const fallback = mockFetch.getMockImplementation()
+    mockFetch.mockImplementation(async (url, options) => url.endsWith('/api/signup/nsrp-import') ? { ok: true, json: async () => ({ answers: { firstName: 'Maria' }, warnings: [], importToken: 'old-proof' }) } : fallback(url, options))
+    await completeAccountStep()
+    fireEvent.click(screen.getByRole('radio', { name: /I already have a filled NSRP form/i }))
+    const input = screen.getByLabelText(/Filled NSRP form/i)
+    fireEvent.change(input, { target: { files: [pdfFile('old.pdf')] } })
+    fireEvent.click(screen.getByText('Retrieve from NSRP'))
+    await screen.findByText('Maria')
+    fireEvent.change(input, { target: { files: [pdfFile('replacement.pdf')] } })
+    expect(screen.queryByText('Maria')).not.toBeInTheDocument()
+    expect(screen.queryByText('Use these details')).not.toBeInTheDocument()
+  })
+
   it('submits nsrpMode upload with the file and basic info, no nsrpAnswers, and stores nothing sensitive', async () => {
     await completeAccountStep()
     await chooseUpload()

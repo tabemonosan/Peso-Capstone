@@ -1,14 +1,9 @@
 import { useEffect, useRef, useState } from "react"
+import DeclaredDocumentFields from './DeclaredDocumentFields'
+import { IMAGE_LIMITS } from '../../shared/documentImage.js'
+import { PHILIPPINE_ID_TYPES } from '../../shared/philippineIds.js'
 
-export const ID_TYPE_OPTIONS = [
-  "SSS",
-  "Passport",
-  "PRC",
-  "Pag-IBIG",
-  "Voter's ID",
-  "Philippine Postal ID",
-  "UMID",
-]
+export const ID_TYPE_OPTIONS = PHILIPPINE_ID_TYPES
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024 // 5 MB per file (matches server)
 const COMPRESS_ABOVE_BYTES = 1.5 * 1024 * 1024 // compress images larger than this
@@ -33,9 +28,9 @@ async function compressImageIfNeeded(file) {
   }
 }
 
-const labelCls = "block text-sm font-semibold text-[#071c35]"
-const helperCls = "mt-1 text-xs text-[#5c7490]"
-const selectCls = "shared-form-control w-full rounded-[10px] border border-[#c4d4e5] bg-[#f8fbfe] px-3 py-2.5 text-sm text-[#071c35]"
+const labelCls = "block text-sm font-semibold text-[var(--peso-ink)]"
+const helperCls = "mt-1 text-xs text-[var(--peso-muted)]"
+const selectCls = "shared-form-control w-full rounded-[10px] border border-[var(--peso-line-strong)] bg-[var(--peso-canvas)] px-3 py-2.5 text-sm text-[var(--peso-ink)]"
 
 function FileField({ label, hint, required, file, error, onSelect, onRemove, disabled }) {
   const inputRef = useRef(null)
@@ -54,23 +49,23 @@ function FileField({ label, hint, required, file, error, onSelect, onRemove, dis
   return (
     <div>
       <span className={labelCls}>
-        {label} {required ? <span className="text-rose-600">*</span> : <span className="text-xs font-normal text-[#5c7490]">(optional)</span>}
+        {label} {required ? <span className="text-rose-600">*</span> : <span className="text-xs font-normal text-[var(--peso-muted)]">(optional)</span>}
       </span>
       {hint && <p className={helperCls}>{hint}</p>}
 
       {file ? (
-        <div className="mt-1.5 flex flex-wrap items-center gap-3 rounded-[10px] border border-[#c4d4e5] bg-white p-3">
+        <div className="mt-1.5 flex flex-wrap items-center gap-3 rounded-[10px] border border-[var(--peso-line-strong)] bg-white p-3">
           {previewUrl ? (
-            <img src={previewUrl} alt={`${label} preview`} className="h-16 w-16 shrink-0 rounded-lg border border-[#c4d4e5] object-cover" />
+            <img src={previewUrl} alt={`${label} preview`} className="h-16 w-16 shrink-0 rounded-lg border border-[var(--peso-line-strong)] object-cover" />
           ) : (
-            <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg border border-[#c4d4e5] bg-[#f8fbfe] text-xs font-bold text-[#1b4265]">PDF</span>
+            <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg border border-[var(--peso-line-strong)] bg-[var(--peso-canvas)] text-xs font-bold text-[var(--peso-body)]">PDF</span>
           )}
           <div className="min-w-0 flex-1" style={{ minWidth: '120px' }}>
-            <p className="truncate text-sm text-[#071c35]">{file.name}</p>
-            <p className="text-xs text-[#5c7490]">{Math.ceil(file.size / 1024)} KB</p>
+            <p className="truncate text-sm text-[var(--peso-ink)]">{file.name}</p>
+            <p className="text-xs text-[var(--peso-muted)]">{Math.ceil(file.size / 1024)} KB</p>
           </div>
           <div className="flex shrink-0 gap-2">
-            <button type="button" disabled={disabled} onClick={() => inputRef.current?.click()} className="rounded-lg border border-[#c4d4e5] bg-white px-3 py-1.5 text-xs font-semibold text-[#1b4265]">
+            <button type="button" disabled={disabled} onClick={() => inputRef.current?.click()} className="rounded-lg border border-[var(--peso-line-strong)] bg-white px-3 py-1.5 text-xs font-semibold text-[var(--peso-body)]">
               Replace
             </button>
             <button type="button" disabled={disabled} onClick={onRemove} className="rounded-lg border border-rose-300 bg-white px-3 py-1.5 text-xs font-semibold text-rose-600">
@@ -83,7 +78,7 @@ function FileField({ label, hint, required, file, error, onSelect, onRemove, dis
           type="button"
           disabled={disabled}
           onClick={() => inputRef.current?.click()}
-          className="mt-1.5 w-full rounded-[10px] border border-dashed border-[#c4d4e5] bg-[#f8fbfe] px-3 py-4 text-sm text-[#5c7490] hover:border-[#1b6ec2] hover:text-[#1b4265]"
+          className="mt-1.5 w-full rounded-[10px] border border-dashed border-[var(--peso-line-strong)] bg-[var(--peso-canvas)] px-3 py-4 text-sm text-[var(--peso-muted)] hover:border-[var(--peso-primary)] hover:text-[var(--peso-body)]"
         >
           Tap to upload or take a photo
         </button>
@@ -131,6 +126,12 @@ export const emptyVerificationDocs = {
 
 export default function VerificationDocumentsForm({ docs, setDocs, disabled, fieldErrors = {} }) {
   const [errors, setErrors] = useState({})
+  const [qualityChoice, setQualityChoice] = useState(null)
+  const acceptFile = async (path, file) => {
+    const processed = await compressImageIfNeeded(file)
+    setDocs(current => path.length === 1 ? { ...current, [path[0]]: processed } : { ...current, [path[0]]: { ...current[path[0]], [path[1]]: processed } })
+    setQualityChoice(null)
+  }
 
   const setFile = async (path, file) => {
     if (!file) {
@@ -146,13 +147,19 @@ export default function VerificationDocumentsForm({ docs, setDocs, disabled, fie
     const errorKey = path.join(".")
     setErrors((current) => ({ ...current, [errorKey]: validationError || undefined }))
     if (validationError) return
-    const processed = await compressImageIfNeeded(file)
-    setDocs((current) => {
-      const next = { ...current }
-      if (path.length === 1) next[path[0]] = processed
-      else next[path[0]] = { ...next[path[0]], [path[1]]: processed }
-      return next
-    })
+    if (file.type !== 'application/pdf' && typeof createImageBitmap === 'function') {
+      try {
+        const bitmap = await createImageBitmap(file)
+        if (Math.max(bitmap.width, bitmap.height) < IMAGE_LIMITS.minWidth || Math.min(bitmap.width, bitmap.height) < IMAGE_LIMITS.minHeight) { bitmap.close(); setErrors(current => ({ ...current, [errorKey]: 'Use an image at least 600 × 380 pixels.' })); return }
+        const canvas = document.createElement('canvas'); canvas.width = 120; canvas.height = 80
+        const context = canvas.getContext('2d'); context.drawImage(bitmap, 0, 0, 120, 80); bitmap.close()
+        const pixels = context.getImageData(0, 0, 120, 80).data
+        let sum = 0; for (let i = 0; i < pixels.length; i += 4) sum += (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3
+        const mean = sum / (pixels.length / 4)
+        if (mean < IMAGE_LIMITS.darkMean || mean > IMAGE_LIMITS.glareMean) { setQualityChoice({ path, file }); return }
+      } catch { /* Server checks always enforce quality when browser decoding is unavailable. */ }
+    }
+    await acceptFile(path, file)
   }
 
   const id1Type = docs.id1.type
@@ -160,9 +167,12 @@ export default function VerificationDocumentsForm({ docs, setDocs, disabled, fie
   const helperText = "Upload clear, uncropped photos or scans (JPG, PNG, or PDF, max 5 MB each). An admin will review your documents before you can browse jobs."
 
   return (
-    <fieldset className="space-y-4 rounded-[10px] border border-[#c4d4e5] bg-[#f8fbfe] p-4">
-      <legend className="px-2 text-sm font-semibold text-[#071c35]">Verification documents</legend>
+    <fieldset className="space-y-4 rounded-[10px] border border-[var(--peso-line-strong)] bg-[var(--peso-canvas)] p-4">
+      <legend className="px-2 text-sm font-semibold text-[var(--peso-ink)]">Verification documents</legend>
       <p className={helperCls}>{helperText}</p>
+      <p className={helperCls}>Check your document before you upload: use good light, keep all edges visible, and make the text clear.</p>
+      {qualityChoice && <div role="status" className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">This photo may be too dark or have glare. <button type="button" className="rounded border bg-white px-2 py-1" onClick={() => setQualityChoice(null)}>Retake</button> <button type="button" className="rounded border bg-white px-2 py-1" onClick={() => acceptFile(qualityChoice.path, qualityChoice.file)}>Use anyway</button></div>}
+      <DeclaredDocumentFields docKey="birthCertificate" value={docs.birthDetails} onChange={value => setDocs(current => ({ ...current, birthDetails: value }))} disabled={disabled} />
       {fieldErrors.verificationDocuments && <p role="alert" className="text-xs font-medium text-rose-600">{fieldErrors.verificationDocuments}</p>}
 
       <FileField
@@ -175,13 +185,14 @@ export default function VerificationDocumentsForm({ docs, setDocs, disabled, fie
         onRemove={() => setFile(["birthCertificate"], null)}
       />
 
-      <div className="space-y-3 rounded-[10px] border border-[#c4d4e5] bg-white p-3">
+      <div className="space-y-3 rounded-[10px] border border-[var(--peso-line-strong)] bg-white p-3">
         <p className={labelCls}>Valid ID #1 <span className="text-rose-600">*</span></p>
         {fieldErrors.validId1 && <p role="alert" className="text-xs text-rose-600">{fieldErrors.validId1}</p>}
         <select
+          aria-label="Valid ID #1 type"
           value={docs.id1.type}
           disabled={disabled}
-          onChange={(e) => setDocs((current) => ({ ...current, id1: { ...current.id1, type: e.target.value } }))}
+          onChange={(e) => setDocs((current) => ({ ...current, id1: { ...current.id1, type: e.target.value, number: '', expiry: '', format: '' } }))}
           className={selectCls}
         >
           <option value="">Select ID type…</option>
@@ -189,6 +200,7 @@ export default function VerificationDocumentsForm({ docs, setDocs, disabled, fie
             <option key={option} value={option}>{option}</option>
           ))}
         </select>
+        <DeclaredDocumentFields docKey="validId1" idType={docs.id1.type} value={docs.id1} onChange={value => setDocs(current => ({ ...current, id1: { ...current.id1, ...value } }))} disabled={disabled} />
         <FileField
           label="Front of ID"
           required
@@ -208,13 +220,14 @@ export default function VerificationDocumentsForm({ docs, setDocs, disabled, fie
         />
       </div>
 
-      <div className="space-y-3 rounded-[10px] border border-[#c4d4e5] bg-white p-3">
-        <p className={labelCls}>Valid ID #2 <span className="text-xs font-normal text-[#5c7490]">(optional)</span></p>
+      <div className="space-y-3 rounded-[10px] border border-[var(--peso-line-strong)] bg-white p-3">
+        <p className={labelCls}>Valid ID #2 <span className="text-xs font-normal text-[var(--peso-muted)]">(optional)</span></p>
         {fieldErrors.validId2 && <p role="alert" className="text-xs text-rose-600">{fieldErrors.validId2}</p>}
         <select
+          aria-label="Valid ID #2 type"
           value={docs.id2.type}
           disabled={disabled}
-          onChange={(e) => setDocs((current) => ({ ...current, id2: { ...current.id2, type: e.target.value } }))}
+          onChange={(e) => setDocs((current) => ({ ...current, id2: { ...current.id2, type: e.target.value, number: '', expiry: '', format: '' } }))}
           className={selectCls}
         >
           <option value="">Select ID type…</option>
@@ -227,6 +240,7 @@ export default function VerificationDocumentsForm({ docs, setDocs, disabled, fie
         )}
         {docs.id2.type && (
           <>
+            <DeclaredDocumentFields docKey="validId2" idType={docs.id2.type} value={docs.id2} onChange={value => setDocs(current => ({ ...current, id2: { ...current.id2, ...value } }))} disabled={disabled} />
             <FileField
               label="Front of ID"
               required
