@@ -13,7 +13,7 @@ export async function prepareDocument(file, docKey, idType, details = {}, otherN
   const expected = nsrp[{ SSS: 'gsisSss', Passport: 'passportNo', 'Pag-IBIG': 'pagibig' }[idType]]
   if (expected && validation.details.number && String(expected).replace(/[\s-]/g, '').toUpperCase() !== validation.details.number) validation.warnings.push('declared_id_nsrp_difference')
   const quality = await inspectDocument(file)
-  return { quality, declaredDetails: validation.details, findings: validation.warnings.map(ruleId => ({ ruleId, severity: 'warning', fieldGroup: 'document details', evidence: 'self-declared', status: 'open' })) }
+  return { quality, declaredDetails: validation.details, findings: validation.warnings.map(ruleId => ({ ruleId, severity: 'warning', fieldGroup: 'document details', evidence: 'self-declared', status: 'open', approvalBlocking: false })) }
 }
 export async function saveAuthorization(accountId, docKey, version, input) {
   if (docKey !== 'birthCertificate' || input?.copyType !== 'PSA e-Certificate' || !input.authorizationCode) return

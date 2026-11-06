@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs'
 import crypto from 'crypto'
 import { normalizeEmail } from '../utils/emailVerification.js'
 import { parsePagination, paginateQuery, escapeRegex } from '../utils/paginate.js'
+import { releaseApplicantClaims } from '../services/identityClaims.js'
 
 export function createAccountDeletionRouter({ Applicant, AccountDeletionRequest, JobPosting, JobApplication, Notification, authenticate, notify, notifyAdmins, mail }) {
   const router = express.Router()
@@ -84,6 +85,7 @@ export function createAccountDeletionRouter({ Applicant, AccountDeletionRequest,
       const account = await Applicant.findById(record.applicantId)
       if (!account) throw new Error('Applicant record unavailable')
       await Applicant.updateOne({ _id: account._id, deletedAt: { $exists: false } }, { $set: { deletedAt: new Date(), retainedEmail: record.email }, $inc: { sessionVersion: 1 } })
+      await releaseApplicantClaims(account._id)
       const archivedEmail = `deleted-${account._id}@retained.invalid`
       // Once released, never scan by the original email again: it may now
       // belong to a new account with its own applications and notifications.

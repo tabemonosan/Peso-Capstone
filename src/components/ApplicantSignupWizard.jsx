@@ -20,7 +20,7 @@ import {
   NSRP_TEXT_LIMITS, NSRP_NUMERIC_SPECS, NSRP_SECTION_MAX_ROWS, NSRP_REQUIRED_FIELDS, RELIGION_OPTIONS,
   EMPLOYED_TYPES, UNEMPLOYED_TYPES, EDUCATION_LEVELS, SEX_OPTIONS, CIVIL_STATUS_OPTIONS,
   EMPLOYMENT_STATUS_OPTIONS, YES_NO, DISABILITY_OPTIONS, WORK_STATUS_OPTIONS,
-  digitsOnly, normalizePhMobile, normalizePassportNo, validateNsrpLanguages, requiresPassport,
+  digitsOnly, normalizePhMobile, normalizePassportNo, validateNsrpLanguages, validateNsrpBasicInfo, requiresPassport,
 } from "../../shared/nsrpValidation.js"
 
 const STORAGE_KEY = "peso-applicant-signup-draft"
@@ -161,6 +161,7 @@ const inputClass = "shared-form-control mt-1 w-full rounded-xl border border-sla
 // 11 Review and submit (upload path).
 const ONLINE_FLOW = [0, 9, 1, 2, 3, 4, 5, 6, 7, 8]
 const UPLOAD_FLOW = [0, 9, 10, 7, 11]
+const IMPORTED_UPLOAD_FLOW = [0, 9, 7, 11]
 const UPDATE_FLOW = [1, 2, 3, 4, 5, 6, 8]
 const UNDECIDED_FLOW = [0, 9]
 const stepTitle = (id) => (id === 9 ? "Your NSRP" : id === 10 ? "Basic information" : id === 11 ? "Review and submit" : STEP_NAMES[id])
@@ -174,9 +175,10 @@ function safeDraft() {
     delete answers.signatureDataUrl
     const basicInfo = saved.basicInfo && typeof saved.basicInfo === "object" ? saved.basicInfo : {}
     const nsrpMode = ["online", "upload"].includes(saved.nsrpMode) ? saved.nsrpMode : null
-    const flow = nsrpMode === "upload" ? UPLOAD_FLOW : nsrpMode === "online" ? ONLINE_FLOW : UNDECIDED_FLOW
+    const reuseBasicInfo = nsrpMode === 'upload' && Object.keys(validateNsrpBasicInfo(basicInfo).fieldErrors).length === 0
+    const flow = nsrpMode === "upload" ? reuseBasicInfo ? IMPORTED_UPLOAD_FLOW : UPLOAD_FLOW : nsrpMode === "online" ? ONLINE_FLOW : UNDECIDED_FLOW
     const rawStep = Number(saved.step) || 0
-    return { email: saved.email || "", step: flow.includes(rawStep) ? rawStep : 0, answers, consent: Boolean(saved.consent), nsrpMode, basicInfo }
+    return { email: saved.email || "", step: reuseBasicInfo && rawStep === 10 ? 9 : flow.includes(rawStep) ? rawStep : 0, answers, consent: Boolean(saved.consent), nsrpMode, basicInfo, reuseBasicInfo }
   } catch (error) {
     console.error("Could not load applicant sign-up draft:", error)
     return { email: "", step: 0, answers: {}, consent: false, nsrpMode: null, basicInfo: {} }
@@ -203,6 +205,8 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
   const [basicInfo, setBasicInfo] = useState(saved.basicInfo || {})
   const [nsrpUpload, setNsrpUpload] = useState(null)
   const [nsrpImportToken, setNsrpImportToken] = useState('')
+  const [reuseBasicInfo, setReuseBasicInfo] = useState(Boolean(saved.reuseBasicInfo))
+  const [editImportedBasic, setEditImportedBasic] = useState(false)
   const [nsrpFileRevision, setNsrpFileRevision] = useState(0)
   const [fieldErrors, setFieldErrors] = useState({})
   const [error, setError] = useState("")
@@ -212,7 +216,8 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
   const [warnings, setWarnings] = useState([])
   const [complete, setComplete] = useState(false)
   // Section navigation is unrestricted; completion tracks actual validation.
-  const flow = isUpdate || isPublic ? UPDATE_FLOW : nsrpMode === "upload" ? UPLOAD_FLOW : nsrpMode === "online" ? ONLINE_FLOW : UNDECIDED_FLOW
+  const skipBasicInfo = reuseBasicInfo && !editImportedBasic && Object.keys(validateNsrpBasicInfo(basicInfo).fieldErrors).length === 0
+  const flow = isUpdate || isPublic ? UPDATE_FLOW : nsrpMode === "upload" ? skipBasicInfo ? IMPORTED_UPLOAD_FLOW : UPLOAD_FLOW : nsrpMode === "online" ? ONLINE_FLOW : UNDECIDED_FLOW
   const flowPos = flow.indexOf(step)
   const [stepValidity, setStepValidity] = useState({})
   const [focusedField, setFocusedField] = useState(null)
@@ -505,7 +510,9 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
         else if (nsrpUpload.size > NSRP_UPLOAD_MAX) localErrors.nsrpFile = "The NSRP form must be 5 MB or smaller."
       }
       if (Object.keys(localErrors).length) showErrors(localErrors)
-      return Object.keys(localErrors).length === 0
+      if (Object.keys(localErrors).length) return false
+      if (nsrpMode === 'upload' && skipBasicInfo) return validateCurrent(10)
+      return true
     }
     if (validationStep === 10) {
       const response = await fetch(`${API_URL}/api/nsrp/validate-signup`, {
@@ -855,6 +862,8 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
                     const file = event.target.files?.[0] || null
                     setNsrpUpload(file)
                     setNsrpImportToken('')
+                    if (nsrpUpload) setReuseBasicInfo(false)
+                    setEditImportedBasic(false)
                     setNsrpFileRevision(value => value + 1)
                     setFieldErrors((current) => ({ ...current, nsrpFile: undefined }))
                     markStepInvalid()
@@ -866,10 +875,13 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
               </label>
               {nsrpUpload && <p className="mt-1 text-xs text-slate-500">{nsrpUpload.name} • {Math.ceil(nsrpUpload.size / 1024)} KB</p>}
               {nsrpUpload && <NsrpImportReview key={`${nsrpFileRevision}:${emailProof}`} file={nsrpUpload} emailProof={emailProof} onUse={result => {
-                setBasicInfo(current => ({ ...current, ...nsrpImportBasic(result.answers), noMiddleName: false }))
+                setBasicInfo({ ...nsrpImportBasic(result.answers), noMiddleName: false })
                 setNsrpImportToken(result.importToken)
+                setReuseBasicInfo(true)
+                setEditImportedBasic(false)
                 markStepInvalid()
               }} />}
+              {skipBasicInfo && <p role="status" className="mt-2 text-sm text-green-800">Your basic details are complete. {nsrpUpload ? 'Continue to Documents.' : 'Reselect your NSRP PDF to continue.'}</p>}
               {fieldErrors.nsrpFile && <p id="error-nsrpFile" role="alert" className="mt-1 text-xs text-rose-600">{fieldErrors.nsrpFile}</p>}
             </div>
           )}
@@ -950,7 +962,7 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
             <div><dt className="inline font-semibold">Cellphone: </dt><dd className="inline">{basicInfo.cellphone}</dd></div>
             <div><dt className="inline font-semibold">Location: </dt><dd className="inline">{[basicInfo.addressCity, basicInfo.addressProvince].filter(Boolean).join(", ")}</dd></div>
           </dl>
-          <button type="button" onClick={() => goToStep(10)} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700">Edit basic information</button>
+          <button type="button" onClick={() => { setEditImportedBasic(true); setStep(10) }} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700">Edit basic information</button>
         </section>
       )}
       {step === 0 && !isUpdate && (

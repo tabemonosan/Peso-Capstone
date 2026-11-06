@@ -13,7 +13,7 @@ const { Applicant, Employer } = await import('../../models/collections.js')
 const EmployerRequest = mongoose.model('EmployerRequest')
 const notify = vi.fn(async () => {}), notifyAdmins = vi.fn(async () => {})
 let automation, engine, sequence = 0
-const version = extra => ({ version: 1, status: 'pending', quality: { passed: true, warnings: [] }, imageComparisons: [{ fieldGroup: 'name', result: 'match', evidence: 'independent' }], ...extra })
+const version = extra => ({ version: 1, status: 'pending', quality: { passed: true, warnings: [] }, imageComparisons: ['name', 'birth date'].map(fieldGroup => ({ fieldGroup, result: 'match', evidence: 'independent' })), ...extra })
 async function account(extra = {}, docKey = 'birthCertificate', accountExtra = {}) {
   return Applicant.create({ email: `engine-${++sequence}@example.invalid`, passwordHash: 'test', emailVerified: true, phone: '09171234567', nsrpAutoEnabledAtCreation: true, profile: { nsrp: validNsrpAnswers() }, verificationDocuments: { [docKey]: { versions: [version(extra)] } }, ...accountExtra })
 }
@@ -43,7 +43,7 @@ it('does not send an unflagged applicant document to admin review for random sam
  expect((await automation.decisions().findOne({ accountId: user._id })).sampleDraw).toBeUndefined()
 })
 it('keeps an ID mismatch on the ID without copying it onto the birth certificate', async () => {
- const mismatch = { ruleId: 'cross_id_nsrp_idNumber', severity: 'critical', fieldGroup: 'ID number', evidence: 'independent', status: 'open', approvalBlocking: true }
+ const mismatch = { ruleId: 'cross_id_nsrp_dob', severity: 'critical', fieldGroup: 'birth date', evidence: 'independent', status: 'open', approvalBlocking: true }
  const user = await account({}, 'birthCertificate', { verificationDocuments: {
   // Include contamination from an older engine decision on the birth record.
   birthCertificate: { versions: [version({ findings: [mismatch] })] },

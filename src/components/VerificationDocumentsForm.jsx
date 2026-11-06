@@ -127,6 +127,8 @@ export const emptyVerificationDocs = {
 export default function VerificationDocumentsForm({ docs, setDocs, disabled, fieldErrors = {} }) {
   const [errors, setErrors] = useState({})
   const [qualityChoice, setQualityChoice] = useState(null)
+  const [showOptionalId, setShowOptionalId] = useState(false)
+  const optionalIdVisible = showOptionalId || Boolean(docs.id2.type || docs.id2.front || docs.id2.back)
   const acceptFile = async (path, file) => {
     const processed = await compressImageIfNeeded(file)
     setDocs(current => path.length === 1 ? { ...current, [path[0]]: processed } : { ...current, [path[0]]: { ...current[path[0]], [path[1]]: processed } })
@@ -220,8 +222,14 @@ export default function VerificationDocumentsForm({ docs, setDocs, disabled, fie
         />
       </div>
 
-      <div className="space-y-3 rounded-[10px] border border-[var(--peso-line-strong)] bg-white p-3">
-        <p className={labelCls}>Valid ID #2 <span className="text-xs font-normal text-[var(--peso-muted)]">(optional)</span></p>
+      {!optionalIdVisible && <button type="button" disabled={disabled} onClick={() => setShowOptionalId(true)} aria-expanded={false} aria-controls="optional-verification-id" className="rounded-lg border border-[var(--peso-line-strong)] bg-white px-4 py-2 text-sm font-semibold text-[var(--peso-body)]">Add ID (optional)</button>}
+      {optionalIdVisible && <div id="optional-verification-id" className="space-y-3 rounded-[10px] border border-[var(--peso-line-strong)] bg-white p-3">
+        <div className="flex items-center justify-between gap-3"><p className={labelCls}>Valid ID #2 <span className="text-xs font-normal text-[var(--peso-muted)]">(optional)</span></p><button type="button" disabled={disabled} onClick={() => {
+          setDocs(current => ({ ...current, id2: { ...emptyVerificationDocs.id2 } }))
+          setErrors(current => ({ ...current, 'id2.front': undefined, 'id2.back': undefined }))
+          setQualityChoice(current => current?.path[0] === 'id2' ? null : current)
+          setShowOptionalId(false)
+        }} className="rounded-lg border border-rose-300 bg-white px-3 py-1.5 text-xs font-semibold text-rose-600">Remove optional ID</button></div>
         {fieldErrors.validId2 && <p role="alert" className="text-xs text-rose-600">{fieldErrors.validId2}</p>}
         <select
           aria-label="Valid ID #2 type"
@@ -260,7 +268,7 @@ export default function VerificationDocumentsForm({ docs, setDocs, disabled, fie
             />
           </>
         )}
-      </div>
+      </div>}
 
       {fieldErrors.validId2 && <p role="alert" className="text-xs font-medium text-rose-600">{fieldErrors.validId2}</p>}
     </fieldset>

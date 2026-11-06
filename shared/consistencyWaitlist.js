@@ -1,10 +1,10 @@
 // Consistency screening policy; no extracted document values belong here or in findings.
 import { isSharedPhoneFinding } from './verificationFindings.js'
-export const WAITLIST_RULES_VERSION = '2026-11-06.2'
+export const WAITLIST_RULES_VERSION = '2026-11-06.4'
 export const APPLICANT_STATUSES = ['under_review', 'waitlisted', 'approved', 'declined', 'restricted']
 export const WAITLIST_DEFAULTS = { waitlistOnMismatch: true, waitlistAttempts: 3, pesoContact: 'Contact your local PESO office.', pesoOfficeHours: 'Contact PESO to confirm office hours.' }
 export const WAITLIST_LIMITS = { timeoutMs: 90000, reminderDays: 7, staleDays: 30, maxAttemptsSetting: 5, minOcrConfidence: 60 }
-export const WAITLIST_GROUPS = ['name', 'birth date', 'ID number']
+export const WAITLIST_GROUPS = ['name', 'birth date']
 export const WAITLIST_DOCUMENTS = ['nsrpForm', 'birthCertificate', 'validId1', 'validId2']
 export const WAITLIST_TIP = 'Text reading is approximate. If your photo is blurry or cropped, retake it, or explain the difference.'
 export const WAITLIST_MESSAGE = 'Your account needs a review by PESO staff.'

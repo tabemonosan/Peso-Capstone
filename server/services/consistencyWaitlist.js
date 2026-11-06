@@ -2,7 +2,7 @@ import crypto from 'node:crypto'
 import mongoose from 'mongoose'
 import { enqueueVerification } from './verificationJobs.js'
 import { processApplicantImages } from './imageChecks.js'
-import { WAITLIST_RULES_VERSION, WAITLIST_DEFAULTS, WAITLIST_LIMITS, WAITLIST_DOCUMENTS, WAITLIST_MESSAGE, WAITLIST_TIP, consistencyIssues, waitlistIssueMessage, isManuallyApproved } from '../../shared/consistencyWaitlist.js'
+import { WAITLIST_RULES_VERSION, WAITLIST_DEFAULTS, WAITLIST_LIMITS, WAITLIST_DOCUMENTS, WAITLIST_GROUPS, WAITLIST_MESSAGE, WAITLIST_TIP, consistencyIssues, waitlistIssueMessage, isManuallyApproved } from '../../shared/consistencyWaitlist.js'
 import { VERIFICATION_DOC_LABELS } from '../../shared/verificationDocs.js'
 import { isSharedPhoneFinding } from '../../shared/verificationFindings.js'
 
@@ -21,7 +21,10 @@ export function createConsistencyWaitlist({ Applicant, automation, notify, notif
     // Refresh obsolete phone flags and flags already settled by staff approval.
     // A policy recheck does not count as an applicant correction attempt.
     const approvedIssue = account.consistencyState?.issues?.some(issue => isManuallyApproved(latest(account, issue.docKey)))
-    if (account.verificationStatus === 'waitlisted' && account.consistencyState?.status !== 'checking' && (approvedIssue || account.consistencyState?.rulesVersion !== WAITLIST_RULES_VERSION && Object.values(account.verificationDocuments || {}).some(slot => slot.versions?.at(-1)?.findings?.some(isSharedPhoneFinding)))) {
+    const obsoleteIssue = account.consistencyState?.issues?.some(issue => issue.reasonCode === 'cross_check_mismatch' && !WAITLIST_GROUPS.includes(issue.fieldGroup))
+    const oldDuplicateReview = account.consistencyState?.rulesVersion !== WAITLIST_RULES_VERSION && account.consistencyState?.issues?.some(issue => issue.reasonCode === 'staff_review')
+    const refreshedDuplicateReview = account.verificationStatus === 'waitlisted' && account.consistencyState?.status !== 'checking' && account.consistencyState?.issues?.some(issue => issue.reasonCode === 'staff_review') && await automation.refreshDuplicateFindings(id)
+    if (account.verificationStatus === 'waitlisted' && account.consistencyState?.status !== 'checking' && (approvedIssue || obsoleteIssue || oldDuplicateReview || refreshedDuplicateReview || account.consistencyState?.rulesVersion !== WAITLIST_RULES_VERSION && Object.values(account.verificationDocuments || {}).some(slot => slot.versions?.at(-1)?.findings?.some(isSharedPhoneFinding)))) {
       await begin(id, 'policy', undefined, ip)
       account = await get(id)
     }

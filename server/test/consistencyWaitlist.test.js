@@ -18,7 +18,7 @@ describe('waitlist evidence policy', () => {
     expect(consistencyIssues(document('duplicate_sss'))).toHaveLength(1)
   })
   it.each([
-    ['surname', 'name'], ['firstName', 'name'], ['dob', 'birth date'], ['idNumber', 'ID number'],
+    ['surname', 'name'], ['firstName', 'name'], ['dob', 'birth date'],
   ])('accepts only significant independent %s evidence', (field, fieldGroup) => {
     const comparison = { ruleId: `cross_birth_nsrp_${field}`, fieldGroup, result: 'significant', evidence: 'independent', reliable: true }
     expect(consistencyIssues(docs(comparison))).toHaveLength(1)
@@ -29,6 +29,9 @@ describe('waitlist evidence policy', () => {
   })
   it.each(['sex', 'religion', 'disability', 'civilStatus', 'address', 'placeOfBirth', 'middleName'])('never waitlists for %s', field => {
     expect(consistencyIssues(docs({ ruleId: `cross_birth_nsrp_${field}`, fieldGroup: field, result: 'significant', evidence: 'independent', reliable: true }))).toEqual([])
+  })
+  it('does not waitlist for an ID-number mismatch', () => {
+    expect(consistencyIssues(docs({ ruleId: 'cross_id_nsrp_idNumber', fieldGroup: 'ID number', result: 'significant', evidence: 'independent', reliable: true }))).toEqual([])
   })
   it('does not copy arbitrary values from comparison payloads into issues', () => {
     const issue = consistencyIssues(docs({ ruleId: 'cross_birth_nsrp_dob', fieldGroup: 'birth date', result: 'significant', evidence: 'independent', reliable: true, text: 'SAMPLE PRIVATE TEXT', left: 'SAMPLE VALUE', right: 'SAMPLE VALUE' }))[0]

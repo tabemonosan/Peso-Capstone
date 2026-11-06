@@ -41,9 +41,60 @@ const action = async body => {
   return request(app).post(`/api/admin/document-verification/waitlist/${applicant._id}/action`).set(auth('Admin', admin)).send({ token: account.consistencyState?.token, ...body })
 }
 describe('consistency waitlist', () => {
+  it.each(['retained', 'removed'])('allows the same identity after the original account is %s', async deletion => {
+    reading.text = sampleText('1990-01-01')
+    await nsrpAutomation.updateSettings({ automaticApproval: true }, admin.email)
+    const old = await Applicant.create({ email: 'deleted-identity@example.test', passwordHash: 'unused', emailVerified: true, profile: applicant.profile.toObject(), verificationDocuments: applicant.verificationDocuments.toObject() })
+    await nsrpAutomation.process({ role: 'Applicant', accountId: old._id, ip: '192.0.2.8' })
+    if (deletion === 'retained') await Applicant.updateOne({ _id: old._id }, { $set: { deletedAt: new Date() } })
+    else await Applicant.deleteOne({ _id: old._id })
+    // Leave legacy claims in place to exercise recovery for old deletions.
+    await nsrpAutomation.process({ role: 'Applicant', accountId: applicant._id, ip: '192.0.2.8' })
+    expect((await check()).status).toBe('approved')
+  })
+  it.each(['2026-11-06.3', '2026-11-06.4'])('rechecks an existing %s duplicate waitlist after the original account was deleted', async rulesVersion => {
+    reading.text = sampleText('1990-01-01')
+    await nsrpAutomation.updateSettings({ automaticApproval: true }, admin.email)
+    const old = await Applicant.create({ email: 'old-active-identity@example.test', passwordHash: 'unused', emailVerified: true, profile: applicant.profile.toObject(), verificationDocuments: applicant.verificationDocuments.toObject() })
+    await nsrpAutomation.process({ role: 'Applicant', accountId: old._id, ip: '192.0.2.8' })
+    await nsrpAutomation.process({ role: 'Applicant', accountId: applicant._id, ip: '192.0.2.8' })
+    expect((await check()).status).toBe('waitlisted')
+    await Applicant.updateOne({ _id: old._id }, { $set: { deletedAt: new Date() } })
+    await Applicant.updateOne({ _id: applicant._id }, { $set: { 'consistencyState.rulesVersion': rulesVersion } })
+    expect((await consistencyWaitlist.publicState(applicant._id, '192.0.2.8')).checking).toBe(true)
+    await drainVerificationJobs()
+    expect((await consistencyWaitlist.publicState(applicant._id)).status).toBe('approved')
+  })
+  it('approves matching name and birth date despite birthplace and ID-number differences', async () => {
+    await nsrpAutomation.updateSettings({ automaticApproval: true }, admin.email)
+    await Applicant.updateOne({ _id: applicant._id }, { $set: {
+      'profile.nsrp.placeOfBirth': 'NAGOTGOT, MANITO, ALBAY',
+      'profile.nsrp.gsisSss': '4982761053',
+      'verificationDocuments.validId1.versions.0.declaredDetails.number': '4982761053',
+    } })
+    reading.text = sampleText('1990-01-01') + '\nPlace of birth: NAGOTGOT, MANTIO, ALBAY'
+    expect((await check()).status).toBe('approved')
+    const saved = await Applicant.findById(applicant._id).lean()
+    expect(saved.verificationDocuments.birthCertificate.versions.at(-1).status).toBe('approved')
+    expect(saved.verificationDocuments.validId1.versions.at(-1).status).toBe('approved')
+  })
+  it('rechecks a legacy ID-number waitlist without charging correction chances', async () => {
+    await nsrpAutomation.updateSettings({ automaticApproval: true }, admin.email)
+    reading.text = sampleText('1990-01-01')
+    await Applicant.updateOne({ _id: applicant._id }, { $set: {
+      consistencyState: { token: 'old-id-number-check', status: 'finished', used: {}, rulesVersion: '2026-11-06.2', issues: [{ docKey: 'validId1', reasonCode: 'cross_check_mismatch', fieldGroup: 'ID number' }] },
+      verificationStatus: 'waitlisted',
+    } })
+    expect((await consistencyWaitlist.publicState(applicant._id, '192.0.2.8')).checking).toBe(true)
+    await drainVerificationJobs()
+    expect((await consistencyWaitlist.publicState(applicant._id)).status, JSON.stringify((await Applicant.findById(applicant._id).lean()).verificationDocuments)).toBe('approved')
+    expect((await Applicant.findById(applicant._id).select('+consistencyState')).consistencyState.used).toEqual({})
+  })
   describe.each(['online', 'upload'])('%s signup automation', mode => {
     it.each([
       ['matching documents', {}, false, false, 'approved', 'approved', 'approved'],
+      ['no ID details', {}, false, false, 'approved', 'approved', 'approved'],
+      ['other identity details differ', {}, false, false, 'approved', 'approved', 'approved'],
       ['significant mismatch', {}, true, false, 'waitlisted', 'pending', 'pending'],
       ['reader unavailable', {}, false, true, 'under_review', 'pending', 'pending'],
       ['glare warning', {}, false, false, 'under_review', 'pending', 'pending'],
@@ -52,6 +103,7 @@ describe('consistency waitlist', () => {
       ['ID automation disabled', { validId: false }, false, false, 'under_review', 'approved', 'pending'],
     ])('handles %s through the signup endpoint', async (_label, settings, mismatch, readerFailure, status, birthStatus, idStatus) => {
       reading.text = sampleText(mismatch ? '1992-02-03' : '1990-01-01').replace('1234567890', '4982761053')
+      if (_label === 'other identity details differ') reading.text = reading.text.replace('4982761053', '9876543210') + '\nPlace of birth: NAGOTGOT, MANTIO, ALBAY'
       reading.fail = readerFailure
       const upload = _label === 'glare warning' ? image : await sharp(image).linear(0.85).png().toBuffer()
       await nsrpAutomation.updateSettings({ automaticApproval: true, ...settings }, admin.email)
@@ -59,8 +111,8 @@ describe('consistency waitlist', () => {
       let submission = request(app).post('/api/signup')
         .field('email', email).field('password', 'SamplePassword123!').field('consent', 'true')
         .field('emailProof', emailProofFor(email)).field('nsrpMode', mode).field('id1Type', 'SSS')
-        .field('verificationDetails', JSON.stringify({ birthCertificate: { copyType: 'PSA copy on security paper' }, validId1: { number: '4982761053' } }))
-      if (mode === 'online') submission = submission.field('nsrpAnswers', JSON.stringify(validNsrpAnswers({ firstName: 'Sample', surname: 'Example', gsisSss: '4982761053' })))
+        .field('verificationDetails', JSON.stringify({ birthCertificate: { copyType: 'PSA copy on security paper' }, validId1: _label === 'no ID details' ? {} : { number: '4982761053' } }))
+      if (mode === 'online') submission = submission.field('nsrpAnswers', JSON.stringify(validNsrpAnswers({ firstName: 'Sample', surname: 'Example', gsisSss: _label === 'other identity details differ' ? '9876543210' : '4982761053', placeOfBirth: 'NAGOTGOT, MANITO, ALBAY' })))
       else {
         for (const [key, value] of Object.entries(validBasicInfo({ firstName: 'Sample', lastName: 'Example' }))) submission = submission.field(key, value)
         submission = submission.attach('nsrpFile', pdfBuffer(), { filename: 'SAMPLE.pdf', contentType: 'application/pdf' })
