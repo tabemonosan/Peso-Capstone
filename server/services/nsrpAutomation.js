@@ -4,6 +4,7 @@ import { checkNsrp, checkSummary, NSRP_RULES_VERSION, normalizedText } from '../
 import { checkNsrp2 } from '../../shared/nsrp2Checks.js'
 import { VERIFICATION_DEFAULTS, REVIEWER_LABELS, openFlags } from '../../shared/verification.js'
 import { isSharedPhoneFinding } from '../../shared/verificationFindings.js'
+import { hasActiveOtherOwner } from './identityClaims.js'
 
 export const SYSTEM_REVIEWER = REVIEWER_LABELS.system
 const DEFAULTS = VERIFICATION_DEFAULTS
@@ -99,9 +100,9 @@ export function createNsrpAutomation({ Applicant, Employer, EmployerRequest, not
       const claim = await identifiers().findOne({ _id: id })
       // Include records predating the identifier registry; never return their data.
       const applicantField = { tin: 'tin', sss: 'gsisSss', pagibig: 'pagibig', philhealth: 'philhealth' }[kind]
-      const applicantDuplicate = await Applicant.exists({ ...(role === 'Applicant' ? { _id: { $ne: accountId } } : {}), [`profile.nsrp.${applicantField}`]: value })
+      const applicantDuplicate = await Applicant.exists({ deletedAt: null, ...(role === 'Applicant' ? { _id: { $ne: accountId } } : {}), [`profile.nsrp.${applicantField}`]: value })
       const employerDuplicate = kind === 'tin' && await EmployerRequest.exists({ ...(role === 'Employer' ? { email: { $ne: data.email } } : {}), 'registrationDetails.taxIdentificationNumber': value })
-      if (claim.owners.some((entry) => entry !== owner) || applicantDuplicate || employerDuplicate) findings.push({ code: `duplicate_${kind}`, severity: 'critical' })
+      if (await hasActiveOtherOwner(claim.owners, owner, { Applicant, Employer }) || applicantDuplicate || employerDuplicate) findings.push({ code: `duplicate_${kind}`, severity: 'critical' })
     }
     if ((await getSettings()).dataChecks) {
       const extra = role === 'Applicant'
@@ -111,7 +112,7 @@ export function createNsrpAutomation({ Applicant, Employer, EmployerRequest, not
         if (!value) continue
         const id = await hash(kind, value)
         await identifiers().updateOne({ _id: id }, { $addToSet: { owners: owner } }, { upsert: true })
-        if ((await identifiers().findOne({ _id: id })).owners.some(entry => entry !== owner)) findings.push({ code: 'duplicate_' + kind, severity, fieldGroup: 'registration', evidence: 'self-declared', status: 'open' })
+        if (await hasActiveOtherOwner((await identifiers().findOne({ _id: id })).owners, owner, { Applicant, Employer })) findings.push({ code: 'duplicate_' + kind, severity, fieldGroup: 'registration', evidence: 'self-declared', status: 'open' })
       }
     }
     return findings
@@ -122,7 +123,7 @@ export function createNsrpAutomation({ Applicant, Employer, EmployerRequest, not
     let approved = false
     try {
       const account = await (role === 'Applicant' ? Applicant : Employer).findById(accountId).select('+nsrpAutoEnabledAtCreation +holdAutoApproval').lean()
-      if (!account) return
+      if (!account || account.deletedAt) return
       const record = role === 'Applicant' ? account : await EmployerRequest.findOne({ email: account.email }).select('+nsrpAutoEnabledAtCreation').lean()
       if (!record) return
       const versions = role === 'Applicant' ? record.verificationDocuments?.nsrpForm?.versions : record.requirementsVersions
@@ -213,6 +214,33 @@ export function createNsrpAutomation({ Applicant, Employer, EmployerRequest, not
     }
   }
 
+  async function refreshDuplicateFindings(accountId) {
+    const account = await Applicant.findById(accountId).select('+consistencyState').lean()
+    if (!account || account.deletedAt || account.consistencyState?.status === 'checking') return
+    const data = account.profile?.nsrp || { firstName: account.profile?.firstName, surname: account.profile?.lastName, middleName: account.profile?.middleName, dob: account.profile?.dob }
+    const current = (await duplicateFindings('Applicant', account._id, data)).map(f => ({ ruleId: f.code, severity: f.severity, fieldGroup: f.fieldGroup || 'registration', evidence: f.evidence || 'self-declared', status: 'open', approvalBlocking: true }))
+    const registrationDuplicates = new Set(['duplicate_tin', 'duplicate_sss', 'duplicate_pagibig', 'duplicate_philhealth', 'duplicate_passport', 'duplicate_name_birth'])
+    const match = { _id: account._id, deletedAt: null, verificationStatus: account.verificationStatus,
+      'consistencyState.token': account.consistencyState?.token || { $exists: false } }
+    const set = {}, inc = {}
+    let changedFindings = false
+    for (const [docKey, slot] of Object.entries(account.verificationDocuments || {})) {
+      const document = slot.versions?.at(-1)
+      if (!document) continue
+      const previousRules = (document.findings || []).filter(f => registrationDuplicates.has(f.ruleId || f.code)).map(f => f.ruleId || f.code).sort().join(',')
+      if (previousRules !== current.map(f => f.ruleId).sort().join(',')) changedFindings = true
+      const path = `verificationDocuments.${docKey}.versions`, base = `${path}.${slot.versions.length - 1}`
+      match[path] = { $size: slot.versions.length }
+      match[`${base}.status`] = document.status
+      match[`${base}.reviewRevision`] = document.reviewRevision || { $in: [0, null] }
+      set[`${base}.findings`] = [...(document.findings || []).filter(f => !registrationDuplicates.has(f.ruleId || f.code)), ...current]
+      inc[`${base}.reviewRevision`] = 1
+    }
+    if (!changedFindings) return false
+    if (Object.keys(set).length && !(await Applicant.collection.updateOne(match, { $set: set, $inc: inc })).modifiedCount) throw new Error('Registration changed during duplicate recheck')
+    return true
+  }
+
   async function revoke(id, admin, reason) {
     if (typeof reason !== 'string' || !reason.trim() || reason.length > 500) throw new Error('A reason of 1 to 500 characters is required')
     const decision = await decisions().findOne({ _id: id, result: 'Auto-approved' })
@@ -238,7 +266,7 @@ export function createNsrpAutomation({ Applicant, Employer, EmployerRequest, not
     return true
   }
 
-  return { getSettings, updateSettings, creationEnabled, process: async payload => {
+  return { getSettings, updateSettings, creationEnabled, refreshDuplicateFindings, process: async payload => {
     await processSubmission(payload)
     if (documentEngine && payload.role === 'Employer') await documentEngine.process({ ...payload, docKey: 'employerNsrpForm' })
   }, attachEngine: engine => { documentEngine = engine }, revoke, decisions, reserveRate, hash }

@@ -1,4 +1,4 @@
-export const CROSS_RULES_VERSION = '2026-11-06.1'
+export const CROSS_RULES_VERSION = '2026-11-06.3'
 export const NO_MIDDLE = new Set(['', 'nomiddlename', 'n/a', 'na', 'nmn'])
 export function normalizeName(value) {
   return String(value || '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/\bma\.?(?=\s|$)/g, 'maria').replace(/\bsto\.?(?=\s|$)/g, 'santo').replace(/[^\p{L}\p{N}]/gu, '')
@@ -76,7 +76,7 @@ export function crossChecks({ nsrp = {}, birth = {}, ids = [] } = {}) {
       const evidence = independent ? 'independent' : 'self-declared'
       const fieldGroup = ['surname', 'firstName', 'middleName', 'suffix'].includes(field) ? 'name' : field === 'dob' ? 'birth date' : field === 'idNumber' ? 'ID number' : field
       comparisons.push({ ruleId, fieldGroup, result, evidence })
-      if (result !== 'match') findings.push({ ruleId, code: ruleId, severity: ['info', 'could_not_read'].includes(result) ? 'info' : result === 'significant' && independent ? 'critical' : 'warning', fieldGroup, evidence, status: 'open', approvalBlocking: field !== 'sex' })
+      if (result !== 'match') findings.push({ ruleId, code: ruleId, severity: ['info', 'could_not_read'].includes(result) ? 'info' : result === 'significant' && independent ? 'critical' : 'warning', fieldGroup, evidence, status: 'open', approvalBlocking: ['name', 'birth date'].includes(fieldGroup) })
     }
   }
   compare(birth, 'birth', nsrp, 'nsrp')

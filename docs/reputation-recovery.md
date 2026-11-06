@@ -129,8 +129,7 @@ entries preserve the original event rather than deleting it.
 
 The private ledger, actor/reasons, audit snapshots, employer identity, internal
 limit flags, and confirmed no-show count remain PESO-only. Applicants receive
-an explicit allowlist of their own display fields; employers receive none of
-the points, tiers, history, review evidence, or private flags. The admin no-show
+an explicit allowlist of their own display fields. Authorized employers receiving an active referral can view the current numeric reputation score and maximum. That score replaces eligibility in the 10-point suitability criterion, scaled proportionally. Tiers, history, review evidence, private flags, reasons, and actors remain hidden from employers. The admin no-show
 count uses a rolling calendar-month window, including leap-year boundaries.
 
 ## Assumptions and known limitations

@@ -30,6 +30,16 @@ function mockRole(role, overrides = {}) {
   }))
 }
 describe('one dashboard per role', () => {
+  it('opens Activity Logs from admin navigation', async () => {
+    mockRole('Admin')
+    localStorage.setItem('peso-token', 'token')
+    localStorage.setItem('peso-active-role', 'Admin')
+    render(<App />)
+    const navigation = await screen.findByRole('navigation', { name: 'Admin navigation' })
+    fireEvent.click(within(navigation).getByRole('button', { name: 'Activity Logs', exact: true }))
+    expect(await screen.findByRole('heading', { name: 'Activity Logs', exact: true })).toBeInTheDocument()
+    expect(fetch.mock.calls.some(([url]) => url.includes('/api/admin/activity-logs?'))).toBe(true)
+  })
   it('opens the admin report maker from navigation and restores it on reload', async () => {
     mockRole('Admin')
     localStorage.setItem('peso-token', 'token')

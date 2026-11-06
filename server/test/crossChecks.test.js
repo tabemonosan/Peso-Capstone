@@ -51,3 +51,10 @@ it('handles comma name order and mononyms, and ignores addresses', () => {
  expect(crossChecks({ nsrp: { firstName: 'Prince' }, birth: { values: { fullName: 'Prince' }, evidence: 'independent' } }).findings.some(f => f.ruleId === 'cross_mononym')).toBe(true)
  expect(extractDocumentFields('Surname: Cruz\nFirst Name: Juan\nDate of Birth: 1990-01-01\nAddress: Do not extract')).toEqual({ surname: 'Cruz', firstName: 'Juan', dob: '1990-01-01' })
 })
+it('keeps birthplace and ID-number differences advisory for automatic approval', () => {
+ const nsrp = { firstName: 'Eliseo', surname: 'Dioneda', dob: '2003-06-11', placeOfBirth: 'NAGOTGOT, MANITO, ALBAY', idNumber: '4982761053' }
+ const report = crossChecks({ nsrp, birth: { values: { ...nsrp, placeOfBirth: 'NAGOTGOT, MANTIO, ALBAY' }, evidence: 'independent' }, ids: [{ values: { ...nsrp, idNumber: '1234567890' }, evidence: 'independent' }] })
+ const otherFields = report.findings.filter(f => ['placeOfBirth', 'ID number'].includes(f.fieldGroup))
+ expect(otherFields.length).toBeGreaterThan(0)
+ expect(otherFields.every(f => f.approvalBlocking === false)).toBe(true)
+})

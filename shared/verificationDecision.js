@@ -1,9 +1,16 @@
 import { isSharedPhoneFinding } from './verificationFindings.js'
-export const DECISION_RULES_VERSION = '2026-11-06.2'
+export const DECISION_RULES_VERSION = '2026-11-06.3'
 export const ALWAYS_MANUAL_TYPES = /government|recruitment|placement agency|DO 174/i
-export const evidenceComparisons = rows => (rows || []).filter(row => row.evidence === 'independent' && row.result === 'match' && !['sex', 'address', 'personal details'].includes(row.fieldGroup))
+export const evidenceComparisons = rows => (rows || []).filter(row => row.evidence === 'independent' && row.result === 'match' && ['name', 'birth date'].includes(row.fieldGroup))
 export function decisionReason({ settings, docKey, document, account, findings = [], comparisons = [], verifiedQr = false, pendingExplanation = false }) {
   findings = findings.filter(finding => !isSharedPhoneFinding(finding))
+  const identityDocument = ['birthCertificate', 'validId1', 'validId2'].includes(docKey)
+  // Ignore older stored comparison findings outside the current identity policy.
+  if (identityDocument) findings = findings.filter(finding => {
+    const rule = finding.ruleId || finding.code || ''
+    if (['declared_id_nsrp_difference', 'id_number_format', 'id_expired', 'national_id_screenshot'].includes(rule)) return false
+    return !/^cross_(birth|id)_/.test(rule) || /_(surname|firstName|middleName|suffix|dob)$/.test(rule)
+  })
   const typeSwitch = { nsrpForm: 'applicant', employerNsrpForm: 'employer', birthCertificate: 'birthCertificate', validId1: 'validId', validId2: 'validId' }[docKey]
   if (!typeSwitch) return 'Always manual'
   if (!settings.automaticApproval || !settings.verificationEngineEnabled || !settings[typeSwitch]) return 'Auto-approval off'
@@ -18,6 +25,9 @@ export function decisionReason({ settings, docKey, document, account, findings =
   if (pendingExplanation) return 'Explanation'
   if (!document.quality?.passed) return 'Could not be read'
   if (document.quality.warnings?.length) return 'Quality warning'
-  if (settings.minimumEvidence === 'independent' && !verifiedQr && !evidenceComparisons(comparisons).length) return 'Not independent'
+  if (settings.minimumEvidence === 'independent' && !verifiedQr) {
+    const evidence = evidenceComparisons(comparisons)
+    if (identityDocument ? !['name', 'birth date'].every(group => evidence.some(row => row.fieldGroup === group)) : !evidence.length) return 'Not independent'
+  }
   return ''
 }

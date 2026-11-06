@@ -30,8 +30,11 @@ history. The ON/OFF state appears in the existing settings banner. Turning the
 master switch OFF releases existing waitlists to ordinary review and prevents
 new waitlists. It does not approve any account or delete its audit history.
 
-Only reliable independent significant surname/first-name, date-of-birth or
-ID-number differences beyond existing tolerances cause mismatch waitlisting.
+Only reliable independent significant surname/first-name or date-of-birth
+differences beyond existing tolerances cause mismatch waitlisting. Automatic
+identity approval requires independent matches for both name and date of birth
+under the default evidence setting. Birthplace, ID-number, address, and sex
+comparison differences do not block approval or cause mismatch waitlisting.
 Verified QR comparisons use the existing configured local signature provider.
 Typed-only differences, minor differences, unreadable/low-confidence results,
 quality warnings alone and unsupported formats stay in normal review. Duplicate

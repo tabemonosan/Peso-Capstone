@@ -1,8 +1,8 @@
 import { jobSkillMatchCount } from './jobSkills.js'
 import { LANGUAGE_OPTIONS, LANGUAGE_PROFICIENCIES, languageKey } from './jobLanguages.js'
 
-export const SUITABILITY_VERSION = '2026-11-05.1'
-export const SUITABILITY_WEIGHTS = { skills: 40, workExperience: 25, technicalTraining: 15, eligibility: 10, languages: 5, availability: 5 }
+export const SUITABILITY_VERSION = '2026-11-06.2'
+export const SUITABILITY_WEIGHTS = { skills: 40, workExperience: 25, technicalTraining: 15, reputation: 10, languages: 5, availability: 5 }
 const text = (value) => typeof value === 'string' ? value.trim() : ''
 const rows = (value) => Array.isArray(value) ? value.filter((entry) => entry && typeof entry === 'object').slice(0, 50) : []
 const yes = (value) => value === true || value === 'true'
@@ -68,6 +68,11 @@ export function assessApplicantSuitability(job = {}, applicant = {}, { now = new
     const maximum = applicable ? SUITABILITY_WEIGHTS[key] : 0
     components.push({ key, points: Math.round(Math.max(0, Math.min(1, ratio)) * maximum * 10) / 10, maximum, detail })
   }
+  const sourceReputation = applicant.reputation
+  const reputation = sourceReputation && Number.isFinite(sourceReputation.points) && Number.isFinite(sourceReputation.maximumPoints) && sourceReputation.maximumPoints > 0 && sourceReputation.points >= 0 && sourceReputation.points <= sourceReputation.maximumPoints
+    ? { points: sourceReputation.points, maximumPoints: sourceReputation.maximumPoints } : null
+  add('reputation', reputation ? reputation.points / reputation.maximumPoints : 0, reputation ? `${reputation.points}/${reputation.maximumPoints} reputation points` : 'Reputation score not available')
+
   const skillTotal = new Set((job.skills || []).filter((entry) => typeof entry === 'string').map((entry) => entry.trim().toLowerCase())).size
   const skillMatches = jobSkillMatchCount(job.skills, qualifications.skills)
   add('skills', skillTotal ? skillMatches / skillTotal : 0, `${skillMatches} of ${skillTotal} required skills match`, skillTotal > 0)
@@ -85,12 +90,7 @@ export function assessApplicantSuitability(job = {}, applicant = {}, { now = new
   const trainingRelevance = Math.max(0, ...completedTraining.map((row) => relevance(`${row.course} ${row.certificate}`, job)))
   add('technicalTraining', trainingRelevance, trainingRelevance ? 'Relevant technical training recorded' : 'No relevant past technical training recorded')
 
-  const eligibilityRequired = /eligib|licen[sc]|certif|board|registration/i.test(text(job.requirements))
-  const today = new Date(+now + 8 * 3600000).toISOString().slice(0, 10)
-  const eligibleRows = qualifications.eligibility.filter((row) => (!row.validUntil || (dateValue(row.validUntil) !== null && row.validUntil >= today))
-    && (!row.examDate || (dateValue(row.examDate) !== null && dateValue(row.examDate) <= +now)))
-  const eligibilityRelevance = Math.max(0, ...eligibleRows.map((row) => relevance(text(row.eligibility), job)))
-  add('eligibility', eligibilityRelevance, eligibilityRequired ? eligibilityRelevance ? 'Relevant current eligibility recorded' : 'No relevant current eligibility recorded' : 'No eligibility requirement stated in this posting', eligibilityRequired)
+
 
   const requirementText = ` ${tokens(job.requirements).join(' ')} `
   const requiredLanguages = job.languageRequirements?.length
@@ -103,7 +103,7 @@ export function assessApplicantSuitability(job = {}, applicant = {}, { now = new
 
   const maximum = components.reduce((sum, item) => sum + item.maximum, 0)
   const points = components.reduce((sum, item) => sum + item.points, 0)
-  return { version: SUITABILITY_VERSION, score: maximum ? Math.round(points / maximum * 100) : 0, components, qualifications, skillMatches, skillTotal }
+  return { version: SUITABILITY_VERSION, score: maximum ? Math.round(points / maximum * 100) : 0, components, qualifications, reputation, skillMatches, skillTotal }
 }
 
 export function rankJobApplicants(job, entries = [], getApplicant = (entry) => entry, options = {}) {

@@ -60,6 +60,8 @@ describe('applicant account deletion requests', () => {
   })
 
   it('releases the email for a new signup while retaining separate records and invalidating old sessions', async () => {
+    const owner = `Applicant:${applicant._id}`
+    for (const name of ['nsrp_identifier_claims', 'verification_qr_claims']) await mongoose.connection.db.collection(name).insertOne({ _id: 'old-identity-claim', owners: [owner, 'Applicant:other-owner'] })
     const oldBoundAuth = auth('Applicant', { sub: String(applicant._id), sessionVersion: 0 })
     const job = await JobPosting.create({ title: 'Clerk', company: 'Example', status: 'approved', applicants: [{ email }] })
     await JobApplication.create({ jobId: job._id, applicantEmail: email, nsrpFile: { originalName: 'old.pdf', mimetype: 'application/pdf', data: Buffer.from('%PDF-old') } })
@@ -76,6 +78,7 @@ describe('applicant account deletion requests', () => {
     expect(archived.deletedAt).toBeTruthy()
     expect(archived.retainedEmail).toBe(email)
     expect(archived.email).not.toBe(email)
+    for (const name of ['nsrp_identifier_claims', 'verification_qr_claims']) expect((await mongoose.connection.db.collection(name).findOne({ _id: 'old-identity-claim' })).owners).toEqual(['Applicant:other-owner'])
     expect(await Referral.exists({ applicantId: applicant._id })).toBeTruthy()
     expect(await HireReport.exists({ applicantId: applicant._id })).toBeTruthy()
     expect(await DocumentFile.exists({ applicant: applicant._id })).toBeTruthy()

@@ -10,6 +10,10 @@
 .landing-skip:focus { top:12px; }
 .landing-header { min-height:100px; width:min(1320px,calc(100% - 80px)); margin:auto; display:flex; align-items:center; justify-content:space-between; gap:28px; border-bottom:1px solid var(--lp-line); }
 .landing-brand { display:inline-flex; align-items:center; gap:11px; flex-shrink:0; }
+.peso-landing .landing-header { position:sticky; top:0; z-index:40; background:var(--lp-canvas); transition:transform .22s ease; }
+.landing-header::before { content:""; position:absolute; inset:0 calc((100vw - 100%) / -2); z-index:-1; background:var(--lp-canvas); pointer-events:none; }
+.peso-landing .landing-header.is-hidden { transform:translateY(-100%); }
+.peso-landing .landing-header:focus-within { transform:translateY(0); }
 .landing-brand img { object-fit:contain; }
 .landing-brand>span { font-size:28px; line-height:1.15; font-weight:650; letter-spacing:-1px; }
 .landing-brand-caption { display:block; margin-top:5px; font-size:8px; font-weight:500; letter-spacing:1.55px; }
@@ -98,7 +102,9 @@
 .landing-faq summary span { color:var(--lp-accent-dark); font-size:22px; line-height:1; }
 .landing-faq details[open] summary span { transform:rotate(45deg); }
 .landing-faq details p { font-size:13px; line-height:1.9; color:var(--lp-muted); margin:0 22px 22px 0; }
-.landing-signin { display:grid; grid-template-columns:1fr 1fr; gap:100px; align-items:center; border-top:1px solid var(--lp-line); padding-block:80px; }
+.landing-signin { position:relative; isolation:isolate; display:grid; grid-template-columns:1fr 1fr; gap:100px; align-items:center; border-top:1px solid var(--lp-line); padding-block:80px; }
+.landing-signin::before { content:""; position:absolute; z-index:-1; pointer-events:none; width:min(620px,100%); aspect-ratio:1; left:0; top:50%; transform:translateY(-50%); background:url('/peso-logo.png') center / contain no-repeat; border-radius:50%; opacity:.12; filter:blur(5px); mix-blend-mode:multiply; }
+@media (max-width:800px) { .landing-signin::before { width:min(480px,100%); left:50%; top:210px; transform:translate(-50%,-50%); opacity:.1; } }
 .landing-signin-copy>p:not(.landing-eyebrow) { max-width:310px; line-height:1.8; color:var(--lp-muted); font-size:14px; }
 .landing-back-top { display:inline-flex; gap:25px; margin-top:24px; font-size:12px; color:var(--lp-accent-dark)!important; }
 .peso-landing .auth-page-login { display:block; min-height:0; padding:0; background:transparent; }

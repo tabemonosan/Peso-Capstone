@@ -4,7 +4,21 @@ import { generateKeyPairSync, sign } from 'node:crypto'
 import { PhilSysQrSignatureProvider, ThirdPartyEkycProvider, MockEkycProvider } from '../services/verificationProviders.js'
 import { decisionReason } from '../../shared/verificationDecision.js'
 import { VERIFICATION_DEFAULTS } from '../../shared/verification.js'
-const context = () => ({ settings: VERIFICATION_DEFAULTS, docKey: 'validId1', document: { version: 1, status: 'pending', quality: { passed: true, warnings: [] } }, account: { emailVerified: true }, comparisons: [{ fieldGroup: 'name', result: 'match', evidence: 'independent' }] })
+const context = () => ({ settings: VERIFICATION_DEFAULTS, docKey: 'validId1', document: { version: 1, status: 'pending', quality: { passed: true, warnings: [] } }, account: { emailVerified: true }, comparisons: ['name', 'birth date'].map(fieldGroup => ({ fieldGroup, result: 'match', evidence: 'independent' })) })
+it.each(['placeOfBirth', 'idNumber', 'sex', 'address'])('ignores legacy %s comparison flags for identity approval', field => {
+ const c = context()
+ c.findings = [{ ruleId: `cross_id_nsrp_${field}`, severity: 'critical', status: 'open', approvalBlocking: true }]
+ expect(decisionReason(c)).toBe('')
+})
+it.each(['name', 'birth date'])('requires independent matching %s evidence', fieldGroup => {
+ const c = context(); c.comparisons = c.comparisons.filter(row => row.fieldGroup !== fieldGroup)
+ c.comparisons.push({ fieldGroup: 'ID number', result: 'match', evidence: 'independent' })
+ expect(decisionReason(c)).toBe('Not independent')
+})
+it.each(['declared_id_nsrp_difference', 'id_number_format', 'id_expired', 'national_id_screenshot'])('keeps %s advisory for identity approval', ruleId => {
+ const c = context(); c.findings = [{ ruleId, severity: 'warning', status: 'open' }]
+ expect(decisionReason(c)).toBe('')
+})
 it.each([
  ['shared phone', c => { c.findings = [{ ruleId: 'duplicate_mobile', severity: 'warning', status: 'open' }] }, ''],
  ['legacy shared phone', c => { c.findings = [{ code: 'duplicate_phone', severity: 'critical', status: 'open' }] }, ''],

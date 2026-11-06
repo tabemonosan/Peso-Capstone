@@ -1,3 +1,4 @@
+import { applicantReputationSummaries } from './services/applicantReputationSummary.js'
 import { createActivityReportService } from './services/activityReport.js'
 import { isJobArchived, jobArchiveAt } from '../shared/jobArchive.js'
 import { Interview, ApplicationReport, ApplicationAppeal } from './models/applicationWorkflow.js'
@@ -54,6 +55,9 @@ import { notify, notifyAdmins } from './services/notify.js'
 import { startHireReportReminders } from './services/hireReminders.js'
 import { createNotificationsRouter } from './routes/notifications.js'
 import { createAccountDeletionRouter } from './routes/accountDeletion.js'
+import { ActivityLog } from './models/activityLog.js'
+import { adminActivityMiddleware } from './services/adminActivity.js'
+import { createAdminActivityRouter } from './routes/adminActivity.js'
 import { createEmploymentUpdatesHandler } from './routes/employmentUpdates.js'
 import { createCsmRouter } from './routes/csm.js'
 import { CsmResponse } from './models/collections.js'
@@ -171,6 +175,8 @@ app.use((req, res, next) => {
   next()
 })
 
+app.use('/api', adminActivityMiddleware({ ActivityLog, Admin, authenticate: authenticateRequest }))
+app.use('/api/admin/activity-logs', createAdminActivityRouter({ ActivityLog, Admin, authenticate: authenticateRequest }))
 app.use('/api', applicantSessionGuard({ Applicant, authenticate: authenticateRequest }))
 
 app.get('/api/employer-requirements/current/versions/:version/view', async (req, res) => {
@@ -2267,6 +2273,7 @@ app.post('/api/admin/job-titles', async (req, res) => {
     const existing = await JobTitle.findOne({ name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }).lean()
     if (existing) return res.status(409).json({ error: 'That job title already exists' })
     const title = await JobTitle.create({ name, category })
+    res.locals.activityTargetId = String(title._id)
     res.status(201).json({ id: String(title._id), name: title.name, category: title.category })
   } catch (err) {
     if (err?.code === 11000) return res.status(409).json({ error: 'That job title already exists' })
@@ -2283,6 +2290,7 @@ app.delete('/api/admin/job-titles/:id', async (req, res) => {
     if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid job title ID' })
     const title = await JobTitle.findByIdAndDelete(req.params.id)
     if (!title) return res.status(404).json({ error: 'Job title not found' })
+    res.locals.activityAction = `Deleted job title: ${redactString(title.name)}`
     res.json({ ok: true })
   } catch (err) {
     console.error(err)
@@ -3298,6 +3306,8 @@ app.get('/api/referrals/employer/:employerId', requireApprovedEmployer, async (r
     const applicationByReferral = new Map(applications.map((entry) => [String(entry.referralId), entry]))
     const enrichedReferrals = await Promise.all(referrals.map(async entry => entry.applicantId && !WITHDRAWN_REFERRALS.includes(entry.status) ? { ...entry, applicantId: await recoverApplicantQualifications(entry.applicantId) } : entry))
     const degreeByApplicant = new Map(await Promise.all(enrichedReferrals.filter(entry => entry.applicantId && !WITHDRAWN_REFERRALS.includes(entry.status)).map(async entry => [String(entry.applicantId._id), await applicantDegree(entry.applicantId)])))
+    const reputationByApplicant = await applicantReputationSummaries(Applicant, enrichedReferrals.filter(entry => entry.applicantId && !WITHDRAWN_REFERRALS.includes(entry.status)).map(entry => entry.applicantId._id))
+    for (const entry of enrichedReferrals) if (entry.applicantId && !WITHDRAWN_REFERRALS.includes(entry.status)) entry.applicantId.reputation = reputationByApplicant.get(String(entry.applicantId._id))
     const ranked = rankEmployerReferrals(enrichedReferrals).map((entry) => {
       const application = applicationByReferral.get(String(entry._id))
       if (application?.applicationDetails && entry.applicantId) application.applicationDetails.bachelorDegree = degreeByApplicant.get(String(entry.applicantId._id)) || 'No'
@@ -4405,12 +4415,14 @@ app.get('/api/admin/users', async (req, res) => {
         sortDir: applicantSortOrder,
         select: '-resumeFile.data -nsrpVerificationFile.data -verificationDocuments.nsrpForm.versions.data -verificationDocuments.birthCertificate.versions.data -verificationDocuments.validId1.versions.data -verificationDocuments.validId2.versions.data -verificationDocuments.resume.versions.data',
       })
+      const reputationByApplicant = await applicantReputationSummaries(Applicant, items.map(u => u._id))
       const mapped = items.map((u) => {
         const docs = summarizeVerificationDocuments(u)
         return {
           id: u._id,
           email: u.email,
           role: 'Applicant',
+          reputation: reputationByApplicant.get(String(u._id)),
           emailVerified: Boolean(u.emailVerified),
           phone: u.phone || u.profile?.phone || u.profile?.nsrp?.cellphone || '',
           profile: {
@@ -4529,6 +4541,7 @@ app.get('/api/admin/users', async (req, res) => {
       id: request._id, email: request.email, role: 'Employer', companyName: request.companyName, contactName: request.contactName, phone: request.phone,
       profile: { location: request.location, summary: request.message }, approvalStatus: request.status, createdAt: request.createdAt,
     }))
+    const reputationByApplicant = await applicantReputationSummaries(Applicant, applicants.map(u => u._id))
     const mapApplicant = applicants.map((u) => {
       const docs = summarizeVerificationDocuments(u)
       const profile = u.profile?.toObject?.() || u.profile || {}
@@ -4537,6 +4550,7 @@ app.get('/api/admin/users', async (req, res) => {
         id: u._id,
         email: u.email,
         role: 'Applicant',
+        reputation: reputationByApplicant.get(String(u._id)),
         emailVerified: Boolean(u.emailVerified),
         phone: u.phone || profile.phone || nsrp.cellphone || '',
         profile: {

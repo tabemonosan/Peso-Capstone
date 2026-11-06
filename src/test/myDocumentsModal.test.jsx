@@ -50,7 +50,7 @@ describe('MyDocumentsModal file viewers', () => {
     render(<MyDocumentsModal token="token" onClose={() => {}} info={{ verificationStatus: 'under_review', documents: [{ ...doc, uploadsRemaining: 4 }] }} />)
     const row = screen.getByText(new RegExp(doc.label)).closest('li')
     expect(within(row).getByRole('combobox', { name: 'ID type' })).toHaveValue(doc.idType)
-    fireEvent.change(within(row).getByLabelText('ID number'), { target: { value: 'TEST-123' } })
+    expect(within(row).queryByLabelText('ID number')).not.toBeInTheDocument()
     const file = new File(['sample'], 'replacement.png', { type: 'image/png' })
     const back = new File(['sample back'], 'replacement-back.png', { type: 'image/png' })
     fireEvent.change(within(row).getByLabelText(`Choose ${doc.label} front file`), { target: { files: [file] } })
@@ -64,7 +64,7 @@ describe('MyDocumentsModal file viewers', () => {
     expect(payload.get('document')).toBe(file)
     expect(payload.get('documentBack')).toBe(back)
     expect(payload.get('idType')).toBe(doc.idType)
-    expect(JSON.parse(payload.get('verificationDetails'))).toEqual({ number: 'TEST-123' })
+    expect(JSON.parse(payload.get('verificationDetails'))).toEqual({})
     fetchMock.mockRestore()
   })
 

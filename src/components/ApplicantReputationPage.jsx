@@ -44,7 +44,7 @@ export default function ApplicantReputationPage({ token, onOpenApplications }) {
           <p className="mt-3 text-4xl font-bold text-blue-800" aria-label={`${data.points} out of ${data.maximumPoints || 100} reputation points`}>{data.points}<span className="text-lg text-slate-500"> / {data.maximumPoints || 100}</span></p>
           <progress aria-label="Reputation points" className="mt-4 h-3 w-full accent-blue-700" value={data.points} max={data.maximumPoints || 100} />
           <p className="mt-3 text-sm leading-relaxed text-slate-700">{data.lowTrustRouting ? 'Applications from the At risk tier are reviewed by PESO before reaching employers. Points alone never automatically decline or suspend an account.' : 'PESO staff see your standing when reviewing referrals. Points alone never block applying or decide an outcome.'}</p>
-          <p className="mt-3 text-xs text-slate-600">Only you and PESO can view your points. Employer star ratings never change them.</p>
+          <p className="mt-3 text-xs text-slate-600">You, PESO, and employers receiving your application can view your score. Your points history and review evidence stay private. Employer star ratings never change your points.</p>
         </section>
         {data.points < (data.maximumPoints || 100) && <section className="rounded-xl border border-slate-200 p-5" aria-label="Your path back">
           <h3 className="font-semibold">Your path back</h3>

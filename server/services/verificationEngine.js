@@ -9,6 +9,7 @@ import { readQr } from './localImageReading.js'
 import { loadDocumentFile } from '../utils/documentFiles.js'
 import { clearAuthorization } from './documentUpload.js'
 import { isSharedPhoneFinding } from '../../shared/verificationFindings.js'
+import { hasActiveOtherOwner } from './identityClaims.js'
 const advisory = new Set(['education_age', 'work_start_age', 'experience_age', 'married_under_18', 'location_pair', 'employer_location_pair'])
 const safeFinding = f => ({ ruleId: String(f.ruleId || f.code || 'provider_inconclusive').slice(0, 100), severity: ['info', 'warning', 'critical'].includes(f.severity) ? f.severity : 'info', fieldGroup: String(f.fieldGroup || 'document').slice(0, 60), evidence: f.evidence === 'independent' ? 'independent' : 'self-declared', status: f.status === 'dismissed' ? 'dismissed' : 'open', approvalBlocking: advisory.has(f.ruleId || f.code) ? false : f.approvalBlocking !== false })
 function findingsForDocument(account, docKey, document) {
@@ -30,7 +31,7 @@ export function createVerificationEngine({ Applicant, Employer, EmployerRequest,
     try {
       const accountModel = role === 'Applicant' ? Applicant : Employer
       const account = await accountModel.findById(accountId).select('+holdAutoApproval +verificationFailureCounts +consistencyState').lean()
-      if (!account) return
+      if (!account || account.deletedAt) return
       if (checkToken && (account.consistencyState?.token !== checkToken || account.consistencyState?.status !== 'checking')) return
       const model = role === 'Applicant' ? Applicant : EmployerRequest
       const record = role === 'Applicant' ? account : await EmployerRequest.findOne({ email: account.email }).lean()
@@ -66,7 +67,7 @@ export function createVerificationEngine({ Applicant, Employer, EmployerRequest,
           const qrHash = await automation.hash('philsys_qr', raw)
           const registry = mongoose.connection.db.collection('verification_qr_claims'), owner = `${role}:${accountId}`
           await registry.updateOne({ _id: qrHash }, { $addToSet: { owners: owner } }, { upsert: true })
-          if ((await registry.findOne({ _id: qrHash })).owners.some(value => value !== owner)) findings.push(safeFinding({ ruleId: 'duplicate_qr', severity: 'critical', evidence: 'independent' }))
+          if (await hasActiveOtherOwner((await registry.findOne({ _id: qrHash })).owners, owner, { Applicant, Employer })) findings.push(safeFinding({ ruleId: 'duplicate_qr', severity: 'critical', evidence: 'independent' }))
         }
         raw = ''
       }
@@ -76,7 +77,7 @@ export function createVerificationEngine({ Applicant, Employer, EmployerRequest,
           const id = await automation.hash(kind, kind === 'passport' ? normalizedText(document.declaredDetails.number) : document.declaredDetails.number.replace(/\D/g, ''))
           const claims = mongoose.connection.db.collection('nsrp_identifier_claims'), owner = `${role}:${accountId}`
           await claims.updateOne({ _id: id }, { $addToSet: { owners: owner } }, { upsert: true })
-          if ((await claims.findOne({ _id: id })).owners.some(value => value !== owner)) findings.push(safeFinding({ ruleId: 'duplicate_' + kind, severity: 'critical', fieldGroup: 'identifiers' }))
+          if (await hasActiveOtherOwner((await claims.findOne({ _id: id })).owners, owner, { Applicant, Employer })) findings.push(safeFinding({ ruleId: 'duplicate_' + kind, severity: 'critical', fieldGroup: 'identifiers' }))
         }
       }
       findings = [...new Map([...findings, ...(providerResult.findings || []).map(safeFinding)].map(f => [f.ruleId, f])).values()]

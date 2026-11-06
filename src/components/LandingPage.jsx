@@ -20,9 +20,25 @@ export default function LandingPage({ children, onApplicantSignup, onEmployerSig
   const root = useRef(null)
   const menuToggle = useRef(null)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [headerHidden, setHeaderHidden] = useState(false)
   const [audience, setAudience] = useState('seeker')
   const [activeStep, setActiveStep] = useState(0)
   const steps = audience === 'seeker' ? seekerSteps : employerSteps
+  useEffect(() => {
+    let lastScroll = Math.max(0, window.scrollY)
+    const updateHeader = () => {
+      const currentScroll = Math.max(0, window.scrollY)
+      if (currentScroll <= 100) {
+        setHeaderHidden(false)
+        lastScroll = currentScroll
+      } else if (Math.abs(currentScroll - lastScroll) >= 8) {
+        setHeaderHidden(currentScroll > lastScroll)
+        lastScroll = currentScroll
+      }
+    }
+    window.addEventListener('scroll', updateHeader, { passive: true })
+    return () => window.removeEventListener('scroll', updateHeader)
+  }, [])
   useEffect(() => {
     if (!menuOpen) return
     const dismissMenu = event => {
@@ -53,7 +69,7 @@ export default function LandingPage({ children, onApplicantSignup, onEmployerSig
   }
   return <div className="peso-landing" ref={root}>
     <a href="#landing-content" className="landing-skip">Skip to content</a>
-    <header className="landing-header">
+    <header className={`landing-header${headerHidden && !menuOpen ? ' is-hidden' : ''}`}>
       <a href="#" className="landing-brand" aria-label="PESO Albay home"><img src="/peso-logo.png" width="48" height="48" alt="" /><span>PESO<span className="landing-brand-caption">ALBAY · EMPLOYMENT PORTAL</span></span></a>
       <button ref={menuToggle} className="landing-menu-toggle" type="button" aria-expanded={menuOpen} aria-controls="landing-navigation" onClick={() => setMenuOpen(value => !value)}>{menuOpen ? 'Close menu' : 'Menu'}<span aria-hidden="true">{menuOpen ? '−' : '+'}</span></button>
       <nav id="landing-navigation" aria-label="Main navigation" className={menuOpen ? 'is-open' : ''}>

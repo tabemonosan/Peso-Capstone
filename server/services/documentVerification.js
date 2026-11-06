@@ -1,4 +1,5 @@
 import mongoose from 'mongoose'
+import crypto from 'node:crypto'
 import { DOCUMENT_KEYS, DOCUMENT_LABELS, REVIEW_ACTIONS, openFlags } from '../../shared/verification.js'
 import { clearAuthorization } from './documentUpload.js'
 import { needsManualChecklist, completeChecklist } from '../../shared/manualDocumentReview.js'
@@ -26,7 +27,7 @@ export function createDocumentVerification({ Applicant, Employer, EmployerReques
     if (!['Applicant', 'Employer'].includes(role) || !DOCUMENT_KEYS.includes(docKey)
       || (role === 'Employer') !== (docKey === 'employerNsrpForm')) fail(400, 'Invalid document type or role')
     const accountModel = role === 'Applicant' ? Applicant : Employer
-    const account = await accountModel.findById(oid(accountId)).select('+holdAutoApproval').lean()
+    const account = await accountModel.findById(oid(accountId)).select('+holdAutoApproval +consistencyState').lean()
     if (!account || account.deletedAt) fail(404, 'Account unavailable')
     const model = role === 'Applicant' ? Applicant : EmployerRequest
     const record = role === 'Applicant' ? account : await EmployerRequest.findOne({ email: account.email }).lean()
@@ -193,6 +194,20 @@ export function createDocumentVerification({ Applicant, Employer, EmployerReques
     const match = { _id: record._id, [path]: { $size: count }, [`${base}.version`]: document.version, [`${base}.status`]: document.status,
       $or: [{ [`${base}.reviewRevision`]: revision }, ...(revision === 0 ? [{ [`${base}.reviewRevision`]: { $exists: false } }] : [])] }
     if (target.role === 'Applicant' && target.docKey !== 'nsrpForm' && action === 'approve' && account.verificationDocuments?.nsrpForm?.versions?.length) match['verificationDocuments.nsrpForm.versions'] = { $size: account.verificationDocuments.nsrpForm.versions.length }
+    if (target.role === 'Applicant' && needsManualChecklist(target.docKey) && action === 'approve') {
+      // Commit the staff decision and its waitlist resolution together. A new
+      // token prevents an older background check from restoring these flags.
+      const state = account.consistencyState || {}
+      match['consistencyState.token'] = state.token || { $exists: false }
+      match.verificationStatus = account.verificationStatus
+      const issues = (state.issues || []).filter(issue => issue.docKey !== target.docKey)
+      set.consistencyState = { ...state, token: crypto.randomUUID(), status: 'manual_review', issues,
+        lastActivityAt: at, history: [...(state.history || []), { action: 'document-approved', docKey: target.docKey, reason, by, at }] }
+      if (account.verificationStatus === 'waitlisted' && !issues.length) {
+        set.verificationStatus = 'under_review'
+        set.verificationReason = ''
+      }
+    }
     if (target.role === 'Applicant' && target.docKey === 'nsrpForm' && action === 'revoke') {
       const recheck = identityRecheckUpdate(account, by, at)
       Object.assign(set, recheck.set); Object.assign(unset, recheck.unset)

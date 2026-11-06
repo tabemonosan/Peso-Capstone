@@ -34,8 +34,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated, guid
   const [explanationDoc, setExplanationDoc] = useState(null)
   const nsrpDocument = info.documents?.find((doc) => doc.docKey === 'nsrpForm')
   const [editingNsrp, setEditingNsrp] = useState(() => new URLSearchParams(window.location.search).get("editNsrp") === "1" && ['missing', 'rejected', 'needs_resubmission'].includes(nsrpDocument?.status) && nsrpDocument.uploadsRemaining !== 0)
-  const documents = [...(info.documents || [])]
-  if (!documents.some((doc) => doc.docKey === 'validId2')) documents.push({ docKey: 'validId2', label: 'Valid ID #2', required: false, status: 'missing', uploadsRemaining: 5 })
+  const documents = (info.documents || []).filter(doc => doc.docKey !== 'validId2' || doc.latest || (doc.status && doc.status !== 'missing'))
   const closeEditor = () => {
     setEditingNsrp(false)
     const url = new URL(window.location.href)

@@ -44,8 +44,9 @@ it('rejects malformed PDFs and PDFs over five pages', async () => {
   const pdf = await PDFDocument.create(); for (let i = 0; i < 6; i++) pdf.addPage()
   for (const buffer of [Buffer.from('%PDF-invalid'), Buffer.from(await pdf.save())]) await expect(inspectDocument({ ...file(buffer), mimetype: 'application/pdf' })).rejects.toMatchObject({ status: 422 })
 })
-it('requires passport expiry, rejects matching IDs and never collects a National ID number', () => {
-  expect(validateDeclaredDetails({ number: 'PV8472059' }, { idType: 'Passport', docKey: 'validId1' }).errors.expiry).toBeTruthy()
+it('accepts uploads without ID number or expiry, rejects matching supplied IDs and never collects a National ID number', () => {
+  expect(validateDeclaredDetails({}, { idType: 'Passport', docKey: 'validId1' }).errors).toEqual({})
+  expect(validateDeclaredDetails({}, { idType: 'SSS', docKey: 'validId1' }).errors).toEqual({})
   expect(validateDeclaredDetails({ number: '1234' }, { idType: 'SSS', otherNumber: '12-34' }).errors.number).toBeTruthy()
   const result = validateDeclaredDetails({ number: 'secret', format: 'Digital screenshot' }, { idType: PHILSYS_TYPE })
   expect(result.errors.number).toBeTruthy(); expect(result.details.number).toBeUndefined(); expect(result.warnings).toContain('national_id_screenshot')
