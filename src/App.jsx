@@ -45,6 +45,7 @@ import { EMPLOYER_VERIFICATION_STATUS as EMPLOYER_STATUS } from "../shared/emplo
 import ReferralList from "./components/ReferralList"
 import ApplicantAccountSettings from "./components/ApplicantAccountSettings"
 import AdminAccountDeletionRequests from "./components/AdminAccountDeletionRequests"
+import AdminActivityLogs from './components/AdminActivityLogs'
 import AdminEmploymentUpdatesPage from "./components/AdminEmploymentUpdatesPage"
 import PortalNavIcon from "./components/PortalNavIcon"
 import ReviewQuestionnaires from "./components/ReviewQuestionnaires"
@@ -89,6 +90,7 @@ const navigationByRole = {
     { id: "applicants", label: "Applicants" },
     { id: "requests", label: "Employer Requests" },
     { id: "account-deletions", label: "Account Deletions" },
+    { id: "activity-logs", label: "Activity Logs" },
     { id: "jobs", label: "Job Postings" },
     { id: "job-titles", label: "Job Titles" },
     { id: "employment-updates", label: "Hiring Updates" },
@@ -2198,6 +2200,7 @@ const toggleSkill = (selected, skill) => {
 
           <main className="space-y-6">
           {!showProfileDocuments && <PageGuide key={`${currentUser?.id}:${activeRole}:${activeView}`} role={activeRole} view={activeView} state={currentUser?.pageGuides} token={getToken()} onSaved={saveGuideState} />}
+          {activeRole === 'Admin' && activeView === 'activity-logs' && <AdminActivityLogs token={getToken()} />}
           {activeRole === 'Admin' && activeView === 'verification-rules' && <AdminNsrpAutomation key={activeView} token={getToken()} />}
           {activeRole === 'Admin' && ['verification-flagged', 'verification-auto'].includes(activeView) && <AdminDocumentVerification key={activeView} token={getToken()} queue={activeView === 'verification-auto' ? 'auto' : 'flagged'} />}
           {approvalNotice && activeRole === 'Employer' && (

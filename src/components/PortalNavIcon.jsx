@@ -4,6 +4,7 @@ const paths = {
   applicants: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8 M22 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75',
   requests: 'M9 3H5v18h14V3h-4 M9 2h6v4H9z M8 11h8 M8 15h6',
   'account-deletions': 'M4 7h16 M9 7V3h6v4 M6 7l1 14h10l1-14 M10 11v6 M14 11v6',
+  'activity-logs': 'M8 4H5v17h14V4h-3 M8 3h8v4H8z M8 11h8 M8 15h8',
   jobs: 'M3 7h18v14H3z M8 7V3h8v4 M3 12a24 24 0 0 0 18 0 M10 12v3h4v-3',
   'job-titles': 'M4 5h6 M14 5h6 M4 12h6 M14 12h6 M4 19h6 M14 19h6',
   'employment-updates': 'M5 3h14v18H5z M8 8h8 M8 12l2 2 5-5 M8 18h8',

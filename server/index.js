@@ -55,6 +55,9 @@ import { notify, notifyAdmins } from './services/notify.js'
 import { startHireReportReminders } from './services/hireReminders.js'
 import { createNotificationsRouter } from './routes/notifications.js'
 import { createAccountDeletionRouter } from './routes/accountDeletion.js'
+import { ActivityLog } from './models/activityLog.js'
+import { adminActivityMiddleware } from './services/adminActivity.js'
+import { createAdminActivityRouter } from './routes/adminActivity.js'
 import { createEmploymentUpdatesHandler } from './routes/employmentUpdates.js'
 import { createCsmRouter } from './routes/csm.js'
 import { CsmResponse } from './models/collections.js'
@@ -172,6 +175,8 @@ app.use((req, res, next) => {
   next()
 })
 
+app.use('/api', adminActivityMiddleware({ ActivityLog, Admin, authenticate: authenticateRequest }))
+app.use('/api/admin/activity-logs', createAdminActivityRouter({ ActivityLog, Admin, authenticate: authenticateRequest }))
 app.use('/api', applicantSessionGuard({ Applicant, authenticate: authenticateRequest }))
 
 app.get('/api/employer-requirements/current/versions/:version/view', async (req, res) => {
@@ -2268,6 +2273,7 @@ app.post('/api/admin/job-titles', async (req, res) => {
     const existing = await JobTitle.findOne({ name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }).lean()
     if (existing) return res.status(409).json({ error: 'That job title already exists' })
     const title = await JobTitle.create({ name, category })
+    res.locals.activityTargetId = String(title._id)
     res.status(201).json({ id: String(title._id), name: title.name, category: title.category })
   } catch (err) {
     if (err?.code === 11000) return res.status(409).json({ error: 'That job title already exists' })
@@ -2284,6 +2290,7 @@ app.delete('/api/admin/job-titles/:id', async (req, res) => {
     if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid job title ID' })
     const title = await JobTitle.findByIdAndDelete(req.params.id)
     if (!title) return res.status(404).json({ error: 'Job title not found' })
+    res.locals.activityAction = `Deleted job title: ${redactString(title.name)}`
     res.json({ ok: true })
   } catch (err) {
     console.error(err)
