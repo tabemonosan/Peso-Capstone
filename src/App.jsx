@@ -106,9 +106,9 @@ const navigationByRole = {
   Applicant: [
     { id: "complete", label: "Complete Registration" },
     { id: "dashboard", label: "Home" },
+    { id: "jobs", label: "Jobs" },
     { id: "my-applications", label: "My applications" },
     { id: "my-reputation", label: "My reputation" },
-    { id: "jobs", label: "Jobs" },
     { id: "reputation", label: "Reviews" },
     { id: "notify", label: "Notifications" },
   ],

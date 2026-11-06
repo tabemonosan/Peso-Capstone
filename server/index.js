@@ -1,3 +1,4 @@
+import { applicantReputationSummaries } from './services/applicantReputationSummary.js'
 import { createActivityReportService } from './services/activityReport.js'
 import { isJobArchived, jobArchiveAt } from '../shared/jobArchive.js'
 import { Interview, ApplicationReport, ApplicationAppeal } from './models/applicationWorkflow.js'
@@ -3298,6 +3299,8 @@ app.get('/api/referrals/employer/:employerId', requireApprovedEmployer, async (r
     const applicationByReferral = new Map(applications.map((entry) => [String(entry.referralId), entry]))
     const enrichedReferrals = await Promise.all(referrals.map(async entry => entry.applicantId && !WITHDRAWN_REFERRALS.includes(entry.status) ? { ...entry, applicantId: await recoverApplicantQualifications(entry.applicantId) } : entry))
     const degreeByApplicant = new Map(await Promise.all(enrichedReferrals.filter(entry => entry.applicantId && !WITHDRAWN_REFERRALS.includes(entry.status)).map(async entry => [String(entry.applicantId._id), await applicantDegree(entry.applicantId)])))
+    const reputationByApplicant = await applicantReputationSummaries(Applicant, enrichedReferrals.filter(entry => entry.applicantId && !WITHDRAWN_REFERRALS.includes(entry.status)).map(entry => entry.applicantId._id))
+    for (const entry of enrichedReferrals) if (entry.applicantId && !WITHDRAWN_REFERRALS.includes(entry.status)) entry.applicantId.reputation = reputationByApplicant.get(String(entry.applicantId._id))
     const ranked = rankEmployerReferrals(enrichedReferrals).map((entry) => {
       const application = applicationByReferral.get(String(entry._id))
       if (application?.applicationDetails && entry.applicantId) application.applicationDetails.bachelorDegree = degreeByApplicant.get(String(entry.applicantId._id)) || 'No'
@@ -4405,12 +4408,14 @@ app.get('/api/admin/users', async (req, res) => {
         sortDir: applicantSortOrder,
         select: '-resumeFile.data -nsrpVerificationFile.data -verificationDocuments.nsrpForm.versions.data -verificationDocuments.birthCertificate.versions.data -verificationDocuments.validId1.versions.data -verificationDocuments.validId2.versions.data -verificationDocuments.resume.versions.data',
       })
+      const reputationByApplicant = await applicantReputationSummaries(Applicant, items.map(u => u._id))
       const mapped = items.map((u) => {
         const docs = summarizeVerificationDocuments(u)
         return {
           id: u._id,
           email: u.email,
           role: 'Applicant',
+          reputation: reputationByApplicant.get(String(u._id)),
           emailVerified: Boolean(u.emailVerified),
           phone: u.phone || u.profile?.phone || u.profile?.nsrp?.cellphone || '',
           profile: {
@@ -4529,6 +4534,7 @@ app.get('/api/admin/users', async (req, res) => {
       id: request._id, email: request.email, role: 'Employer', companyName: request.companyName, contactName: request.contactName, phone: request.phone,
       profile: { location: request.location, summary: request.message }, approvalStatus: request.status, createdAt: request.createdAt,
     }))
+    const reputationByApplicant = await applicantReputationSummaries(Applicant, applicants.map(u => u._id))
     const mapApplicant = applicants.map((u) => {
       const docs = summarizeVerificationDocuments(u)
       const profile = u.profile?.toObject?.() || u.profile || {}
@@ -4537,6 +4543,7 @@ app.get('/api/admin/users', async (req, res) => {
         id: u._id,
         email: u.email,
         role: 'Applicant',
+        reputation: reputationByApplicant.get(String(u._id)),
         emailVerified: Boolean(u.emailVerified),
         phone: u.phone || profile.phone || nsrp.cellphone || '',
         profile: {

@@ -5,7 +5,7 @@ import ApplicantSuitability from '../components/ApplicantSuitability'
 
 const now = new Date('2026-11-02T04:00:00Z')
 const job = { title: 'Office Clerk', skills: ['Excel', 'Administration'], experience: '1–3 years', requirements: 'Office Clerk experience, Excel certification and English proficiency.' }
-const candidate = (nsrp = {}, skills = ['Excel', 'Administration']) => ({ profile: { skills, nsrp } })
+const candidate = (nsrp = {}, skills = ['Excel', 'Administration']) => ({ reputation: { points: 100, maximumPoints: 100 }, profile: { skills, nsrp } })
 const strong = () => candidate({
   technicalTraining: [{ course: 'Excel for Office Clerks', institution: 'Training Center', certificate: 'Excel', fromDate: '2022-01-01', toDate: '2022-04-01' }],
   eligibility: [{ eligibility: 'Excel certification', validUntil: '2027-12-31' }],
@@ -23,22 +23,21 @@ describe('job-specific applicant suitability', () => {
     expect(ranked[0].suitability.components.every((component) => component.points === component.maximum)).toBe(true)
     expect(ranked[1].suitability.score).toBeLessThan(ranked[0].suitability.score)
   })
-  it('does not award points for unrelated training, eligibility or work', () => {
+  it('does not award points for unrelated training or work', () => {
     const result = assessApplicantSuitability(job, candidate({ technicalTraining: [{ course: 'Welding' }], eligibility: [{ eligibility: 'Welding certification' }], workExperience: [{ position: 'Welder', fromDate: '2010-01-01', toDate: 'Present' }] }), { now })
-    for (const key of ['workExperience', 'technicalTraining', 'eligibility']) expect(result.components.find((component) => component.key === key).points).toBe(0)
+    for (const key of ['workExperience', 'technicalTraining']) expect(result.components.find((component) => component.key === key).points).toBe(0)
   })
   it('does not award language points when the job states no language requirement', () => {
     const result = assessApplicantSuitability({ ...job, requirements: '' }, strong(), { now })
     expect(result.components.find((component) => component.key === 'languages').maximum).toBe(0)
-    expect(result.components.find((component) => component.key === 'eligibility').maximum).toBe(0)
+    expect(result.components.find((component) => component.key === 'reputation').maximum).toBe(10)
   })
-  it('does not reward expired eligibility or future training and does not double-count overlapping work', () => {
+  it('does not reward future training and does not double-count overlapping work', () => {
     const result = assessApplicantSuitability(job, candidate({
       technicalTraining: [{ course: 'Excel', fromDate: '2030-01-01' }],
       eligibility: [{ eligibility: 'Excel certification', validUntil: '2020-01-01' }],
       workExperience: [1, 2].map(() => ({ position: 'Office Clerk', fromDate: '2024-01-01', toDate: '2025-01-01' })),
     }), { now })
-    expect(result.components.find((component) => component.key === 'eligibility').points).toBe(0)
     expect(result.components.find((component) => component.key === 'technicalTraining').points).toBe(0)
     expect(result.components.find((component) => component.key === 'workExperience').detail).toContain('1 recorded years')
   })
@@ -50,12 +49,12 @@ describe('job-specific applicant suitability', () => {
     expect(partial.components.find(item => item.key === 'languages').points).toBe(2.5)
   })
 
-  it('allows eligibility valid through today and supports NSRP other-language names', () => {
+  it('awards reputation points and supports NSRP other-language names', () => {
     const result = assessApplicantSuitability({ ...job, requirements: 'Excel certification and Bikol proficiency' }, candidate({
       eligibility: [{ eligibility: 'Excel certification', validUntil: '2026-11-02' }],
       languages: [{ name: 'Others', otherName: 'Bicol', read: true, write: true, speak: true, understand: true }],
     }), { now })
-    expect(result.components.find((component) => component.key === 'eligibility').points).toBe(10)
+    expect(result.components.find((component) => component.key === 'reputation').points).toBe(10)
     expect(result.components.find((component) => component.key === 'languages').points).toBe(5)
   })
   it('supports older profile training/work fields and preserves stable ties', () => {
@@ -63,6 +62,25 @@ describe('job-specific applicant suitability', () => {
     expect(applicantQualifications(record).technicalTraining[0]).toMatchObject({ course: 'Excel', institution: 'Center' })
     const tied = rankJobApplicants(job, [{ id: 'first', ...record }, { id: 'second', ...record }], undefined, { now })
     expect(tied.map((entry) => entry.id)).toEqual(['first', 'second'])
+  })
+  it('uses reputation instead of eligibility with the same ten-point weight and moves it to the top', () => {
+    const high = { ...strong(), reputation: { points: 100, maximumPoints: 100 } }
+    const low = { ...strong(), reputation: { points: 80, maximumPoints: 100 } }
+    const ranked = rankJobApplicants(job, [low, high], undefined, { now })
+    expect(ranked[0].reputation.points).toBe(100)
+    const suitability = assessApplicantSuitability(job, low, { now })
+    expect(suitability.components[0]).toMatchObject({ key: 'reputation', points: 8, maximum: 10 })
+    expect(suitability.components.some(item => item.key === 'eligibility')).toBe(false)
+    render(<ApplicantSuitability suitability={{ ...suitability, rank: 2 }} />)
+    const score = screen.getByLabelText('Applicant reputation score')
+    expect(score).toHaveTextContent('80/100')
+    expect(score.compareDocumentPosition(screen.getByText(/Fit score/)) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+  it('never presents a missing reputation as a perfect score', () => {
+    const missing = { ...strong(), reputation: undefined }
+    const result = assessApplicantSuitability(job, missing, { now })
+    expect(result.reputation).toBeNull()
+    expect(result.components[0]).toMatchObject({ key: 'reputation', points: 0, maximum: 10 })
   })
   it('does not use demographics or disclose identity numbers and home addresses in ranking evidence', () => {
     const normal = strong()
@@ -86,7 +104,8 @@ describe('job-specific applicant suitability', () => {
     expect(screen.getByText('Available immediately')).toBeInTheDocument()
     expect(screen.getByText('Top match')).toBeInTheDocument()
     expect(screen.getByText('Technical training', { selector: 'dt' })).toBeInTheDocument()
-    expect(screen.getByText('Eligibility', { selector: 'dt' })).toBeInTheDocument()
+    expect(screen.queryByText('Eligibility', { selector: 'dt' })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Applicant reputation score')).toHaveTextContent('100/100')
     expect(screen.getByText('Language / dialect proficiency', { selector: 'dt' })).toBeInTheDocument()
     expect(screen.getByText('Work experience', { selector: 'dt' })).toBeInTheDocument()
   })

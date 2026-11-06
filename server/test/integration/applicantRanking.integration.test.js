@@ -35,6 +35,22 @@ beforeEach(async () => {
 })
 
 describe('ranked employer referrals', () => {
+  it('uses live reputation for ranking while keeping the private ledger and notes hidden', async () => {
+    await Applicant.collection.updateOne({ _id: strong._id }, { $set: { trustValue: 100, trustEvents: [{ key: 'private-penalty', type: 'confirmed_no_show', points: -20, at: new Date(), reason: 'PRIVATE penalty evidence', by: 'PRIVATE reviewer' }] } })
+    const response = await request(app).get(`/api/referrals/employer/${employer._id}`).set(auth()).expect(200)
+    const candidate = response.body.find(entry => String(entry.applicantId._id) === String(strong._id))
+    expect(candidate.suitability.reputation).toEqual({ points: 80, maximumPoints: 100 })
+    expect(candidate.suitability.components[0]).toMatchObject({ key: 'reputation', points: 8, maximum: 10 })
+    expect(candidate.suitability.components.some(component => component.key === 'eligibility')).toBe(false)
+    expect(JSON.stringify(response.body)).not.toMatch(/trustValue|trustEvents|PRIVATE penalty|PRIVATE reviewer|private-penalty/)
+    const directory = await request(app).get('/api/admin/users').set(auth('Admin', admin.email)).expect(200)
+    expect(directory.body.find(user => String(user.id) === String(strong._id)).reputation).toEqual({ points: 80, maximumPoints: 100 })
+    await Referral.updateOne({ applicantId: strong._id, employerId: employer._id }, { status: 'withdrawn' })
+    const withdrawn = await request(app).get(`/api/referrals/employer/${employer._id}`).set(auth()).expect(200)
+    expect(withdrawn.body.find(entry => entry.status === 'withdrawn').applicantId).toBeNull()
+    expect(withdrawn.body.find(entry => entry.status === 'withdrawn').suitability).toBeUndefined()
+  })
+
   it('shares profile resume metadata and downloads only with employers holding an active referral', async () => {
     await Applicant.updateOne({ _id: strong._id }, { $set: { resumeFile: { originalName: 'resume.pdf', mimetype: 'application/pdf', size: 8, data: Buffer.from('%PDFtest') } } })
     const response = await request(app).get(`/api/referrals/employer/${employer._id}`).set(auth()).expect(200)
