@@ -61,6 +61,24 @@ export function createInternalAccountsRouter({ Admin, Applicant, Employer, Accou
       res.status(201).json({ ...safeAccount(account), initialPassword, mustChangePassword: true })
     } catch (error) { if (error.code === 11000) return res.status(409).json({ error: 'That email is already registered.' }); throw error }
   })
+  router.post('/internal-accounts/:id/reset-password', requirePermission('accounts'), async (req, res) => {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid account.' })
+    const targetId = new mongoose.Types.ObjectId(req.params.id)
+    if (String(targetId) === String(req.internalAccount._id)) return res.status(403).json({ error: 'Use Forgot password to recover your own account.' })
+    const { reason } = req.body || {}
+    if (typeof reason !== 'string' || !reason.trim() || reason.length > 1000) return res.status(400).json({ error: 'A reason is required.' })
+    const target = await Admin.findById(targetId).lean()
+    if (!target) return res.status(404).json({ error: 'Account not found.' })
+    if (adminLevel(target) === 'super_admin') return res.status(403).json({ error: 'Only Admin and Staff accounts can be reset here.' })
+    if (target.disabled) return res.status(409).json({ error: 'Enable the account before resetting its password.' })
+    const initialPassword = `P3!a${crypto.randomBytes(15).toString('base64url')}`
+    const updated = await Admin.findOneAndUpdate({ _id: targetId, adminLevel: { $ne: 'super_admin' }, disabled: { $ne: true } }, { $set: { passwordHash: await bcrypt.hash(initialPassword, 12), mustChangePassword: true }, $inc: { sessionVersion: 1 } }, { returnDocument: 'after' }).lean()
+    if (!updated) return res.status(409).json({ error: 'The account changed. Refresh the list and try again.' })
+    res.locals.activityTargetId = String(updated._id)
+    res.locals.activityAction = `Reset internal account password: ${reason.trim()}`
+    res.set('Cache-Control', 'no-store')
+    res.json({ ...safeAccount(updated), initialPassword, mustChangePassword: true })
+  })
   router.patch('/internal-accounts/:id', requirePermission('accounts'), async (req, res) => {
     if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid account.' })
     const { adminLevel: level, disabled, reason } = req.body || {}

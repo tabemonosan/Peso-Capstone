@@ -10,6 +10,7 @@ export function adminCan(user, permission) {
 }
 export function adminViewAllowed(user, view) {
   if (view === 'internal-accounts') return adminCan(user, 'accounts')
+  if (view === 'email-delivery') return adminCan(user, 'emailDelivery')
   if (view === 'account-deletions') return adminCan(user, 'decide')
   if (['verification-rules'].includes(view)) return adminLevel(user) !== 'staff'
   return true

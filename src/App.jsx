@@ -3,6 +3,8 @@ import { AdminAccessContext } from './components/AdminAccessContext'
 import { adminCan, adminLevel, ADMIN_LABELS, adminViewAllowed } from '../shared/adminAccess.js'
 import InternalAccountsPage from './components/InternalAccountsPage'
 import InternalPasswordChange from './components/InternalPasswordChange'
+import ForgotPasswordModal from './components/ForgotPasswordModal'
+import AdminEmailDelivery from './components/AdminEmailDelivery'
 import AdminReviewNotes from './components/AdminReviewNotes'
 import { partitionJobArchive } from '../shared/jobArchive.js'
 import PasswordInput from './components/PasswordInput'
@@ -98,6 +100,7 @@ const navigationByRole = {
     { id: "activity-logs", label: "Activity Logs" },
     { id: 'internal-accounts', label: 'Internal Accounts' },
     { id: 'review-notes', label: 'Review Notes' },
+    { id: 'email-delivery', label: 'Email Delivery' },
     { id: 'verification-flagged', label: 'Verification Queue' },
     { id: 'verification-auto', label: 'Auto-approved Documents' },
     { id: 'verification-rules', label: 'Verification Settings' },
@@ -297,6 +300,7 @@ const toggleSkill = (selected, skill) => {
     } catch { return 'login' }
   })
   const [showSignupRestoreNotice, setShowSignupRestoreNotice] = useState(() => authView !== 'login')
+  const [forgotPasswordOpen, setForgotPasswordOpen] = useState(false)
   useEffect(() => {
     try { sessionStorage.setItem('peso-auth-view', isLoggedIn ? 'login' : authView) } catch { /* Browser storage may be unavailable. */ }
     if (authView === 'login') setShowSignupRestoreNotice(false)
@@ -1876,6 +1880,7 @@ const toggleSkill = (selected, skill) => {
                 <button
                   type="button"
                   className="auth-link"
+                  onClick={() => setForgotPasswordOpen(true)}
                 >
                   Forgot password?
                 </button>
@@ -2078,12 +2083,13 @@ const toggleSkill = (selected, skill) => {
         </div>
       </div>
     )
+    const recovery = forgotPasswordOpen && <ForgotPasswordModal initialEmail={formData.email} onClose={() => setForgotPasswordOpen(false)} onDone={email => { setFormData(data => ({ ...data, email, password: '' })); setForgotPasswordOpen(false) }} />
     const openPublicFlow = view => {
       setAuthView(view)
       requestAnimationFrame(() => document.querySelector('.auth-page')?.scrollIntoView?.({ block: 'start' }))
     }
     return authView === 'login'
-      ? <LandingPage onApplicantSignup={() => openPublicFlow('signup')} onEmployerSignup={() => openPublicFlow('employer')} onApplicantForm={() => openPublicFlow('nsrp-applicant')} onEmployerForm={() => openPublicFlow('nsrp-employer')}>{authentication}</LandingPage>
+      ? <><LandingPage onApplicantSignup={() => openPublicFlow('signup')} onEmployerSignup={() => openPublicFlow('employer')} onApplicantForm={() => openPublicFlow('nsrp-applicant')} onEmployerForm={() => openPublicFlow('nsrp-employer')}>{authentication}</LandingPage>{recovery}</>
       : authentication
   }
 
@@ -2553,6 +2559,7 @@ const toggleSkill = (selected, skill) => {
           {activeRole === 'Admin' && activeView === 'report-maker' && <AdminReportMaker token={getToken()} />}
           {activeRole === 'Admin' && activeView === 'internal-accounts' && adminCan(currentUser, 'accounts') && <InternalAccountsPage token={getToken()} currentId={currentUser?.id} />}
           {activeRole === 'Admin' && activeView === 'review-notes' && <AdminReviewNotes token={getToken()} />}
+          {activeRole === 'Admin' && activeView === 'email-delivery' && adminCan(currentUser, 'emailDelivery') && <AdminEmailDelivery token={getToken()} />}
 
           {activeRole === 'Admin' && activeView === 'employment-updates' && (
             <AdminEmploymentUpdatesPage key={`${hiringUpdates.applicantId || ''}:${hiringUpdates.jobId || ''}`} token={getToken()} applicantId={hiringUpdates.applicantId} jobId={hiringUpdates.jobId} />

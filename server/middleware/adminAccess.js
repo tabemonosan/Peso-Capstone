@@ -18,6 +18,7 @@ export function adminAccessMiddleware({ Admin, authenticate }) {
       if (route === '/admin/change-password' && req.method === 'POST') permission = 'notes'
       else if (/^\/admin\/internal-accounts(?:\/|$)/.test(route)) permission = 'accounts'
       else if (/^\/admin\/review-notes(?:\/|$)/.test(route)) permission = 'notes'
+      else if (/^\/admin\/email-delivery(?:\/|$)/.test(route)) permission = 'emailDelivery'
       else if (/^\/account-deletion(?:\/|$)/.test(route)) permission = read ? 'decide' : 'deleteAccounts'
       else if (/\/settings$/.test(route) || route === '/admin/job-moderation') permission = read ? 'viewSettings' : 'settings'
       else if (route === '/referrals' && req.method === 'POST') permission = 'refer'

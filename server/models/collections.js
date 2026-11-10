@@ -187,6 +187,7 @@ export function applicantDisplayName(applicant) {
 }
 
 const employerSchema = new Schema({
+  sessionVersion: { type: Number, default: 0 },
   pageGuides: { type: pageGuidesSchema, default: undefined },
   ...verificationAccountFields,
   receivingApplicantsSuspendedAt: Date,

@@ -27,10 +27,11 @@ export default function InternalAccountsPage({ token, currentId }) {
   const save = async reason => {
     setBusy(true); setError(''); setNotice('')
     try {
-      const response = await fetch(`${API_URL}/api/admin/internal-accounts${action.id ? `/${action.id}` : ''}`, { method: action.id ? 'PATCH' : 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ ...action.changes, reason }) })
+      const response = await fetch(`${API_URL}/api/admin/internal-accounts${action.id ? `/${action.id}` : ''}${action.reset ? '/reset-password' : ''}`, { method: action.id && !action.reset ? 'PATCH' : 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ ...action.changes, reason }) })
       const result = await response.json()
       if (!response.ok) throw new Error(result.error)
       if (!action.id) { setForm(empty); setCreating(false); setCredentials(result) }
+      if (action.reset) setCredentials({ ...result, reset: true })
       setAction(null); setNotice('Account saved. Access changes take effect immediately.'); await load()
     } catch (err) { setError(err.message || 'Could not save account.') } finally { setBusy(false) }
   }
@@ -39,7 +40,7 @@ export default function InternalAccountsPage({ token, currentId }) {
     <p className="mt-2 text-sm text-slate-600">Create and manage Super Admin, Admin, and Staff access. Super Admin accounts are protected from deactivation and demotion.</p>
     {error && !action && <p role="alert" className="mt-3 text-rose-700">{error}</p>}{notice && <p role="status" className="mt-3 text-green-800">{notice}</p>}
     {credentials && <section aria-label="New account login details" className="mt-5 rounded-xl border border-cyan-200 bg-cyan-50 p-4">
-      <h3 className="font-semibold">Account created</h3><p className="mt-1 text-sm">Copy these details before dismissing. The initial password is shown once.</p>
+      <h3 className="font-semibold">{credentials.reset ? 'Password reset' : 'Account created'}</h3><p className="mt-1 text-sm">Copy these details before dismissing. The initial password is shown once.</p>
       <label className="mt-3 block text-sm">Login details<textarea readOnly className="shared-form-control mt-1 block w-full rounded-lg px-3 py-2 font-mono text-sm" rows={6} value={loginDetails} /></label>
       <div className="mt-3 flex flex-wrap gap-2"><button type="button" className="rounded-full bg-cyan-700 px-4 py-2 text-sm font-semibold text-white" onClick={copyDetails}>Copy login details</button><button type="button" className="rounded-full border border-slate-300 px-4 py-2 text-sm" onClick={() => { setCredentials(null); setNotice(''); setError('') }}>Dismiss login details</button></div>
     </section>}
@@ -52,9 +53,9 @@ export default function InternalAccountsPage({ token, currentId }) {
     </form>}
     <div className="mt-6 space-y-3">{data.items.map(account => <article className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 p-4" key={account.id}>
       <div><p className="font-semibold">{account.name || account.email}</p><p className="text-sm">{account.email} · {ADMIN_LABELS[account.adminLevel]} · {account.disabled ? 'Disabled' : 'Active'}</p></div>
-      {account.id !== currentId && account.adminLevel !== 'super_admin' && <div className="flex flex-wrap gap-2"><select aria-label={`Access level for ${account.email}`} className="shared-form-control rounded-lg px-3 py-2" value={account.adminLevel} onChange={event => { setError(''); setAction({ id: account.id, changes: { adminLevel: event.target.value }, title: `Change access for ${account.email}?` }) }}>{Object.entries(ADMIN_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><button type="button" className="rounded-full border border-rose-300 px-4 py-2 text-sm text-rose-800" onClick={() => { setError(''); setAction({ id: account.id, changes: { disabled: !account.disabled }, title: `${account.disabled ? 'Enable' : 'Disable'} ${account.email}?` }) }}>{account.disabled ? 'Enable' : 'Disable'}</button></div>}
+      {account.id !== currentId && account.adminLevel !== 'super_admin' && <div className="flex flex-wrap gap-2"><select aria-label={`Access level for ${account.email}`} className="shared-form-control rounded-lg px-3 py-2" value={account.adminLevel} onChange={event => { setError(''); setAction({ id: account.id, changes: { adminLevel: event.target.value }, title: `Change access for ${account.email}?` }) }}>{Object.entries(ADMIN_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><button type="button" className="rounded-full border border-rose-300 px-4 py-2 text-sm text-rose-800" onClick={() => { setError(''); setAction({ id: account.id, changes: { disabled: !account.disabled }, title: `${account.disabled ? 'Enable' : 'Disable'} ${account.email}?` }) }}>{account.disabled ? 'Enable' : 'Disable'}</button><button type="button" disabled={account.disabled || busy} className="rounded-full border border-cyan-300 px-4 py-2 text-sm text-cyan-900 disabled:opacity-50" onClick={() => { setError(''); setAction({ id: account.id, reset: true, title: `Reset password for ${account.email}?` }) }}>Reset password</button></div>}
     </article>)}</div>
     {data.total > 20 && <Pagination page={page} pageSize={20} totalItems={data.total} onPageChange={setPage} itemLabel="accounts" />}
-    {action && <ConfirmDialog title={action.title} note={action.id ? 'This account change is recorded in Activity Logs. Provide the reason for the change.' : `Create an account for ${action.changes.email}? An initial password will be generated for you to copy.`} requireReason={Boolean(action.id)} reasonMinLength={1} busy={busy} error={error} onConfirm={reason => save(action.id ? reason : 'New internal account')} onCancel={() => { if (!busy) setAction(null) }} />}
+    {action && <ConfirmDialog title={action.title} note={action.reset ? 'Existing sessions will end. Copy the new initial password and share it with the account holder. They must choose their own password at sign-in.' : action.id ? 'This account change is recorded in Activity Logs. Provide the reason for the change.' : `Create an account for ${action.changes.email}? An initial password will be generated for you to copy.`} requireReason={Boolean(action.id)} reasonMinLength={1} busy={busy} error={error} onConfirm={reason => save(action.id ? reason : 'New internal account')} onCancel={() => { if (!busy) setAction(null) }} />}
   </section>
 }

@@ -1,0 +1,22 @@
+name: System workflow and recovery checks
+on:
+  push:
+  pull_request:
+jobs:
+  workflow:
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+      JWT_SECRET: ci-test-only-secret
+      EMAIL_DELIVERY_SECRET: ci-email-test-only-secret
+      TZ: Asia/Manila
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run test:workflow
+      - run: npx vitest run server/test/integration/passwordRecovery.integration.test.js src/test/passwordRecovery.test.jsx src/test/correctionGuidance.test.jsx --maxWorkers=2 --testTimeout=60000
+      - run: npm run build

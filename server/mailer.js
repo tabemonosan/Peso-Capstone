@@ -1,4 +1,7 @@
 import nodemailer from 'nodemailer'
+import mongoose from 'mongoose'
+import { EmailDelivery } from './models/emailDelivery.js'
+import { createEmailDeliveryService } from './services/emailDelivery.js'
 import { redactString } from './utils/redact.js'
 
 // Email delivery modes:
@@ -116,7 +119,7 @@ export function initMailer() {
   return initPromise
 }
 
-export async function sendEmail(to, subject, text) {
+export async function deliverEmail(to, subject, text) {
   await initMailer()
   if (!transporter) {
     // Never log the recipient or body: they contain email addresses and
@@ -138,6 +141,26 @@ export async function sendEmail(to, subject, text) {
     console.error(`[email] send failed: ${describeSmtpError(err)}`)
     return { delivered: false, error: describeSmtpError(err) }
   }
+}
+
+export const emailDeliveryService = createEmailDeliveryService({ Model: EmailDelivery, deliver: deliverEmail, secret: process.env.EMAIL_DELIVERY_SECRET || process.env.JWT_SECRET || 'dev-secret' })
+export async function sendEmail(to, subject, text, options) {
+  // The standalone mail diagnostic can run without a database connection.
+  if (mongoose.connection.readyState !== 1) return deliverEmail(to, subject, text)
+  try { return await emailDeliveryService.send(to, subject, text, options) }
+  catch { return { delivered: false, error: 'Unable to queue the email.' } }
+}
+export function startEmailDeliveryWorker() {
+  let running = false
+  const run = async () => {
+    if (running || mongoose.connection.readyState !== 1) return
+    running = true
+    try { await emailDeliveryService.processDue() } catch { console.error('[email] Delivery retry unavailable') }
+    finally { running = false }
+  }
+  const timer = setInterval(run, 30000)
+  timer.unref(); void run()
+  return () => clearInterval(timer)
 }
 
 // Dev-only escape hatch: print the full verification link when delivery is not

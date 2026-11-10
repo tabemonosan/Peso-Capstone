@@ -45,6 +45,12 @@ the initial password, enforces the shared password policy, invalidates all initi
 sessions, and issues a fresh session. Existing accounts keep their current passwords
 and do not receive this requirement retroactively.
 
+Super Admin can reset an active Admin or Staff account from its Reset password
+button. A new initial password is shown once and existing sessions end. The account
+holder must choose a personal password again. All users can recover their own
+account using an email verification code from Forgot password on the sign-in page.
+See [password recovery](password-recovery.md).
+
 To provision the initial three accounts in the configured database:
 
 ```sh

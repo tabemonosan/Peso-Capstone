@@ -6,9 +6,11 @@ import bcrypt from 'bcryptjs'
 import mongoose from 'mongoose'
 import request from 'supertest'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { startTestDb, stopTestDb, signupUploadRequest } from './helpers.js'
+import { startTestDb, stopTestDb, signupUploadRequest, pdfBuffer } from './helpers.js'
+import { drainVerificationJobs } from '../../services/verificationJobs.js'
 import { deadlineBounds, emptyJobPosting } from '../../../shared/jobPosting.js'
 import { CSM_QUESTION_KEYS } from '../../../shared/csmQuestionnaire.js'
+import { PH_LOCATIONS } from '../../../shared/phLocations.js'
 
 const sent = vi.hoisted(() => [])
 
@@ -48,7 +50,7 @@ beforeAll(async () => { await startTestDb(); await CsmResponse.init() }, 60000)
 afterAll(stopTestDb)
 
 describe('connected portal lifecycle', () => {
-  it('runs verified signup through approvals, applications, referral acceptance, both hiring reports, feedback, closure and fresh registration', async () => {
+  it('runs verified signup through correction, approvals, application, referral, interview, hiring, feedback, closure and fresh registration', async () => {
     await Admin.create({ adminLevel: 'super_admin', email: 'cycle-admin@example.com', passwordHash: await bcrypt.hash(password, 4) })
     const adminToken = await login('cycle-admin@example.com')
     const applicantProof = await verify(applicantEmail)
@@ -79,6 +81,13 @@ describe('connected portal lifecycle', () => {
     expect((await request(app).put(`/api/jobs/${jobId}/status`).set(auth(adminToken)).send({ status: 'approved' })).status).toBe(200)
     // A complete registration still awaits PESO approval until its documents are reviewed.
     expect((await request(app).post(`/api/jobs/${jobId}/apply`).set(auth(applicantToken)).send({ sharingConsent: true })).status).toBe(403)
+    const correction = await request(app).put(`/api/applicants/${applicant._id}/verification-documents/birthCertificate`).set(auth(adminToken)).send({ status: 'rejected', reason: 'Upload a complete birth certificate with readable details.' })
+    expect(correction.status, JSON.stringify(correction.body)).toBe(200)
+    const ownDocuments = await request(app).get('/api/profile').set(auth(applicantToken))
+    expect(ownDocuments.body.verificationDocuments.find(doc => doc.docKey === 'birthCertificate').status).toBe('rejected')
+    const replacement = await request(app).post('/api/profile/verification-documents/birthCertificate').set(auth(applicantToken)).field('verificationDetails', JSON.stringify({ copyType: 'PSA copy on security paper' })).attach('document', pdfBuffer(), { filename: 'corrected-birth.pdf', contentType: 'application/pdf' })
+    expect(replacement.status, JSON.stringify(replacement.body)).toBe(200)
+    await drainVerificationJobs()
     for (const key of ['nsrpForm', 'birthCertificate', 'validId1']) {
       const current = await request(app).get(`/api/applicants/${applicant._id}/verification-documents`).set(auth(adminToken))
       const unresolved = current.body.documents.find(doc => doc.docKey === key).unresolved
@@ -97,6 +106,18 @@ describe('connected portal lifecycle', () => {
     const referral = await Referral.findOne({ jobId, applicantId: applicant._id })
     expect(referral.source).toBe('auto')
     expect(referred.body.createdCount).toBe(0)
+    const invitation = await request(app).post(`/api/workflow/referrals/${referral._id}/interview`).set(auth(employerToken)).send({ scheduledAt: new Date(Date.now() + 86400000).toISOString(), mode: 'Online', city: 'Legazpi City', barangay: PH_LOCATIONS['Legazpi City'][0], province: 'Albay', meetingLink: 'https://meet.example.com/lifecycle', message: 'Please confirm your interview.' })
+    expect(invitation.status, JSON.stringify(invitation.body)).toBe(200)
+    const interviewId = invitation.body._id || invitation.body.id
+    expect(interviewId).toBeTruthy()
+    expect((await request(app).post(`/api/workflow/interviews/${interviewId}/respond`).set(auth(employerToken)).send({ action: 'confirm' })).status).toBe(403)
+    expect((await request(app).post(`/api/workflow/interviews/${interviewId}/respond`).set(auth(applicantToken)).send({ action: 'confirm' })).status).toBe(200)
+    const held = await request(app).post(`/api/workflow/interviews/${interviewId}/held`).set(auth(employerToken)).send({ outcome: 'passed', confirmEarly: true, reason: 'Interview completed earlier by agreement.' })
+    expect(held.status, JSON.stringify(held.body)).toBe(200)
+    expect((await request(app).post('/api/workflow/admin/events/confirm').set(auth(adminToken)).send({ type: 'attended_interview', applicantId: String(applicant._id), referenceId: String(interviewId), reason: 'Attendance checked with both parties.' })).status).toBe(200)
+    const interviewHistory = await request(app).get(`/api/admin/referral-workflow/applications/${referral.applicationId}`).set(auth(adminToken))
+    expect(interviewHistory.body.history.some(entry => entry.action === 'interview_invited')).toBe(true)
+    expect(interviewHistory.body.history.some(entry => entry.action === 'peso_confirmed_interview_attendance')).toBe(true)
     const report = { applicantId: String(applicant._id), referralId: String(referral._id), jobId, status: 'hired', employmentDate: '2026-01-01', notes: 'Contract signed' }
     expect((await request(app).post('/api/hire-reports').set(auth(applicantToken)).send(report)).status).toBe(403)
     expect((await request(app).put(`/api/referrals/${referral._id}/respond`).set(auth(employerToken)).send({ status: 'accepted' })).status).toBe(200)
