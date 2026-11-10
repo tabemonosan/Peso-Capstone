@@ -49,7 +49,7 @@ afterAll(stopTestDb)
 
 describe('connected portal lifecycle', () => {
   it('runs verified signup through approvals, applications, referral acceptance, both hiring reports, feedback, closure and fresh registration', async () => {
-    await Admin.create({ email: 'cycle-admin@example.com', passwordHash: await bcrypt.hash(password, 4) })
+    await Admin.create({ adminLevel: 'super_admin', email: 'cycle-admin@example.com', passwordHash: await bcrypt.hash(password, 4) })
     const adminToken = await login('cycle-admin@example.com')
     const applicantProof = await verify(applicantEmail)
     const signup = await signupUploadRequest(request(app).post('/api/signup'), { email: applicantEmail, emailProof: applicantProof })

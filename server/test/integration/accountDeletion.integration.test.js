@@ -23,7 +23,7 @@ afterAll(stopTestDb)
 beforeEach(async () => {
   vi.restoreAllMocks()
   await clearDb()
-  await Admin.create({ email: 'admin@example.com', passwordHash: 'unused' })
+  await Admin.create({ adminLevel: 'super_admin', email: 'admin@example.com', passwordHash: 'unused' })
   applicant = await Applicant.create({ email, emailNormalized: email, passwordHash: await bcrypt.hash('OldPass123!', 4), emailVerified: true, verificationStatus: 'approved', profile: { firstName: 'Juan', lastName: 'Cruz', location: 'Legazpi City, Albay' }, verificationDocuments: Object.fromEntries(['nsrpForm', 'birthCertificate', 'validId1'].map((key) => [key, { versions: [{ version: 1, status: 'approved' }] }])) })
 })
 

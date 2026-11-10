@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { API_URL } from '../config'
 import { outcomeLabel } from '../../shared/employmentReporting.js'
 import Pagination from './Pagination'
+import AdminReviewNotes from './AdminReviewNotes'
 
 const dateLabel = (value, withTime = false) => {
   if (!value) return 'Not provided'
@@ -85,6 +86,7 @@ export default function AdminEmploymentUpdatesPage({ token, applicantId, jobId }
         <Statement title="Applicant / employee update" report={item.applicantReport} />
         <Statement title="Employer update" report={item.employerReport} />
       </div>
+      <AdminReviewNotes token={token} entityType="Applicant" entityId={item.applicant.id} />
     </article>)}
     {!loading && !error && data.total > 0 && <Pagination page={page} pageSize={pageSize} totalItems={data.total} onPageChange={setPage} onPageSizeChange={(value) => { setPageSize(value); setPage(1) }} itemLabel="employment records" ariaLabel="Hiring updates pagination" />}
   </section>

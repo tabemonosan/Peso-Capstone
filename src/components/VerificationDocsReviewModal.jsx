@@ -6,6 +6,9 @@ import { fetchWithTimeout } from '../utils/fetchWithTimeout'
 import Modal from "./Modal"
 import ConfirmDialog from "./ConfirmDialog"
 import { formatFullName } from "../../shared/nameFields.js"
+import './VerificationDocsReviewModal.css'
+import { useAdminAccess } from './AdminAccessContext'
+import AdminReviewNotes from './AdminReviewNotes'
 
 const QUICK_REJECT_REASONS = ["Blurry or unreadable", "Wrong document type", "Name doesn't match", "Expired ID"]
 
@@ -20,6 +23,9 @@ import ManualDocumentChecklist from './ManualDocumentChecklist'
 import { needsManualChecklist, completeChecklist } from '../../shared/manualDocumentReview.js'
 
 export default function VerificationDocsReviewModal({ applicant, token, onClose, onReviewed, onRestrict, onUnrestrict, readOnly = false }) {
+  const { can } = useAdminAccess()
+  const closedRecord = Boolean(applicant.deletedAt)
+  readOnly = readOnly || !can('decide')
   const [documents, setDocuments] = useState(null)
   const [status, setStatus] = useState(null)
   const [details, setDetails] = useState(null)
@@ -170,6 +176,7 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
 
   return (
     <Modal onClose={onClose} labelledBy="verification-docs-review-title" describedBy="verification-docs-review-description">
+      <div className="verification-review">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 id="verification-docs-review-title" className="text-xl font-bold">Verification documents</h2>
@@ -182,7 +189,7 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
               </p>
             )}
           </div>
-          <button type="button" onClick={onClose} aria-label="Close verification documents" className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold">
+          <button type="button" onClick={onClose} aria-label="Close verification documents" className="verification-button verification-button-outlined">
             Close
           </button>
         </div>
@@ -241,7 +248,7 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
                     {badge(nsrpDocument.referenceOnly ? 'Registration reference' : nsrpDocument.status)}
                     <span className="text-xs text-slate-600">{nsrpSource}</span>
                     {nsrpDocument.latest.url && (
-                      <button type="button" onClick={() => viewVersion(nsrpDocument.latest.url)} className="rounded-lg bg-cyan-500 px-2 py-1 text-xs font-semibold text-white">View</button>
+                      <button type="button" onClick={() => viewVersion(nsrpDocument.latest.url)} className="verification-button verification-button-filled">View</button>
                     )}
                   </>
                 ) : (
@@ -250,14 +257,14 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
               </dd>
             </div>
           </dl>
-          {readOnly && <p className="mt-3 text-sm font-semibold text-slate-700">Account closed. This retained PESO record is read-only and separate from any new registration.</p>}
+          {readOnly && <p className="mt-3 text-sm font-semibold text-slate-700">{closedRecord ? 'Account closed. This retained PESO record is read-only and separate from any new registration.' : 'Inspection access. Final verification decisions require an Admin.'}</p>}
           {!readOnly && accountStatus === "approved" && onRestrict && (
-            <button type="button" onClick={() => { setActionError(''); setAccountAction('restrict') }} className="mt-3 rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-white">
+            <button type="button" onClick={() => { setActionError(''); setAccountAction('restrict') }} className="mt-4 verification-button verification-button-danger">
               Restrict applicant
             </button>
           )}
           {!readOnly && accountStatus === 'restricted' && onUnrestrict && (
-            <button type="button" onClick={() => { setActionError(''); setAccountAction('unrestrict') }} className="mt-3 rounded-lg bg-cyan-700 px-3 py-1.5 text-xs font-semibold text-white">Unrestrict applicant</button>
+            <button type="button" onClick={() => { setActionError(''); setAccountAction('unrestrict') }} className="mt-4 verification-button verification-button-filled">Unrestrict applicant</button>
           )}
         </section>
 
@@ -268,7 +275,7 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
         ) : (
           <ul className="mt-5 space-y-3">
             {documents.map((doc) => (
-              <li key={doc.docKey} className="rounded-xl bg-slate-50 p-3 text-sm">
+              <li key={doc.docKey} className="verification-document rounded-xl bg-slate-50 p-4 text-sm">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-medium text-slate-900">
                     {doc.label}{doc.idType ? ` — ${doc.idType}` : ""}
@@ -285,16 +292,18 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
                     <span className="rounded-full border border-cyan-300 bg-cyan-100 px-2 py-0.5 text-xs font-semibold text-cyan-800">resubmitted</span>
                   )}
                   {doc.correctionRequest && <p className="w-full rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">Applicant correction request: {doc.correctionRequest.reason}. {doc.referenceOnly ? 'Reopen the reference to allow a correction and new identity checks.' : 'Use Revert to pending to reopen this document for review.'}</p>}
+                </div>
+                <div className="verification-document-actions">
                   {doc.docKey.startsWith("validId") ? (
                     (doc.latest?.url || doc.latest?.back?.url) && (
-                      <div role="group" aria-label={`${doc.label} file views`} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1">
+                      <div role="group" aria-label={`${doc.label} file views`} className="verification-view-group">
                         {doc.latest?.url && (
-                          <button type="button" onClick={() => viewVersion(doc.latest.url)} className="rounded-md bg-cyan-500 px-2 py-1 text-xs font-semibold text-white">
+                          <button type="button" onClick={() => viewVersion(doc.latest.url)} className="verification-button verification-button-filled">
                             View front
                           </button>
                         )}
                         {doc.latest?.back?.url && (
-                          <button type="button" onClick={() => viewVersion(doc.latest.back.url)} className="rounded-md border border-cyan-700 px-2 py-1 text-xs font-semibold text-cyan-800">
+                          <button type="button" onClick={() => viewVersion(doc.latest.back.url)} className="verification-button verification-button-filled">
                             View back
                           </button>
                         )}
@@ -302,7 +311,7 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
                     )
                   ) : (
                     doc.latest?.url && (
-                      <button type="button" onClick={() => viewVersion(doc.latest.url)} className="rounded-xl bg-cyan-500 px-2 py-1 text-xs font-semibold text-white">
+                      <button type="button" onClick={() => viewVersion(doc.latest.url)} className="verification-button verification-button-filled">
                         View
                       </button>
                     )
@@ -312,14 +321,14 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
                       <button
                         type="button"
                         onClick={() => { setActionError(""); setConfirmAction({ docKey: doc.docKey, action: "approved" }) }}
-                        className="rounded-xl bg-green-600 px-2 py-1 text-xs font-semibold text-white"
+                        className="verification-button verification-button-approve"
                       >
                         Approve
                       </button>
                       <button
                         type="button"
                         onClick={() => { setActionError(""); setConfirmAction({ docKey: doc.docKey, action: "rejected" }) }}
-                        className="rounded-xl bg-red-600 px-2 py-1 text-xs font-semibold text-white"
+                        className="verification-button verification-button-danger"
                       >
                         Reject
                       </button>
@@ -329,7 +338,7 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
                     <button
                       type="button"
                       onClick={() => { setActionError(""); setConfirmAction({ docKey: doc.docKey, action: "revert" }) }}
-                      className="rounded-xl border border-amber-400 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700"
+                      className="verification-button verification-button-tonal"
                     >
                       {doc.referenceOnly ? 'Reopen reference for correction' : 'Revert to pending'}
                     </button>
@@ -338,7 +347,7 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
                     <button
                       type="button"
                       onClick={() => setExpanded((current) => ({ ...current, [doc.docKey]: !current[doc.docKey] }))}
-                      className="rounded-xl border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700"
+                      className="verification-button verification-button-outlined"
                     >
                       {expanded[doc.docKey] ? "Hide history" : `History (${doc.history.length})`}
                     </button>
@@ -376,14 +385,14 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
                         {version.uploadedAt && <span>{new Date(version.uploadedAt).toLocaleString()}</span>}
                         {doc.docKey.startsWith("validId") ? (
                           (version.url || version.back?.url) && (
-                            <div role="group" aria-label={`${doc.label} version ${version.version} file views`} className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white p-0.5">
+                            <div role="group" aria-label={`${doc.label} version ${version.version} file views`} className="verification-view-group">
                               {version.url && (
-                                <button type="button" onClick={() => viewVersion(version.url)} className="rounded px-1.5 py-0.5 text-cyan-800">
+                                <button type="button" onClick={() => viewVersion(version.url)} className="verification-button verification-button-outlined">
                                   View front
                                 </button>
                               )}
                               {version.back?.url && (
-                                <button type="button" onClick={() => viewVersion(version.back.url)} className="rounded border-l border-slate-200 px-1.5 py-0.5 text-cyan-800">
+                                <button type="button" onClick={() => viewVersion(version.back.url)} className="verification-button verification-button-outlined">
                                   View back
                                 </button>
                               )}
@@ -391,7 +400,7 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
                           )
                         ) : (
                           version.url && (
-                            <button type="button" onClick={() => viewVersion(version.url)} className="rounded-lg border border-slate-300 bg-white px-1.5 py-0.5 text-slate-700">
+                            <button type="button" onClick={() => viewVersion(version.url)} className="verification-button verification-button-outlined">
                               View
                             </button>
                           )
@@ -406,6 +415,7 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
           </ul>
         )}
 
+        {!closedRecord && <AdminReviewNotes token={token} entityType="Applicant" entityId={applicant.id || applicant._id} />}
         {toast && (
           <p role="status" className="fixed bottom-4 left-1/2 z-[90] -translate-x-1/2 rounded-xl border border-green-300 bg-white px-4 py-2 text-sm font-semibold text-green-900 shadow-lg">
             {toast}
@@ -474,6 +484,7 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
             />
           )
         })()}
+      </div>
     </Modal>
   )
 }

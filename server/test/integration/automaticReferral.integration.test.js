@@ -35,11 +35,22 @@ beforeEach(async () => {
   await clearDb()
   applicant = await makeApplicant()
   employer = await Employer.create({ email: 'employer@auto.test', passwordHash: 'test', emailVerified: true, verificationStatus: 'approved', companyName: 'Company', phone: '09170000000' })
-  admin = await Admin.create({ email: 'admin@auto.test', passwordHash: 'test' })
+  admin = await Admin.create({ adminLevel: 'super_admin', email: 'admin@auto.test', passwordHash: 'test' })
   job = await JobPosting.create({ title: 'Clerk', company: employer.companyName, createdBy: employer.email, status: 'approved', slots: 2, deadline: new Date(Date.now() + 86400000), skills: ['Excel'] })
 })
 
 describe('automatic applications and referral oversight', () => {
+  it('allows Staff to create routine referrals but cannot refer an unapproved applicant', async () => {
+    const staff = await Admin.create({ email: 'staff@auto.test', passwordHash: 'test', adminLevel: 'staff' })
+    const body = { jobId: String(job._id), applicantIds: [String(applicant._id)], reason: 'Routine staff referral' }
+    await request(app).post('/api/referrals').set(auth('Admin', staff.email)).send(body).expect(200)
+    expect(await Referral.exists({ applicantId: applicant._id, jobId: job._id })).toBeTruthy()
+    const unapproved = await makeApplicant('unapproved@auto.test')
+    await Applicant.updateOne({ _id: unapproved._id }, { $set: { verificationStatus: 'under_review', verificationDocuments: {} } })
+    const denied = await request(app).post('/api/referrals').set(auth('Admin', staff.email)).send({ ...body, applicantIds: [String(unapproved._id)] })
+    expect(denied.status).toBe(403)
+    expect(await Referral.exists({ applicantId: unapproved._id })).toBeFalsy()
+  })
   it('keeps admin reasons private when the employer responds, while retaining the admin audit history', async () => {
     const reason = 'PRIVATE: identity review reference 123456789'
     await request(app).post('/api/referrals').set(auth('Admin', admin.email)).send({ jobId: String(job._id), applicantIds: [String(applicant._id)], reason }).expect(200)

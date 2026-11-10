@@ -19,7 +19,7 @@ afterAll(stopTestDb)
 beforeEach(async () => {
   await clearDb()
   await Employer.create({ email: 'employer@example.com', passwordHash: 'unused', emailVerified: true, verificationStatus: 'approved', companyName: 'Example Works' })
-  await Admin.create({ email: 'admin@example.com', passwordHash: 'unused' })
+  await Admin.create({ adminLevel: 'super_admin', email: 'admin@example.com', passwordHash: 'unused' })
 })
 describe('job request and review API', () => {
   it('presents automatic archives without changing approval or deleting applications', async () => {

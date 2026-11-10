@@ -3,8 +3,11 @@ import { API_URL } from '../config'
 import ConfirmDialog from './ConfirmDialog'
 import Pagination from './Pagination'
 import { usePagination } from '../hooks/usePagination'
+import { useAdminAccess } from './AdminAccessContext'
+import AdminReviewNotes from './AdminReviewNotes'
 
 export default function AdminAccountDeletionRequests({ token, onMessage, onViewRetained }) {
+  const { can } = useAdminAccess()
   const [items, setItems] = useState([])
   const [total, setTotal] = useState(0)
   const [status, setStatus] = useState('pending')
@@ -62,7 +65,8 @@ export default function AdminAccountDeletionRequests({ token, onMessage, onViewR
         {record.reviewReason && <p className="mt-2 text-sm">Review reason: {record.reviewReason}</p>}
         {record.status === 'approved' && onViewRetained && <button type="button" onClick={() => onViewRetained(record)} className="mt-3 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold">View retained PESO record</button>}
         {record.status === 'processing' && <p className="mt-2 text-sm text-amber-800">Approval was started. Retry to finish closing the account and releasing its email.</p>}
-        {['pending', 'processing'].includes(record.status) && <div className="mt-3 flex gap-2">
+        {['pending', 'processing'].includes(record.status) && <AdminReviewNotes token={token} entityType="AccountDeletionRequest" entityId={record._id} />}
+        {can('deleteAccounts') && ['pending', 'processing'].includes(record.status) && <div className="mt-3 flex gap-2">
           <button type="button" onClick={() => { setError(''); setDecision({ record, status: 'approved' }) }} className="rounded-lg bg-red-700 px-3 py-2 text-sm font-semibold text-white">{record.status === 'processing' ? 'Retry approval' : 'Approve deletion'}</button>
           {record.status === 'pending' && <button type="button" onClick={() => { setError(''); setDecision({ record, status: 'declined' }) }} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold">Decline request</button>}
         </div>}

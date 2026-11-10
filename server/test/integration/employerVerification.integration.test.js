@@ -28,6 +28,45 @@ beforeEach(async () => {
   await clearDb()
 })
 
+describe('admin employer directory status filtering', () => {
+  it('filters before pagination, combines search, and uses request status before account status', async () => {
+    await Admin.create({ email: 'admin@example.com', passwordHash: 'unused' })
+    await Employer.insertMany([
+      { email: 'a@example.com', passwordHash: 'unused', companyName: 'A Declined', verificationStatus: 'declined' },
+      { email: 'b@example.com', passwordHash: 'unused', companyName: 'B Approved', verificationStatus: 'approved' },
+      { email: 'c@example.com', passwordHash: 'unused', companyName: 'C Approved', verificationStatus: 'approved' },
+      { email: 'd@example.com', passwordHash: 'unused', companyName: 'D Request Approved', verificationStatus: 'under_review' },
+      { email: 'e@example.com', passwordHash: 'unused', companyName: 'E Request Declined', verificationStatus: 'approved' },
+      { email: 'f@example.com', passwordHash: 'unused', companyName: 'F Resubmit', verificationStatus: 'approved' },
+    ])
+    await EmployerRequest.insertMany([
+      { email: 'D@EXAMPLE.COM', passwordHash: 'unused', companyName: 'D Request Approved', contactName: 'Contact', status: 'approved' },
+      { email: 'e@example.com', passwordHash: 'unused', companyName: 'E Request Declined', contactName: 'Contact', status: 'declined' },
+      { email: 'f@example.com', passwordHash: 'unused', companyName: 'F Resubmit', contactName: 'Contact', status: 'needs_resubmission' },
+    ])
+    const getDirectory = (query) => request(app).get('/api/admin/users')
+      .set({ Authorization: `Bearer ${adminToken()}` })
+      .query({ role: 'Employer', sortBy: 'companyName', order: 'asc', limit: 2, ...query })
+    const first = await getDirectory({ status: 'approved', page: 1 })
+    expect(first.status).toBe(200)
+    expect(first.body).toMatchObject({ total: 3, totalPages: 2 })
+    expect(first.body.items.map((item) => item.companyName)).toEqual(['B Approved', 'C Approved'])
+    const second = await getDirectory({ status: 'approved', page: 2 })
+    expect(second.body).toMatchObject({ total: 3, totalPages: 2 })
+    expect(second.body.items.map((item) => item.companyName)).toEqual(['D Request Approved'])
+    const search = await getDirectory({ status: 'declined', search: 'Request' })
+    expect(search.body.total).toBe(1)
+    expect(search.body.items[0].companyName).toBe('E Request Declined')
+    const resubmit = await getDirectory({ status: 'needs_resubmission' })
+    expect(resubmit.body.total).toBe(1)
+    expect(resubmit.body.items[0].companyName).toBe('F Resubmit')
+    const empty = await getDirectory({ status: 'under_review' })
+    expect(empty.body).toMatchObject({ items: [], total: 0, totalPages: 1 })
+    const all = await getDirectory({ status: 'all' })
+    expect(all.body.total).toBe(6)
+  })
+})
+
 describe("employer verification access control", () => {
   it("restricts pending employers, then unlocks the same session after approval", async () => {
     const email = "waitlisted-employer@example.com"

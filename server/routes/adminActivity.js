@@ -10,6 +10,8 @@ export function createAdminActivityRouter({ ActivityLog, Admin, authenticate }) 
       if (actor?.role !== 'Admin' || !await Admin.exists({ email: actor.email })) return res.status(403).json({ error: 'Admins only.' })
       // Hide earlier request-level entries without deleting the audit history.
       const filter = { method: { $in: ADMIN_ACTION_METHODS }, path: { $not: PASSIVE_ADMIN_PATH } }
+      if (req.internalAccount?.adminLevel === 'staff') filter.actorId = req.internalAccount._id
+      if (req.internalAccount?.adminLevel === 'admin') filter.$and = [{ path: { $not: /\/internal-accounts(?:\/|$)|\/settings\/?$/i } }]
       if (req.query.search) {
         const search = new RegExp(escapeRegex(String(req.query.search).slice(0, 100)), 'i')
         filter.$or = ['actorEmail', 'action', 'path', 'targetId'].map(field => ({ [field]: search }))

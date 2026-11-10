@@ -20,7 +20,7 @@ async function applicant(version = {}, extra = {}, docKey = 'nsrpForm') {
 const action = (account, type, extra = {}) => api('post', '/action').send({ role: 'Applicant', accountId: String(account._id), docKey: 'nsrpForm', version: 1, unresolved: 0, action: type, reason: 'Supervisor review recorded', ...extra })
 beforeAll(startTestDb, 180000)
 afterAll(stopTestDb)
-beforeEach(async () => { await clearDb(); admin = await Admin.create({ email: 'review-admin@example.invalid', passwordHash: 'test' }) })
+beforeEach(async () => { await clearDb(); admin = await Admin.create({ adminLevel: 'super_admin', email: 'review-admin@example.invalid', passwordHash: 'test' }) })
 
 describe('Document verification foundations', () => {
   it('excludes checking and verified documents from the admin review queue', async () => {

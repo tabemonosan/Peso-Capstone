@@ -110,19 +110,22 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .portal-shell[class] .portal-nav {
   display: flex;
   flex-direction: row;
+  flex-wrap: wrap;
   min-width: 0;
   max-width: 100%;
   gap: 5px;
   margin: 0;
-  overflow-x: auto;
+  overflow: visible;
   padding: 2px;
-  scrollbar-width: thin;
 }
 .portal-shell[class] .portal-nav-item {
   display: flex;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   width: auto;
-  white-space: nowrap;
+  max-width: 100%;
+  min-width: 0;
+  white-space: normal;
+  text-align: left;
   align-items: center;
   gap: 11px;
   min-height: 44px;
@@ -504,8 +507,8 @@ input[type='file']::file-selector-button { padding: 8px 13px; border: 1px solid 
   .portal-shell[class] .portal-layout { grid-template-columns: 1fr; gap: 20px; }
   .portal-shell[class] .portal-sidebar { position: static; padding: 9px; border-radius: 18px; }
   .portal-shell[class] .portal-session { display: none; }
-  .portal-shell[class] .portal-nav { display: flex; gap: 5px; margin: 0; overflow-x: auto; padding: 2px; scrollbar-width: thin; }
-  .portal-shell[class] .portal-nav-item { flex: 0 0 auto; width: auto; white-space: nowrap; padding: 10px 13px; }
+  .portal-shell[class] .portal-nav { display: flex; flex-wrap: wrap; gap: 5px; margin: 0; overflow: visible; padding: 2px; }
+  .portal-shell[class] .portal-nav-item { flex: 0 1 auto; width: auto; white-space: normal; padding: 10px 13px; }
   .portal-shell[class] .portal-header { height: 78px; }
   .portal-shell[class] .portal-brand img { width: 45px; height: 48px; }
   .portal-shell[class] .portal-brand h1 { max-width: 260px; font-size: 14px; }

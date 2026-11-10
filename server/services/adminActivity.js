@@ -4,7 +4,7 @@ const verbs = { GET: 'Viewed', POST: 'Submitted', PUT: 'Updated', PATCH: 'Update
 const decisions = new Set(['approve', 'approved', 'decline', 'declined', 'reject', 'rejected', 'pending', 'under_review', 'needs_resubmission', 'restrict', 'restricted', 'unrestrict', 'release', 'resolve', 'grant', 'request', 'hold', 'release-hold', 'revoke', 'resubmit', 'checked', 'explain', 'suspend', 'resume', 'confirm', 'confirmed', 'dismiss', 'dismissed', 'reverse', 'keep', 'reduce', 'publish', 'close', 'cancel', 'cancelled', 'withdraw', 'accept', 'accepted'])
 const safeDecision = value => decisions.has(value) ? value : ''
 export const ADMIN_ACTION_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE']
-export const PASSIVE_ADMIN_PATH = /^\/api\/(?:login\/?$|logout\/?$|admin\/activity-logs(?:\/|$)|notifications(?:\/|$)|profile\/page-guides(?:\/|$)|nsrp\/(?:validate-signup|preview-signup|preview|generate)(?:\/|$)|employer-registration\/preview(?:\/|$)|signup\/(?:email-code|check-documents|nsrp-import)(?:\/|$)|profile\/nsrp-import\/preview(?:\/|$)|applications\/validate-email(?:\/|$))/
+export const PASSIVE_ADMIN_PATH = /^\/api\/(?:login\/?$|logout\/?$|admin\/activity-logs(?:\/|$)|notifications(?:\/|$)|profile\/page-guides(?:\/|$)|nsrp\/(?:validate-signup|preview-signup|preview|generate)(?:\/|$)|employer-registration\/preview(?:\/|$)|signup\/(?:email-code|check-documents|nsrp-import)(?:\/|$)|profile\/nsrp-import\/preview(?:\/|$)|applications\/validate-email(?:\/|$))/i
 export const isAdminBusinessAction = (method, path) => ADMIN_ACTION_METHODS.includes(method) && !PASSIVE_ADMIN_PATH.test(path)
 
 export function describeAdminAction(method, path, body = {}) {

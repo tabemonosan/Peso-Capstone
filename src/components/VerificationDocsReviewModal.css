@@ -1,0 +1,65 @@
+/* Material-style filled, tonal, and outlined actions in the portal palette. */
+.verification-review .verification-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 1 auto;
+  min-height: 40px;
+  max-width: 100%;
+  padding: 9px 18px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+  text-align: center;
+  transition: background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.verification-review .verification-button-filled {
+  background: var(--peso-primary);
+  color: #fff;
+}
+.verification-review .verification-button-filled:hover {
+  background: var(--peso-primary-hover);
+  box-shadow: 0 2px 5px #291d2520;
+}
+.verification-review .verification-button-tonal {
+  background: var(--peso-primary-soft);
+  color: var(--peso-primary-hover);
+}
+.verification-review .verification-button-tonal:hover { background: var(--peso-card); }
+.verification-review .verification-button-outlined {
+  border-color: var(--peso-line-strong);
+  background: transparent;
+  color: var(--peso-body);
+}
+.verification-review .verification-button-outlined:hover { background: var(--peso-primary-soft); }
+.verification-review .verification-button-danger {
+  border-color: #e3b4bb;
+  background: transparent;
+  color: #a1263d;
+}
+.verification-review .verification-button-danger:hover { background: #fce8ec; border-color: #a1263d; }
+.verification-review .verification-button-approve { background: #226442; color: #fff; }
+.verification-review .verification-button-approve:hover { background: #174b30; }
+.verification-review .verification-button:focus-visible {
+  outline: 3px solid var(--peso-primary);
+  outline-offset: 3px;
+}
+.verification-review .verification-button:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; }
+
+.verification-review .verification-document { border: 1px solid var(--peso-line); }
+.verification-review .verification-document-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 10px;
+}
+.verification-review .verification-document-actions:empty { display: none; }
+.verification-review .verification-view-group { display: inline-flex; max-width: 100%; gap: 8px; flex-wrap: wrap; }
+
+@media (max-width: 480px) {
+  .verification-review .verification-button { min-height: 44px; padding-inline: 16px; }
+}
