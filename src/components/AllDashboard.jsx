@@ -73,7 +73,7 @@ export default function AllDashboard({ token, onNavigate, applicantOverview }) {
         return body
       })
       .then((body) => {
-        if (!body?.stats) throw new Error('Failed to load dashboard')
+        if (!body?.stats && !body?.tasks) throw new Error('Failed to load dashboard')
         if (!cancelled) setData(body)
       })
       .catch((err) => { if (!cancelled) setError(err.message) })
@@ -82,6 +82,11 @@ export default function AllDashboard({ token, onNavigate, applicantOverview }) {
 
   if (error) return <p role="alert" className="text-rose-700">{error}</p>
   if (!data) return <Skeleton />
+  if (data.adminLevel === 'staff') return <section className="portal-card p-5">
+    <h2 className="text-xl font-semibold">Staff work queue</h2>
+    <p className="mt-2 text-sm text-slate-600">Inspect records, add recommendations, and follow up on hiring updates. Final decisions go to an Admin.</p>
+    <div className="mt-5 grid gap-4 sm:grid-cols-2">{[['Applicants to inspect', data.tasks.applicants, 'applicants'], ['Employer requests to inspect', data.tasks.employers, 'requests'], ['Job postings to inspect', data.tasks.jobs, 'jobs'], ["Today's hiring updates", data.tasks.hiringUpdates, 'employment-updates']].map(([label, value, to]) => <button key={to} type="button" onClick={() => onNavigate(to)} className="rounded-xl border border-slate-200 bg-white p-5 text-left"><span className="text-sm">{label}</span><strong className="mt-2 block text-2xl">{value}</strong></button>)}</div>
+  </section>
   if (data.role === 'Admin') return <AdminDashboardReport data={data} onNavigate={onNavigate} />
 
   const cards = cardsFor(data.role, data.stats, applicantOverview)

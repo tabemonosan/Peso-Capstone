@@ -1,4 +1,5 @@
 import mongoose from 'mongoose'
+import { escapeRegex } from '../utils/paginate.js'
 import { APPLICANT_STATUSES } from '../../shared/consistencyWaitlist.js'
 import { normalizeEmail } from '../utils/emailVerification.js'
 import { formatFullName, formatDisplayName } from '../../shared/nameFields.js'
@@ -186,6 +187,7 @@ export function applicantDisplayName(applicant) {
 }
 
 const employerSchema = new Schema({
+  sessionVersion: { type: Number, default: 0 },
   pageGuides: { type: pageGuidesSchema, default: undefined },
   ...verificationAccountFields,
   receivingApplicantsSuspendedAt: Date,
@@ -225,6 +227,10 @@ const employerSchema = new Schema({
 }, { collection: 'employers', timestamps: true })
 
 const adminSchema = new Schema({
+  mustChangePassword: { type: Boolean, default: false },
+  sessionVersion: { type: Number, default: 0 },
+  adminLevel: { type: String, enum: ['super_admin', 'admin', 'staff'], default: 'admin' },
+  disabled: { type: Boolean, default: false },
   email: { type: String, required: true, unique: true },
   passwordHash: { type: String, required: true },
   profile: { name: String },
@@ -390,9 +396,9 @@ const EmailCodeSend = mongoose.models.EmailCodeSend || mongoose.model('EmailCode
 const UsedEmailProof = mongoose.models.UsedEmailProof || mongoose.model('UsedEmailProof', usedEmailProofSchema)
 
 async function findUserByEmail(email) {
-  if (!email) return null
+  if (typeof email !== 'string' || !email.trim()) return null
   const normalized = normalizeEmail(email)
-  let user = await Admin.findOne({ email: email.trim() }).lean()
+  let user = await Admin.findOne({ email: new RegExp(`^${escapeRegex(email.trim())}$`, 'i') }).lean()
   if (user) return { user, type: 'Admin' }
   // Match applicants/employers on the normalized value so gmail aliases collapse
   user = await Employer.findOne({ $or: [{ emailNormalized: normalized }, { email }] }).lean()
@@ -407,7 +413,7 @@ async function emailTakenAcrossRoles(email) {
   const normalized = normalizeEmail(email)
   if (!normalized) return false
   const [admin, employer, applicant] = await Promise.all([
-    Admin.findOne({ email: email.trim() }).select('_id').lean(),
+    Admin.findOne({ email: new RegExp(`^${escapeRegex(email.trim())}$`, 'i') }).select('_id').lean(),
     Employer.findOne({ $or: [{ emailNormalized: normalized }, { email }] }).select('_id').lean(),
     Applicant.findOne({ $or: [{ emailNormalized: normalized }, { email }] }).select('_id').lean(),
   ])

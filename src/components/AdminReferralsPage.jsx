@@ -1,3 +1,4 @@
+import { useAdminAccess } from './AdminAccessContext'
 import AdminApplicationWorkflow from './AdminApplicationWorkflow'
 import { AdminReputationSettings, AdminReputationReviews } from './AdminReputation'
 import { APPLICATION_STATUS_LABELS } from '../../shared/applicationProgress.js'
@@ -30,6 +31,7 @@ export function AutomaticReferralBanner({ token, onOpen }) {
 }
 
 export default function AdminReferralsPage({ token, onOpenReviewQueue, ...legacyProps }) {
+  const { can } = useAdminAccess()
   const [settings, setSettings] = useState(null)
   const [options, setOptions] = useState({ employers: [], jobs: [], applicants: [] })
   const [data, setData] = useState({ items: [], total: 0 })
@@ -53,7 +55,7 @@ export default function AdminReferralsPage({ token, onOpenReviewQueue, ...legacy
       if (!result.items.length && result.total > 0 && page > 1) setPage(page - 1)
     } catch (err) { setError(err.message) }
   }, [request, filters, page, limit])
-  useEffect(() => { request(`${base}/settings`).then(setSettings).catch((err) => setError(err.message)); loadOptions().catch((err) => setError(err.message)) }, [request, loadOptions])
+  useEffect(() => { if (can('viewSettings')) request(`${base}/settings`).then(setSettings).catch((err) => setError(err.message)); loadOptions().catch((err) => setError(err.message)) }, [request, loadOptions, can])
   useEffect(() => { load(); const timer = setInterval(load, 10000); return () => clearInterval(timer) }, [load])
   const changeFilter = (key, value) => { setFilters((current) => ({ ...current, [key]: value })); setPage(1) }
   const confirmAction = async (reason) => {
@@ -79,8 +81,8 @@ export default function AdminReferralsPage({ token, onOpenReviewQueue, ...legacy
       <h2 className="text-xl font-bold">Referrals and applications</h2>
       {onOpenReviewQueue && <button type="button" onClick={onOpenReviewQueue} className="mt-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">Open Flagged for review</button>}
       <p className="mt-2 text-sm text-slate-600">Live oversight of applications and referrals. Automatic delivery needs no PESO approval. Refreshes every 10 seconds.</p>
-      {settings && <label className="my-4 flex items-center gap-2 rounded-xl border border-cyan-200 bg-cyan-50 p-3 text-sm font-semibold"><input type="checkbox" checked={settings.automaticReferral} disabled={busy} onChange={(event) => settingsChange(event.target.checked)} />Automatic referral {settings.automaticReferral ? 'ON' : 'OFF'}</label>}
-      {settings && <label className="my-3 flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm"><input type="checkbox" checked={settings.lowTrustRouting === true} disabled={busy} onChange={(event) => settingsChange(event.target.checked, 'lowTrustRouting')} />Send low-trust applications to admin review first</label>}
+      {settings && <label className="my-4 flex items-center gap-2 rounded-xl border border-cyan-200 bg-cyan-50 p-3 text-sm font-semibold"><input type="checkbox" checked={settings.automaticReferral} disabled={busy || !can('settings')} onChange={(event) => settingsChange(event.target.checked)} />Automatic referral {settings.automaticReferral ? 'ON' : 'OFF'}</label>}
+      {settings && <label className="my-3 flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm"><input type="checkbox" checked={settings.lowTrustRouting === true} disabled={busy || !can('settings')} onChange={(event) => settingsChange(event.target.checked, 'lowTrustRouting')} />Send low-trust applications to admin review first</label>}
       {settings?.automaticReferral === false && <p role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm">Automatic referral is OFF. The manual queue is available below.</p>}
       {error && <p role="alert" className="my-2 text-rose-700">{error}</p>}{notice && <p role="status" className="my-2 text-sm text-cyan-900">{notice}</p>}
       <div className="my-4 grid gap-3 sm:grid-cols-3">
@@ -96,7 +98,7 @@ export default function AdminReferralsPage({ token, onOpenReviewQueue, ...legacy
         <td className="p-3">{[entry.applicant.firstName, entry.applicant.lastName].filter(Boolean).join(' ') || entry.applicant.name || entry.applicant.email}<p className="text-xs text-slate-500">{entry.applicant.email}</p>{entry.findings?.length > 0 && <span className="text-xs text-amber-800">Info: application burst</span>}</td>
         <td className="p-3">{entry.employer.name}<p>{entry.job.title}</p>{entry.employer.suspendedAt && <span className="text-xs text-amber-800">Receiving suspended</span>}</td>
         <td className="p-3">{statusLabel(entry.status)}<p className="text-xs">{entry.source === 'auto' ? 'Automatic' : 'Admin'}</p></td><td className="p-3">{entry.submittedAt ? new Date(entry.submittedAt).toLocaleString() : ''}</td>
-        <td className="p-3">{entry.reviewQueue === 'low_trust' && entry.status === 'pending_admin' && <div className="mb-2 flex gap-2"><button type="button" onClick={() => setAction({ type: 'approve_review', id: entry._id })} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1 text-blue-800">Approve delivery</button><button type="button" onClick={() => setAction({ type: 'decline_review', id: entry._id })} className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1 text-rose-800">Decline application</button></div>}<button type="button" onClick={async () => { try { setDetail(await request(`${base}/applications/${entry._id}`)) } catch (err) { setError(err.message) } }} className="mr-2 rounded-lg border border-slate-300 px-3 py-1">Timeline</button>{entry.referralId && !['withdrawn', 'withdrawn_by_admin'].includes(entry.status) && <button type="button" onClick={() => { setError(''); setAction({ type: 'pullback', id: entry._id }) }} className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1">Pull back</button>}</td>
+        <td className="p-3">{can('decide') && entry.reviewQueue === 'low_trust' && entry.status === 'pending_admin' && <div className="mb-2 flex gap-2"><button type="button" onClick={() => setAction({ type: 'approve_review', id: entry._id })} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1 text-blue-800">Approve delivery</button><button type="button" onClick={() => setAction({ type: 'decline_review', id: entry._id })} className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1 text-rose-800">Decline application</button></div>}<button type="button" onClick={async () => { try { setDetail(await request(`${base}/applications/${entry._id}`)) } catch (err) { setError(err.message) } }} className="mr-2 rounded-lg border border-slate-300 px-3 py-1">Timeline</button>{can('decide') && entry.referralId && !['withdrawn', 'withdrawn_by_admin'].includes(entry.status) && <button type="button" onClick={() => { setError(''); setAction({ type: 'pullback', id: entry._id }) }} className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1">Pull back</button>}</td>
       </tr>)}</tbody></table></div>
       {!data.items.length && <p className="my-4 text-sm text-slate-600">No applications match these filters.</p>}
       <Pagination page={page} pageSize={limit} totalItems={data.total} onPageChange={setPage} onPageSizeChange={(size) => { setLimit(size); setPage(1) }} itemLabel="applications" />
@@ -109,11 +111,11 @@ export default function AdminReferralsPage({ token, onOpenReviewQueue, ...legacy
         <label>Job for referral<select className={`${control} block w-full`} value={manual.jobId} onChange={(event) => setManual({ ...manual, jobId: event.target.value })}><option value="">Select approved job</option>{options.jobs.filter((entry) => entry.status === 'approved' && (!selectedEmployer || entry.createdBy === selectedEmployer.email)).map((entry) => <option key={entry._id} value={entry._id}>{entry.title}</option>)}</select></label>
         <label>Applicant for referral<select className={`${control} block w-full`} value={manual.applicantId} onChange={(event) => setManual({ ...manual, applicantId: event.target.value })}><option value="">Select verified applicant</option>{options.applicants.map((entry) => <option key={entry._id} value={entry._id}>{[entry.profile?.firstName, entry.profile?.lastName].filter(Boolean).join(' ') || entry.profile?.name || entry.email}</option>)}</select></label>
       </div>
-      <div className="mt-3 flex flex-wrap gap-3"><button type="button" disabled={!manual.employerId || busy} onClick={() => { setError(''); setAction({ type: selectedEmployer?.receivingApplicantsSuspendedAt ? 'resume' : 'suspend', id: manual.employerId }) }} className="rounded-full border border-amber-300 bg-amber-50 px-4 py-2 text-sm">{selectedEmployer?.receivingApplicantsSuspendedAt ? 'Resume receiving applicants' : 'Suspend receiving applicants'}</button><button type="button" disabled={!manual.jobId || !manual.applicantId || busy} onClick={() => { setError(''); setAction({ type: 'manual' }) }} className="rounded-full border border-cyan-300 bg-cyan-50 px-4 py-2 text-sm">Create referral</button></div>
+      <div className="mt-3 flex flex-wrap gap-3"><button type="button" disabled={!manual.employerId || busy || !can('decide')} onClick={() => { setError(''); setAction({ type: selectedEmployer?.receivingApplicantsSuspendedAt ? 'resume' : 'suspend', id: manual.employerId }) }} className="rounded-full border border-amber-300 bg-amber-50 px-4 py-2 text-sm">{selectedEmployer?.receivingApplicantsSuspendedAt ? 'Resume receiving applicants' : 'Suspend receiving applicants'}</button><button type="button" disabled={!manual.jobId || !manual.applicantId || busy} onClick={() => { setError(''); setAction({ type: 'manual' }) }} className="rounded-full border border-cyan-300 bg-cyan-50 px-4 py-2 text-sm">Create referral</button></div>
     </section>
-    <AdminReputationSettings token={token} />
+    {can('viewSettings') && <AdminReputationSettings token={token} />}
     <AdminReputationReviews token={token} />
-    <AdminApplicationWorkflow token={token} />
+    {can('decide') && <AdminApplicationWorkflow token={token} />}
     {settings?.automaticReferral === false && <PesoReferralPanel token={token} {...legacyProps} />}
     {detail && <Modal onClose={() => setDetail(null)} labelledBy="application-timeline-title"><div className="flex justify-between gap-3"><h2 id="application-timeline-title" className="text-xl font-bold">Application timeline</h2><button type="button" onClick={() => setDetail(null)}>Close</button></div><p className="mt-3">{detail.applicant.email} · {detail.job.title} · {statusLabel(detail.status)} · {detail.source}</p><ApplicationTimeline history={detail.history} /></Modal>}
     {action && <ConfirmDialog title={{ pullback: 'Pull back application', suspend: 'Suspend employer from receiving applicants', resume: 'Resume receiving applicants', manual: 'Create referral', approve_review: 'Approve application delivery', decline_review: 'Decline application' }[action.type]} note="This action is recorded in the audit history. A reason is required." requireReason reasonMinLength={1} busy={busy} error={error} onConfirm={confirmAction} onCancel={() => setAction(null)} />}

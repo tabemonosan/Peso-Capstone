@@ -1,5 +1,6 @@
+import { AdminAccessContext } from '../components/AdminAccessContext'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render as rtlRender, screen, waitFor, within } from '@testing-library/react'
 import ApplicantAccountSettings from '../components/ApplicantAccountSettings'
 import AdminAccountDeletionRequests from '../components/AdminAccountDeletionRequests'
 
@@ -50,6 +51,7 @@ describe('account deletion screens', () => {
   it('requires admin approval confirmation and refreshes the queue after success', async () => {
     let reviewed = false
     fetch.mockImplementation(async (_url, options) => {
+      if (_url.includes('/review-notes')) return response({ items: [], total: 0 })
       if (options?.method === 'PUT') { reviewed = true; return response({ ...record, status: 'approved' }) }
       return response({ items: reviewed ? [] : [record], total: reviewed ? 0 : 1 })
     })
@@ -62,7 +64,7 @@ describe('account deletion screens', () => {
   })
 
   it('requires a reason to decline an account deletion request', async () => {
-    fetch.mockResolvedValue(response({ items: [record], total: 1 }))
+    fetch.mockImplementation(async url => response(url.includes('/review-notes') ? { items: [], total: 0 } : { items: [record], total: 1 }))
     render(<AdminAccountDeletionRequests token="admin-token" />)
     fireEvent.click(await screen.findByRole('button', { name: 'Decline request' }))
     const dialog = screen.getByRole('alertdialog')
@@ -71,3 +73,6 @@ describe('account deletion screens', () => {
     await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Confirm decline' })).toBeEnabled())
   })
 })
+
+// These existing workflows exercise privileges now reserved for Super Admin.
+function render(ui, options) { return rtlRender(<AdminAccessContext.Provider value={{ adminLevel: 'super_admin' }}>{ui}</AdminAccessContext.Provider>, options) }

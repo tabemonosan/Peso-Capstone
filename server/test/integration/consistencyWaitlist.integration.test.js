@@ -30,7 +30,7 @@ beforeEach(async () => {
   await clearDb()
   vi.unstubAllEnvs()
   reading.text = sampleText('1992-02-03'); reading.confidence = 95; reading.fail = false; reading.qr = ''
-  admin = await Admin.create({ email: 'waitlist-admin@example.test', passwordHash: 'unused' })
+  admin = await Admin.create({ adminLevel: 'super_admin', email: 'waitlist-admin@example.test', passwordHash: 'unused' })
   applicant = await Applicant.create({ email: 'waitlist-sample@example.test', passwordHash: await bcrypt.hash('SamplePassword123!', 4), emailVerified: true, profile: { firstName: 'Sample', lastName: 'Example', dob: '1990-01-01', location: 'Albay', nsrp: validNsrpAnswers({ firstName: 'Sample', surname: 'Example', dob: '1990-01-01', gsisSss: '1234567890' }) }, verificationDocuments: Object.fromEntries(['nsrpForm', 'birthCertificate', 'validId1'].map(key => [key, { uploads: 1, versions: [{ version: 1, status: 'pending', mimetype: key === 'nsrpForm' ? 'application/pdf' : 'image/png', originalName: 'SAMPLE.png', uploadedAt: new Date(), quality: { passed: true }, declaredDetails: { idType: 'SSS', number: '1234567890', copyType: 'PSA copy on security paper' } }] }])) })
   for (const slot of ['birthCertificate', 'validId1']) await storeDocumentFile(applicant._id, slot, 1, 'front', { mimetype: 'image/png', buffer: image, size: image.length })
   await nsrpAutomation.updateSettings({ automaticApproval: false }, admin.email)

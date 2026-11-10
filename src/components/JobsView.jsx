@@ -1,3 +1,4 @@
+import { useAdminAccess } from './AdminAccessContext'
 import { PH_LOCATIONS, applicantCityName, parseStoredLocation } from '../../shared/phLocations.js'
 import { EMPLOYMENT_TYPES, formatSalary, formatLocation, mapEmploymentType, normalizeJobPosting } from '../../shared/jobPosting.js'
 import { jobSkillMatchCount } from '../../shared/jobSkills.js'
@@ -5,6 +6,7 @@ import { rankJobApplicants } from '../../shared/applicantSuitability.js'
 import ApplicantSuitability from './ApplicantSuitability'
 import JobLanguageRequirements from './JobLanguageRequirements'
 import JobModerationSettings from './JobModerationSettings'
+import AdminReviewNotes from './AdminReviewNotes'
 import JobScreeningSummary from './JobScreeningSummary'
 import { showNotice } from '../utils/portalNotice'
 import ApplicantJobBrowser from './ApplicantJobBrowser'
@@ -75,6 +77,7 @@ function JobsView({
   applicantSkills = [],
   onGoToProfile,
 }) {
+  const { can } = useAdminAccess()
   const [selectedApprovedJob, setSelectedApprovedJob] = useState(null)
   const [reviewJob, setReviewJob] = useState(null)
   const [reviewSubmitting, setReviewSubmitting] = useState(false)
@@ -329,7 +332,7 @@ function JobsView({
   return (
     <section className={`${activeRole === 'Admin' ? 'admin-jobs-card portal-card' : activeRole === 'Applicant' ? 'applicant-jobs-card portal-card' : 'employer-jobs-card'} rounded-2xl border ${activeRole === 'Employer' ? 'border-slate-300 bg-white text-black' : 'border-slate-800 bg-slate-900/70'} p-6`}>
       <h2 className={`text-xl font-semibold ${activeRole === 'Employer' ? 'text-black' : 'text-white'}`}>Job Offers</h2>
-      {activeRole === 'Admin' && <JobModerationSettings token={token} />}
+      {activeRole === 'Admin' && can('viewSettings') && <JobModerationSettings token={token} />}
       <p className={`mt-3 ${activeRole === 'Employer' ? 'text-black' : 'text-slate-400'}`}>{activeRole === 'Applicant' ? 'Find jobs that fit you.' : 'View postings and manage approvals.'}</p>
 
       {jobLoading && <p className="mt-4 text-slate-300">Loading jobs…</p>}
@@ -828,7 +831,7 @@ function JobsView({
             {reviewError && <p role="alert" className="mt-3 rounded-lg border border-rose-300 bg-rose-50 p-3 text-sm text-rose-800">{reviewError}</p>}
             <div className="mt-5 flex flex-wrap justify-end gap-2">
               <button type="button" onClick={closeReviewJob} disabled={reviewSubmitting} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold disabled:opacity-50">Close</button>
-              {reviewJob.status === 'pending' && (
+              {can('decide') && reviewJob.status === 'pending' && (
                 <>
                   <button
                     type="button"
@@ -849,6 +852,7 @@ function JobsView({
                 </>
               )}
             </div>
+            {activeRole === 'Admin' && <AdminReviewNotes token={token} entityType="JobPosting" entityId={reviewJob._id} />}
             {jobReviewConfirm && (
               <ConfirmDialog
                 title={jobReviewConfirm === 'approved' ? `Approve "${reviewJob.title}"?` : `Decline "${reviewJob.title}"?`}

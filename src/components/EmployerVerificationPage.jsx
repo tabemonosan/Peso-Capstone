@@ -1,3 +1,4 @@
+import CorrectionGuidance from './CorrectionGuidance'
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { API_URL } from "../config"
 import { digits, mobileInput, validMobile, validLandline, MOBILE_ERROR, LANDLINE_ERROR } from '../../shared/employerNumbers.js'
@@ -287,6 +288,7 @@ export default function EmployerVerificationPage({ token, onStatusChange }) {
             <StatusBadge status={info.verificationStatus} />
           </div>
           <p className="mt-3 text-sm text-rose-800">Admin reason: {info.verificationReason || "Please update your NSRP Form 2 and resubmit it for review."}</p>
+          <CorrectionGuidance employer canReplace={canReplace} />
           {canReplace && (
             <button type="button" onClick={() => openEditor("online")} className="mt-4 rounded-lg border border-rose-400 bg-white px-4 py-2 text-sm font-semibold text-rose-900">
               Update NSRP Form 2

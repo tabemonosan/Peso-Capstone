@@ -6,6 +6,8 @@ import { fetchWithTimeout } from '../utils/fetchWithTimeout'
 import { DOCUMENT_LABELS, openFlags } from '../../shared/verification.js'
 import Modal from './Modal'
 import ConfirmDialog from './ConfirmDialog'
+import { useAdminAccess } from './AdminAccessContext'
+import AdminReviewNotes from './AdminReviewNotes'
 import VerificationDocsReviewModal from './VerificationDocsReviewModal'
 import AdminDocumentImageViewer from './AdminDocumentImageViewer'
 import ManualDocumentChecklist from './ManualDocumentChecklist'
@@ -33,6 +35,7 @@ export function VerificationQueueBadge({ token }) {
 }
 
 export default function AdminDocumentVerification({ token, queue = 'flagged' }) {
+  const { can } = useAdminAccess()
   const [filters, setFilters] = useState({ docKey: '', from: '', to: '', checked: '', sort: 'at', order: 'asc', waitlisted: '' })
   const [page, setPage] = useState(1)
   const [data, setData] = useState({ items: [], total: 0, limit: 25 })
@@ -72,7 +75,7 @@ export default function AdminDocumentVerification({ token, queue = 'flagged' }) 
     } catch (err) { setError(err.message) }
     finally { setBusy(false) }
   }
-  const actionButton = (item, action, ruleId) => <button type="button" className={`${control} text-cyan-800`} onClick={() => { setError(''); setChecklist({}); setConfirmation({ item, action, ruleId }) }}>{labels[action]}</button>
+  const actionButton = (item, action, ruleId) => can('decide') && <button type="button" className={`${control} text-cyan-800`} onClick={() => { setError(''); setChecklist({}); setConfirmation({ item, action, ruleId }) }}>{labels[action]}</button>
   return <section className="rounded-xl border border-slate-200 bg-white p-4 text-slate-900">
     <h1 className="text-xl font-semibold">{queue === 'auto' ? 'Auto-approved' : 'Flagged for review'}</h1>
     {queue !== 'auto' && <div className="my-4"><AdminReputationReviews token={token} /></div>}
@@ -123,6 +126,7 @@ export default function AdminDocumentVerification({ token, queue = 'flagged' }) 
       {selected.explanation && <div className="my-3"><h3 className="font-semibold">Explanation</h3><p>{selected.explanation.status} · {selected.explanation.category}</p><p>{selected.explanation.note}</p></div>}
       {selected.findings.some(f => f.ruleId === 'agency_manual_license') && <p className="rounded border border-cyan-200 bg-cyan-50 p-2 text-sm">Verify the agency license manually.</p>}
       <h3 className="mt-4 font-semibold">Audit history</h3>{selected.audit.map((entry, index) => <p key={index} className="my-2 text-sm">{entry.action} · {entry.by} · {new Date(entry.at).toLocaleString()} · {entry.reason}</p>)}
+      <AdminReviewNotes token={token} entityType={selected.role === 'Employer' ? 'EmployerRequest' : 'Applicant'} entityId={selected.role === 'Employer' ? selected.recordId : selected.accountId} />
       <button type="button" className={`${control} mt-4`} onClick={() => setSelected(null)}>Close review details</button>
     </Modal>}
     {viewer && <VerificationDocsReviewModal applicant={viewer} token={token} readOnly onClose={() => setViewer(null)} />}

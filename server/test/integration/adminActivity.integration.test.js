@@ -14,7 +14,7 @@ beforeAll(startTestDb, 180000)
 afterAll(stopTestDb)
 beforeEach(async () => {
   await clearDb()
-  admin = await Admin.create({ email: 'activity-admin@example.test', passwordHash: await bcrypt.hash('AuditPassword123!', 4) })
+  admin = await Admin.create({ adminLevel: 'super_admin', email: 'activity-admin@example.test', passwordHash: await bcrypt.hash('AuditPassword123!', 4) })
 })
 
 describe('admin activity logs', () => {
@@ -55,7 +55,7 @@ describe('admin activity logs', () => {
   })
   it('rejects anonymous or removed admins, and exposes no log mutation endpoints', async () => {
     await request(app).get('/api/admin/activity-logs').expect(403)
-    await request(app).get('/api/admin/activity-logs').set(auth('Admin', 'removed@example.test')).expect(403)
+    await request(app).get('/api/admin/activity-logs').set(auth('Admin', 'removed@example.test')).expect(401)
     expect(await ActivityLog.countDocuments()).toBe(0)
     await request(app).post('/api/admin/activity-logs').set(auth()).send({ action: 'Forged entry' }).expect(404)
     await request(app).delete('/api/admin/activity-logs/000000000000000000000001').set(auth()).expect(404)

@@ -1,3 +1,4 @@
+import CorrectionGuidance from './CorrectionGuidance'
 import { useState } from "react"
 import { API_URL } from "../config"
 import { showNotice } from '../utils/portalNotice'
@@ -184,7 +185,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated, guid
           const staffReviewOnly = (info.consistency?.issues || []).some(issue => issue.document === doc.docKey && issue.chancesLeft === null)
           const pendingEditable = ['under_review', 'waitlisted'].includes(info.verificationStatus) && !staffReviewOnly && (doc.status === 'pending' || doc.referenceOnly)
           const locked = (doc.referenceOnly ? doc.locked : doc.status === "approved") && !flagged
-          const canReplace = !locked && (["rejected", "needs_resubmission", "missing"].includes(doc.status) || flagged || pendingEditable) && doc.uploadsRemaining !== 0 && hasChances
+          const canReplace = !locked && !staffReviewOnly && (["rejected", "needs_resubmission", "missing"].includes(doc.status) || flagged || pendingEditable) && doc.uploadsRemaining !== 0 && hasChances
           const idType = pendingIdType[doc.docKey] ?? doc.idType ?? ''
           return (
             <li key={doc.docKey} className="min-w-0 rounded-xl border border-slate-200 bg-white p-4 text-sm sm:p-5">
@@ -237,6 +238,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated, guid
               )}
               {!doc.referenceOnly && (needsReview || review?.reason || doc.status === 'pending') && <p className={`mt-3 rounded-lg px-3 py-2 text-xs leading-relaxed ${needsReview ? 'bg-amber-50 text-amber-900' : 'bg-slate-50 text-slate-600'}`}>{scanning ? 'Scanning your upload and comparing it with your NSRP. Results update automatically.' : review?.reason || (needsReview ? 'PESO will review this document. You can upload a clearer copy or explain a difference.' : 'Your document is being checked.')}</p>}
               {needsReview && ['nsrpForm', 'birthCertificate', 'validId1', 'validId2'].includes(doc.docKey) && doc.latest && <button type="button" onClick={() => setExplanationDoc(doc.docKey)} className="mt-2 rounded border border-slate-300 bg-white px-3 py-1 text-xs text-cyan-800">Explain a difference</button>}
+              {needsReview && <CorrectionGuidance docKey={doc.docKey} canReplace={canReplace} remaining={doc.uploadsRemaining} />}
               {locked && <p className="mt-2 text-xs text-green-700">{doc.referenceOnly ? 'Request a correction to update your NSRP. Your identity documents will be checked again.' : 'Request a correction if your information changes.'}</p>}
               {doc.correctionRequest && <p className="mt-2 rounded-lg border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">Correction requested: {doc.correctionRequest.reason}. Waiting for PESO review.</p>}
               {locked && !doc.correctionRequest && <button type="button" onClick={() => { setCorrectionDoc(doc.docKey); setCorrectionReason(''); setError(''); setSuccess('') }} className="mt-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold">Request correction</button>}

@@ -1,9 +1,11 @@
+import { useAdminAccess } from './AdminAccessContext'
 import { useCallback, useEffect, useState } from "react"
 import { API_URL } from "../config"
 import Pagination from "./Pagination"
 import { usePagination } from "../hooks/usePagination"
 
 export default function AdminJobTitlesPage({ token, onChanged }) {
+  const { can } = useAdminAccess()
   const [categories, setCategories] = useState([])
   const titlesPagination = usePagination({ syncUrl: false })
   const [name, setName] = useState("")
@@ -95,7 +97,7 @@ export default function AdminJobTitlesPage({ token, onChanged }) {
           Category
           <input value={category} onChange={(event) => setCategory(event.target.value)} maxLength={60} required className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" />
         </label>
-        <button type="submit" disabled={busy} className="self-end rounded-xl bg-cyan-500 px-4 py-2 font-semibold text-slate-950 disabled:opacity-50">
+        <button type="submit" disabled={busy || !can('decide')} className="self-end rounded-xl bg-cyan-500 px-4 py-2 font-semibold text-slate-950 disabled:opacity-50">
           Add title
         </button>
       </form>
@@ -108,7 +110,7 @@ export default function AdminJobTitlesPage({ token, onChanged }) {
               {group.titles.map((title) => (
                 <li key={title.id} className="flex items-center justify-between gap-3 px-3 py-2">
                   <span>{title.name}</span>
-                  <button type="button" disabled={busy} onClick={() => removeTitle(title.id)} className="rounded-lg border border-rose-300 px-3 py-1 text-sm font-medium text-rose-700 disabled:opacity-50">
+                  <button type="button" disabled={busy || !can('decide')} onClick={() => removeTitle(title.id)} className="rounded-lg border border-rose-300 px-3 py-1 text-sm font-medium text-rose-700 disabled:opacity-50">
                     Delete
                   </button>
                 </li>

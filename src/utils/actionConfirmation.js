@@ -9,6 +9,7 @@ export function registerActionConfirmation(handler) {
 
 // These requests check data or update passive UI state; they are not business actions.
 const passive = [
+  /^\/api\/auth\/password-recovery\/verify\/?$/,
   /^\/api\/login\/?$/, /^\/api\/signup\/email-code\/verify\/?$/, /^\/api\/auth\/verify-email\/?$/,
   /^\/api\/nsrp\/(?:validate-signup|preview-signup|preview)\/?$/,
   /^\/api\/employer-registration\/preview\/?$/, /^\/api\/signup\/(?:check-documents|nsrp-import)\/?$/,
@@ -34,7 +35,8 @@ export function mutationDescription(input, options = {}) {
   else if (/\/jobs\/[^/]+\/?$/.test(path) && method === 'PUT') { title = 'Save job posting changes?'; note = 'The changes to this job posting will be saved.'; label = 'Confirm save' }
   else if (/\/ratings\/?$/.test(path)) { title = 'Submit this rating?'; note = 'Your rating will be recorded and may affect the recipient’s reputation.'; label = 'Confirm rating' }
   else if (/\/(?:resume|file|requirements|employer-requirements|nsrp-verification)\/?$/.test(path) || options.body instanceof FormData) { title = 'Submit these files and details?'; note = 'The selected files and entered details will be uploaded. Continue?'; label = 'Confirm upload' }
-  else if (/\/email-code\/?$|\/resend-verification\/?$/.test(path)) { title = 'Send a verification email?'; note = 'A verification email will be sent to the address you entered.'; label = 'Confirm send' }
+  else if (/\/email-code\/?$|\/resend-verification\/?$|\/password-recovery\/request\/?$/.test(path)) { title = 'Send a verification email?'; note = 'A verification email will be sent to the address you entered.'; label = 'Confirm send' }
+  else if (/\/password-recovery\/reset\/?$/.test(path)) { title = 'Reset your password?'; note = 'Your password will be changed and existing sessions will end.'; label = 'Confirm reset' }
   else if (/\/status\/?$|\/respond\/?$|\/review\/?$/.test(path)) { title = 'Confirm this decision?'; note = 'This will record your decision and update the record.'; label = 'Confirm decision' }
   return { title, note, confirmLabel: label, confirmTone: method === 'DELETE' ? 'danger' : 'primary' }
 }

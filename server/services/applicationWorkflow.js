@@ -213,13 +213,14 @@ export function createApplicationWorkflow({ Applicant, Employer, JobPosting, Job
     const reason = reasonText(body.reason); id(body.applicantId)
     const { rules } = await loadReputationSettings()
     if (!await Applicant.exists({ _id: body.applicantId, deletedAt: { $exists: false } })) fail('APPLICANT_UNAVAILABLE', 'Applicant unavailable.', 403)
-    let key, confirmedMeeting, confirmedHire
+    let key, confirmedMeeting, confirmedHire, attendanceConfirmed = false
     if (body.type === 'attended_interview' || body.type === 'late_cancellation') {
       const meeting = await Interview.findOne({ _id: id(body.referenceId), applicantId: body.applicantId }).lean()
       if (!meeting) fail('INTERVIEW_UNAVAILABLE', 'Interview unavailable.')
       if (body.type === 'attended_interview') {
         if (!['held', 'attended'].includes(meeting.status)) fail('INTERVIEW_NOT_HELD', 'The employer must first record the interview as held.')
-        await Interview.updateOne({ _id: meeting._id }, { $set: { status: 'attended' } })
+        const changed = await Interview.updateOne({ _id: meeting._id, status: 'held' }, { $set: { status: 'attended' } })
+        attendanceConfirmed = changed.modifiedCount === 1
       } else if (meeting.status !== 'cancelled' || meeting.cancelledBy !== 'Applicant' || !meeting.cancelledAt || +meeting.scheduledAt - +meeting.cancelledAt >= rules.lateCancellationHours * 3600000 || +meeting.scheduledAt < +meeting.cancelledAt) fail('NOT_LATE_CANCELLATION', `This is not an applicant cancellation under ${rules.lateCancellationHours} hours before the interview.`)
       key = `${body.type}:${meeting._id}`
       confirmedMeeting = meeting
@@ -232,11 +233,11 @@ export function createApplicationWorkflow({ Applicant, Employer, JobPosting, Job
     else fail('INVALID_TRUST_EVENT', 'Confirm a supported event. No-shows must use report review.', 403)
     const source = confirmedMeeting || confirmedHire
     const applied = await recordTrustEvent(Applicant, { applicantId: body.applicantId, key, type: body.type, ...(body.type === 'manual_adjustment' ? { delta: body.delta } : {}), applicationId: source?.referralId, employerId: source?.employerId, by: admin.email, reason, at: now() })
-    if (applied && confirmedMeeting) {
+    if ((applied || attendanceConfirmed) && confirmedMeeting) {
       const referral = await Referral.findById(confirmedMeeting.referralId).lean()
       if (referral) await event(referral, body.type === 'attended_interview' ? 'peso_confirmed_interview_attendance' : 'peso_confirmed_late_cancellation', body.type === 'attended_interview' ? 'interview_attended' : 'interview_cancelled', 'PESO')
     }
-    if (applied) await audit({ action: 'applicant_event_confirmed', applicantId: new mongoose.Types.ObjectId(body.applicantId), eventKey: key, type: body.type, by: admin.email, reason })
+    if (applied || attendanceConfirmed) await audit({ action: 'applicant_event_confirmed', applicantId: new mongoose.Types.ObjectId(body.applicantId), eventKey: key, type: body.type, by: admin.email, reason })
     if (applied) await notify({ recipient: { id: body.applicantId, role: 'Applicant' }, type: 'reputation_updated', title: 'Reputation points updated', message: 'PESO confirmed a reputation event. Open My reputation to view your points and history.', link: '/my-reputation' })
     return { ok: true, applied }
   }

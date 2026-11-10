@@ -1,3 +1,4 @@
+import { useAdminAccess } from './AdminAccessContext'
 import { useCallback, useEffect, useState } from 'react'
 import { API_URL } from '../config'
 import ConfirmDialog from './ConfirmDialog'
@@ -15,6 +16,7 @@ export function NsrpAutomationBadge({ decision }) {
 }
 
 export function AdminNsrpAccountDecision({ token, accountId, role, onChanged, compact = false }) {
+  const { can } = useAdminAccess()
   const [decision, setDecision] = useState(null)
   const [confirm, setConfirm] = useState(false)
   const [error, setError] = useState('')
@@ -38,13 +40,14 @@ export function AdminNsrpAccountDecision({ token, accountId, role, onChanged, co
   }
   return <div>
     <NsrpAutomationBadge decision={decision} />
-    {!compact && decision?.result === 'Auto-approved' && <button type="button" className="rounded-lg border border-amber-400 bg-amber-50 px-3 py-1 text-sm text-amber-900" onClick={() => { setError(''); setConfirm(true) }}>Revoke auto-approval</button>}
+    {can('decide') && !compact && decision?.result === 'Auto-approved' && <button type="button" className="rounded-lg border border-amber-400 bg-amber-50 px-3 py-1 text-sm text-amber-900" onClick={() => { setError(''); setConfirm(true) }}>Revoke auto-approval</button>}
     {confirm && <ConfirmDialog title="Revoke auto-approval" note="Return this NSRP to pending review? The user will be notified." requireReason reasonMinLength={1} confirmLabel="Confirm revoke" busy={busy} error={error} onConfirm={revoke} onCancel={() => setConfirm(false)} />}
     {error && <p role="alert" className="text-sm text-rose-700">{error}</p>}
   </div>
 }
 
 export default function AdminNsrpAutomation({ token, bannerOnly = false }) {
+  const { can } = useAdminAccess()
   const [counts, setCounts] = useState(null)
   useEffect(() => {
     let active = true
@@ -106,7 +109,7 @@ export default function AdminNsrpAutomation({ token, bannerOnly = false }) {
     {counts && <p className="my-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">Auto-approved: {counts.automatic || 0} · Flagged: {counts.flagged || 0} · Audit samples: {counts.samples || 0} · Revoked: {counts.revoked || 0}</p>}
     {!bannerOnly && <>
       <h2 className="mt-4 text-xl font-semibold">Verification rules</h2>
-      {settings && <form onSubmit={save} className="my-4 grid gap-4 sm:grid-cols-2">
+      {settings && <form onSubmit={save}><fieldset disabled={!can('settings')} className="my-4 grid gap-4 sm:grid-cols-2">
         <label><input type="checkbox" checked={settings.waitlistOnMismatch} onChange={event => setSettings({ ...settings, waitlistOnMismatch: event.target.checked })} /> Waitlist on mismatch</label>
         <label>Correction chances per flagged document<input type="number" min="1" max="5" required className={`${control} block`} value={settings.waitlistAttempts} onChange={event => setSettings({ ...settings, waitlistAttempts: event.target.value })} /></label>
         <label>PESO contact information<textarea required maxLength={300} className={`${control} block w-full`} value={settings.pesoContact} onChange={event => setSettings({ ...settings, pesoContact: event.target.value })} /></label>
@@ -124,7 +127,7 @@ export default function AdminNsrpAutomation({ token, bannerOnly = false }) {
         <label>Audit sample percentage<input type="number" min="0" max="100" required className={`${control} block`} value={settings.auditPercent} onChange={(event) => setSettings({ ...settings, auditPercent: event.target.value })} /></label>
         <label>Rate guard per IP and mobile / 24 hours<input type="number" min="1" max="5" required className={`${control} block`} value={settings.rateLimit} onChange={(event) => setSettings({ ...settings, rateLimit: event.target.value })} /></label>
         <button disabled={busy} type="submit" className="rounded-lg border border-cyan-500 bg-cyan-50 px-4 py-2">Save verification rules</button>
-      </form>}
+      </fieldset></form>}
       {notice && <p role="status">{notice}</p>}
       <details><summary>Settings audit history</summary>{settings?.history?.map((entry, index) => <p key={index} className="my-1 text-xs">{new Date(entry.at).toLocaleString()} · {entry.by} · {JSON.stringify(entry.changes)}</p>)}</details>
       <h2 className="mt-6 text-xl font-semibold">Auto-approval log</h2>

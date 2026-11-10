@@ -25,7 +25,7 @@ beforeEach(async () => {
   await clearDb()
   applicant = await Applicant.create({ email: 'recovery@applicant.test', passwordHash: 'unused', emailVerified: true, verificationStatus: 'approved', profile: { firstName: 'Test', lastName: 'Applicant' } })
   employer = await Employer.create({ email: 'recovery@employer.test', passwordHash: 'unused', emailVerified: true, verificationStatus: 'approved', companyName: 'Test employer' })
-  admin = await Admin.create({ email: 'recovery@admin.test', passwordHash: 'unused' })
+  admin = await Admin.create({ adminLevel: 'super_admin', email: 'recovery@admin.test', passwordHash: 'unused' })
 })
 describe('reputation recovery and reviews', () => {
   it.each(['reverse', 'keep', 'reduce'])('records a %s decision, its points, private audit and neutral applicant notification', async action => {

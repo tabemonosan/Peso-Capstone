@@ -1,4 +1,5 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { AdminAccessContext } from '../components/AdminAccessContext'
+import { render as rtlRender, screen, fireEvent, waitFor } from '@testing-library/react'
 import { beforeEach, afterEach, it, expect, vi } from 'vitest'
 import AdminNsrpAutomation, { AdminNsrpAccountDecision } from '../components/AdminNsrpAutomation'
 import { VERIFICATION_DEFAULTS } from '../../shared/verification.js'
@@ -44,3 +45,6 @@ it('requires confirmation and a reason before revoking an automatic approval', a
   fireEvent.click(confirm)
   await waitFor(() => expect(fetchMock.mock.calls.some(([url, options]) => url.endsWith('/revoke') && JSON.parse(options.body).reason === 'Supervisor review requested')).toBe(true))
 })
+
+// These existing workflows exercise privileges now reserved for Super Admin.
+function render(ui, options) { return rtlRender(<AdminAccessContext.Provider value={{ adminLevel: 'super_admin' }}>{ui}</AdminAccessContext.Provider>, options) }

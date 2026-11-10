@@ -1,4 +1,5 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { AdminAccessContext } from '../components/AdminAccessContext'
+import { cleanup, fireEvent, render as rtlRender, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AdminReputationSettings, AdminReputationReviews, AdminReputationAccount } from '../components/AdminReputation'
 import { REPUTATION_DEFAULTS } from '../../shared/reputation.js'
@@ -59,3 +60,6 @@ it('shows the private admin-only count and supports reversing a ledger event', a
   await waitFor(() => expect(screen.getByText(/0 confirmed no-shows/)).toBeInTheDocument())
   expect(screen.queryByRole('button', { name: 'Reverse event' })).not.toBeInTheDocument()
 })
+
+// These existing workflows exercise privileges now reserved for Super Admin.
+function render(ui, options) { return rtlRender(<AdminAccessContext.Provider value={{ adminLevel: 'super_admin' }}>{ui}</AdminAccessContext.Provider>, options) }

@@ -8,7 +8,7 @@ import { startTestDb, stopTestDb, clearDb, signupUploadRequest } from './helpers
 
 vi.mock('../../mailer.js', () => ({ sendEmail: vi.fn().mockResolvedValue({ ok: true }), sendVerificationEmail: vi.fn().mockResolvedValue({ ok: true }), initMailer: vi.fn() }))
 const { app } = await import('../../index.js')
-const { Applicant, Admin, AccountDeletionRequest, Notification, Referral, HireReport, DocumentFile } = await import('../../models/collections.js')
+const { Applicant, Employer, Admin, AccountDeletionRequest, Notification, Referral, HireReport, DocumentFile } = await import('../../models/collections.js')
 const JobPosting = mongoose.model('JobPosting')
 const JobApplication = mongoose.model('JobApplication')
 const email = 'returning@example.com'
@@ -23,14 +23,15 @@ afterAll(stopTestDb)
 beforeEach(async () => {
   vi.restoreAllMocks()
   await clearDb()
-  await Admin.create({ email: 'admin@example.com', passwordHash: 'unused' })
+  await Admin.create({ adminLevel: 'super_admin', email: 'admin@example.com', passwordHash: 'unused' })
   applicant = await Applicant.create({ email, emailNormalized: email, passwordHash: await bcrypt.hash('OldPass123!', 4), emailVerified: true, verificationStatus: 'approved', profile: { firstName: 'Juan', lastName: 'Cruz', location: 'Legazpi City, Albay' }, verificationDocuments: Object.fromEntries(['nsrpForm', 'birthCertificate', 'validId1'].map((key) => [key, { versions: [{ version: 1, status: 'approved' }] }])) })
 })
 
 describe('applicant account deletion requests', () => {
   it('requires the owner password, prevents duplicate requests, and lets the owner cancel', async () => {
+    const employer = await Employer.create({ email: 'other-employer@example.com', passwordHash: 'unused' })
     expect((await request(app).post('/api/account-deletion/requests').send({ password: 'OldPass123!' })).status).toBe(401)
-    expect((await request(app).post('/api/account-deletion/requests').set(auth('Employer')).send({ password: 'OldPass123!' })).status).toBe(403)
+    expect((await request(app).post('/api/account-deletion/requests').set(auth('Employer', { email: employer.email })).send({ password: 'OldPass123!' })).status).toBe(403)
     expect((await request(app).post('/api/account-deletion/requests').set(auth()).send({ password: 'wrong' })).status).toBe(403)
     const sent = await requestDeletion()
     expect(sent.status).toBe(201)

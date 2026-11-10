@@ -1,4 +1,11 @@
 import AdminReportMaker from './components/AdminReportMaker'
+import { AdminAccessContext } from './components/AdminAccessContext'
+import { adminCan, adminLevel, ADMIN_LABELS, adminViewAllowed } from '../shared/adminAccess.js'
+import InternalAccountsPage from './components/InternalAccountsPage'
+import InternalPasswordChange from './components/InternalPasswordChange'
+import ForgotPasswordModal from './components/ForgotPasswordModal'
+import AdminEmailDelivery from './components/AdminEmailDelivery'
+import AdminReviewNotes from './components/AdminReviewNotes'
 import { partitionJobArchive } from '../shared/jobArchive.js'
 import PasswordInput from './components/PasswordInput'
 import SkillTagPicker from './components/SkillTagPicker'
@@ -91,6 +98,12 @@ const navigationByRole = {
     { id: "requests", label: "Employer Requests" },
     { id: "account-deletions", label: "Account Deletions" },
     { id: "activity-logs", label: "Activity Logs" },
+    { id: 'internal-accounts', label: 'Internal Accounts' },
+    { id: 'review-notes', label: 'Review Notes' },
+    { id: 'email-delivery', label: 'Email Delivery' },
+    { id: 'verification-flagged', label: 'Verification Queue' },
+    { id: 'verification-auto', label: 'Auto-approved Documents' },
+    { id: 'verification-rules', label: 'Verification Settings' },
     { id: "jobs", label: "Job Postings" },
     { id: "job-titles", label: "Job Titles" },
     { id: "employment-updates", label: "Hiring Updates" },
@@ -186,6 +199,9 @@ function App() {
   const [showProfileDocuments, setShowProfileDocuments] = useState(() => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('editNsrp') === '1')
   const documentLinkHandled = useRef(false)
   const [isLoggedIn, setIsLoggedIn] = useState(false)
+  useEffect(() => {
+    if (currentUser?.role === 'Admin' && !adminViewAllowed(currentUser, activeView)) setActiveView('dashboard')
+  }, [currentUser, activeView])
   useLayoutEffect(() => {
     if (!isLoggedIn) return
     const page = document.scrollingElement || document.documentElement
@@ -284,6 +300,7 @@ const toggleSkill = (selected, skill) => {
     } catch { return 'login' }
   })
   const [showSignupRestoreNotice, setShowSignupRestoreNotice] = useState(() => authView !== 'login')
+  const [forgotPasswordOpen, setForgotPasswordOpen] = useState(false)
   useEffect(() => {
     try { sessionStorage.setItem('peso-auth-view', isLoggedIn ? 'login' : authView) } catch { /* Browser storage may be unavailable. */ }
     if (authView === 'login') setShowSignupRestoreNotice(false)
@@ -767,6 +784,7 @@ const toggleSkill = (selected, skill) => {
     try {
       const params = new URLSearchParams({
         role: 'Employer',
+        status: adminEmployerStatusFilter,
         page: String(employersPagination.page),
         limit: String(employersPagination.pageSize),
         search: debouncedDirectorySearch,
@@ -786,7 +804,7 @@ const toggleSkill = (selected, skill) => {
     } finally {
       setAdminEmployersLoading(false)
     }
-  }, [activeRole, employersPagination, debouncedDirectorySearch, employerSort.sortBy, employerSort.order])
+  }, [activeRole, employersPagination, debouncedDirectorySearch, adminEmployerStatusFilter, employerSort.sortBy, employerSort.order])
 
   useEffect(() => {
     if (activeRole === 'Admin' && activeView === 'employers') fetchAdminEmployers()
@@ -1862,6 +1880,7 @@ const toggleSkill = (selected, skill) => {
                 <button
                   type="button"
                   className="auth-link"
+                  onClick={() => setForgotPasswordOpen(true)}
                 >
                   Forgot password?
                 </button>
@@ -2064,21 +2083,24 @@ const toggleSkill = (selected, skill) => {
         </div>
       </div>
     )
+    const recovery = forgotPasswordOpen && <ForgotPasswordModal initialEmail={formData.email} onClose={() => setForgotPasswordOpen(false)} onDone={email => { setFormData(data => ({ ...data, email, password: '' })); setForgotPasswordOpen(false) }} />
     const openPublicFlow = view => {
       setAuthView(view)
       requestAnimationFrame(() => document.querySelector('.auth-page')?.scrollIntoView?.({ block: 'start' }))
     }
     return authView === 'login'
-      ? <LandingPage onApplicantSignup={() => openPublicFlow('signup')} onEmployerSignup={() => openPublicFlow('employer')} onApplicantForm={() => openPublicFlow('nsrp-applicant')} onEmployerForm={() => openPublicFlow('nsrp-employer')}>{authentication}</LandingPage>
+      ? <><LandingPage onApplicantSignup={() => openPublicFlow('signup')} onEmployerSignup={() => openPublicFlow('employer')} onApplicantForm={() => openPublicFlow('nsrp-applicant')} onEmployerForm={() => openPublicFlow('nsrp-employer')}>{authentication}</LandingPage>{recovery}</>
       : authentication
   }
 
+  if (isLoggedIn && currentUser?.role === 'Admin' && currentUser.mustChangePassword) return <InternalPasswordChange token={getToken()} email={currentUser.email} onLogout={handleLogout} onChanged={token => { localStorage.setItem('peso-token', token); setCurrentUser(user => ({ ...user, token, mustChangePassword: false })); setActiveView('dashboard') }} />
   const navItems = navigationByRole[activeRole] || []
   const employerApproved = activeRole !== 'Employer' || !currentUser?.verificationStatus || currentUser.verificationStatus === EMPLOYER_STATUS.APPROVED
   const applicantApproved = activeRole !== 'Applicant' || !currentUser?.verificationStatus || currentUser.verificationStatus === 'approved'
   const registrationIncomplete = ['Applicant', 'Employer'].includes(activeRole) && currentUser?.registration && !currentUser.registration.complete
 
   const portalNavItems = navItems.filter((item) => {
+    if (activeRole === 'Admin' && !adminViewAllowed(currentUser, item.id)) return false
     if (item.id === "profile") return false
     if (activeRole === 'Employer' && !employerApproved) return item.id === 'verification'
     if (registrationIncomplete) return item.id === 'complete'
@@ -2092,6 +2114,7 @@ const toggleSkill = (selected, skill) => {
   const showProfileTab = ["Applicant", "Employer"].includes(activeRole) && (activeRole !== 'Employer' || employerApproved)
 
   return (
+    <AdminAccessContext.Provider value={currentUser}>
     <div className={`portal-shell portal-shell-${activeRole.toLowerCase()}`}>
       <header className="portal-header">
         <div className="portal-header-inner">
@@ -2109,6 +2132,7 @@ const toggleSkill = (selected, skill) => {
             </div>
           </div>
           <div className="portal-header-actions flex items-center gap-3">
+            {activeRole === 'Admin' && <span className="rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-xs font-semibold text-cyan-900">{ADMIN_LABELS[adminLevel(currentUser)]}</span>}
             <button
               type="button"
               onClick={() => setActiveView("notify")}
@@ -2347,6 +2371,7 @@ const toggleSkill = (selected, skill) => {
                           <option value="under_review">Under review</option>
                           <option value="approved">Approved</option>
                           <option value="declined">Declined</option>
+                          <option value="needs_resubmission">Needs resubmission</option>
                         </select>
                         ) : (
                           <span aria-hidden="true" />
@@ -2485,7 +2510,7 @@ const toggleSkill = (selected, skill) => {
                                                     <button type="button" className="portal-table-action" onClick={() => handleDownloadRequirements(user.requirementsFile.requestId, user.requirementsFile.originalName)}>Download</button>
                                                   </>
                                                 )}
-                                                {user.requestId && ['pending', 'under_review'].includes(user.approvalStatus) && (
+                                                {adminCan(currentUser, 'decide') && user.requestId && ['pending', 'under_review'].includes(user.approvalStatus) && (
                                                   <>
                                                     <button type="button" className="portal-table-action" onClick={() => confirmEmployerRequest(user.requestId, user.companyName, 'approved')}>Approve</button>
                                                     <button type="button" className="portal-table-action" onClick={() => confirmEmployerRequest(user.requestId, user.companyName, 'declined')}>Decline</button>
@@ -2528,10 +2553,13 @@ const toggleSkill = (selected, skill) => {
               onReviewed={() => { fetchAdminUsers(); fetchAdminApplicants() }}
               onRestrict={(applicantId) => handleReviewApplicantVerification(applicantId, 'restricted')}
               onUnrestrict={(applicantId) => handleReviewApplicantVerification(applicantId, 'unrestrict')}
-              readOnly={Boolean(reviewDocsApplicant.deletedAt)}
+              readOnly={Boolean(reviewDocsApplicant.deletedAt) || !adminCan(currentUser, 'decide')}
             />
           )}
           {activeRole === 'Admin' && activeView === 'report-maker' && <AdminReportMaker token={getToken()} />}
+          {activeRole === 'Admin' && activeView === 'internal-accounts' && adminCan(currentUser, 'accounts') && <InternalAccountsPage token={getToken()} currentId={currentUser?.id} />}
+          {activeRole === 'Admin' && activeView === 'review-notes' && <AdminReviewNotes token={getToken()} />}
+          {activeRole === 'Admin' && activeView === 'email-delivery' && adminCan(currentUser, 'emailDelivery') && <AdminEmailDelivery token={getToken()} />}
 
           {activeRole === 'Admin' && activeView === 'employment-updates' && (
             <AdminEmploymentUpdatesPage key={`${hiringUpdates.applicantId || ''}:${hiringUpdates.jobId || ''}`} token={getToken()} applicantId={hiringUpdates.applicantId} jobId={hiringUpdates.jobId} />
@@ -3293,7 +3321,7 @@ const toggleSkill = (selected, skill) => {
                             </div>
                           )}
                         </div>
-                        <div className="flex flex-wrap items-center gap-2">
+                        <fieldset disabled={!adminCan(currentUser, 'decide')} className="flex flex-wrap items-center gap-2">
                           <button
                             type="button"
                             onClick={() => confirmEmployerRequest(request._id, request.companyName, 'approved')}
@@ -3315,8 +3343,9 @@ const toggleSkill = (selected, skill) => {
                           >
                             Request new document
                           </button>
-                        </div>
+                        </fieldset>
                       </div>
+                      <AdminReviewNotes token={getToken()} entityType="EmployerRequest" entityId={request._id} />
                     </div>
                   ))}
                 </div>
@@ -3354,6 +3383,7 @@ const toggleSkill = (selected, skill) => {
         </div>
       </div>
     </div>
+    </AdminAccessContext.Provider>
   )
 }
 

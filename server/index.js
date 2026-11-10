@@ -1,4 +1,11 @@
 import { applicantReputationSummaries } from './services/applicantReputationSummary.js'
+import { adminAccessMiddleware } from './middleware/adminAccess.js'
+import { createInternalAccountsRouter } from './routes/internalAccounts.js'
+import { createPasswordRecoveryRouter } from './routes/passwordRecovery.js'
+import { employerSessionGuard } from './middleware/employerSessions.js'
+import { EmailDelivery } from './models/emailDelivery.js'
+import { createEmailDeliveryRouter } from './routes/emailDelivery.js'
+import { adminLevel } from '../shared/adminAccess.js'
 import { createActivityReportService } from './services/activityReport.js'
 import { isJobArchived, jobArchiveAt } from '../shared/jobArchive.js'
 import { Interview, ApplicationReport, ApplicationAppeal } from './models/applicationWorkflow.js'
@@ -28,6 +35,7 @@ import rateLimit, { MemoryStore } from 'express-rate-limit'
 import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
+import os from 'node:os'
 import { createReport } from 'docx-templates'
 import { Applicant, Employer, Admin, JobTitle, Notification, Referral, HireReport, Rating, DocumentFile, EmailCode, EmailCodeSend, UsedEmailProof, findUserByEmail, emailTakenAcrossRoles, createUserInRole, updateUserProfileByEmail, applicantFullName, applicantDisplayName } from './models/collections.js'
 import { sendEmail, sendVerificationEmail, initMailer } from './mailer.js'
@@ -175,9 +183,14 @@ app.use((req, res, next) => {
   next()
 })
 
+app.use('/api/auth/password-recovery', createPasswordRecoveryRouter({ findUserByEmail, Admin, Applicant, Employer, EmailCodeSend, sendEmail }))
 app.use('/api', adminActivityMiddleware({ ActivityLog, Admin, authenticate: authenticateRequest }))
+app.use('/api', adminAccessMiddleware({ Admin, authenticate: authenticateRequest }))
+app.use('/api/admin', createInternalAccountsRouter({ Admin, Applicant, Employer, AccountDeletionRequest, signSession: account => jwt.sign({ email: account.email, role: 'Admin', sessionVersion: account.sessionVersion || 0 }, jwtSecret, { expiresIn: '7d' }) }))
 app.use('/api/admin/activity-logs', createAdminActivityRouter({ ActivityLog, Admin, authenticate: authenticateRequest }))
+app.use('/api/admin/email-delivery', createEmailDeliveryRouter({ Model: EmailDelivery, service: { attempt: (...args) => import('./mailer.js').then(module => module.emailDeliveryService.attempt(...args)) } }))
 app.use('/api', applicantSessionGuard({ Applicant, authenticate: authenticateRequest }))
+app.use('/api', employerSessionGuard({ Employer, authenticate: authenticateRequest }))
 
 app.get('/api/employer-requirements/current/versions/:version/view', async (req, res) => {
   try {
@@ -426,7 +439,8 @@ app.get('/api/profile/review-status', async (req, res) => {
   } catch { res.status(503).json({ error: 'Review details are temporarily unavailable. You can still open My Documents.' }) }
 })
 
-const requirementsDirectory = path.join(process.cwd(), 'server', 'uploads', 'employer-requirements')
+const requirementsDirectory = isTestEnv ? fs.mkdtempSync(path.join(os.tmpdir(), 'peso-test-uploads-')) : path.join(process.cwd(), 'server', 'uploads', 'employer-requirements')
+if (isTestEnv) process.once('exit', () => { if (path.dirname(requirementsDirectory) === os.tmpdir() && path.basename(requirementsDirectory).startsWith('peso-test-uploads-')) fs.rmSync(requirementsDirectory, { recursive: true, force: true }) })
 fs.mkdirSync(requirementsDirectory, { recursive: true })
 const requirementsUpload = multer({
   dest: requirementsDirectory,
@@ -1376,8 +1390,8 @@ async function hydrateEmployerAddress(employer, request) {
 
 app.post('/api/login', async (req, res) => {
   try {
-    const { email, password } = req.body
-    if (!email || !password) return res.status(400).json({ error: 'Missing email or password' })
+    const { email, password } = req.body || {}
+    if (typeof email !== 'string' || !email.trim() || email.length > 254 || typeof password !== 'string' || !password || password.length > 256) return res.status(400).json({ error: 'Provide a valid email and password.' })
 
     const found = await findUserByEmail(email)
     if (!found) return res.status(401).json({ error: 'Invalid credentials' })
@@ -1387,6 +1401,7 @@ app.post('/api/login', async (req, res) => {
 
     const ok = await bcrypt.compare(password, user.passwordHash)
     if (!ok) return res.status(401).json({ error: 'Invalid credentials' })
+    if (type === 'Admin' && user.disabled) return res.status(403).json({ error: 'This internal account has been disabled.' })
     if (type === 'Applicant' && user.deletedAt) return res.status(403).json({ error: 'This account is closed. You may register a new account.' })
     if (type === 'Applicant') user = await loadApplicantWithCurrentResume(user.email)
     if (user.verificationStatus === 'restricted') return res.status(403).json({ error: 'Your account has been restricted. Please contact PESO support.' })
@@ -1394,7 +1409,8 @@ app.post('/api/login', async (req, res) => {
     if (type === 'Employer') await hydrateEmployerAddress(user, requirements)
     const registration = ['Applicant', 'Employer'].includes(type) ? registrationProgress(user, type, { requirementsFile: requirements?.requirementsFile, requestLocation: requirements?.location }) : undefined
     const safe = { id: String(user._id), pageGuides: user.pageGuides, email: user.email, role: type, emailVerified: ['Applicant', 'Employer'].includes(type) ? Boolean(user.emailVerified) : undefined, needsNameConfirmation: type === 'Applicant' ? Boolean(user.needsNameConfirmation) : undefined, registration, verificationDocuments: type === 'Applicant' ? summarizeVerificationDocuments(user) : undefined, attentionCount: type === 'Applicant' ? attentionCount(user) : undefined, establishmentAddress: type === 'Employer' ? user.establishmentAddress : undefined, companyName: type === 'Employer' ? (user.companyName || requirements?.companyName) : undefined, contactName: type === 'Employer' ? (user.contactName || requirements?.contactName) : undefined, phone: type === 'Employer' ? (user.phone || requirements?.phone) : undefined, profile: user.profile, verificationStatus: type === 'Employer' ? employerVerification.status : type === 'Applicant' ? (user.verificationStatus || 'approved') : undefined, verificationReason: type === 'Employer' ? employerVerification.reason : type === 'Applicant' ? user.verificationReason : undefined, approvalNoticePending: type === 'Employer' ? Boolean(user.approvalNoticePending) : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size, status: requirements.requirementsFile.status, sourceType: requirements.requirementsFile.sourceType, version: requirements.requirementsFile.version } : undefined, requirementsSubmittedAt: type === 'Employer' ? (requirements?.requirementsSubmittedAt || user.requirementsSubmittedAt) : undefined, nsrpVerificationFile: type === 'Applicant' && user.nsrpVerificationFile?.originalName ? { originalName: user.nsrpVerificationFile.originalName, size: user.nsrpVerificationFile.size, uploadedAt: user.nsrpVerificationFile.uploadedAt } : undefined }
-    const token = jwt.sign({ email: user.email, role: type, ...(type === 'Applicant' ? { sub: String(user._id), sessionVersion: user.sessionVersion || 0 } : {}) }, jwtSecret, { expiresIn: '7d' })
+    const token = jwt.sign({ email: user.email, role: type, ...(['Admin', 'Employer'].includes(type) ? { sessionVersion: user.sessionVersion || 0 } : {}), ...(type === 'Applicant' ? { sub: String(user._id), sessionVersion: user.sessionVersion || 0 } : {}) }, jwtSecret, { expiresIn: '7d' })
+    if (type === 'Admin') { safe.adminLevel = adminLevel(user); safe.mustChangePassword = Boolean(user.mustChangePassword) }
     res.json({ user: safe, token })
   } catch (err) {
     console.error(err)
@@ -1417,7 +1433,7 @@ app.get('/api/profile', async (req, res) => {
     if (type === 'Employer') await hydrateEmployerAddress(user, requirements)
     const employerVerification = type === 'Employer' ? await loadEmployerVerification(user.email) : null
     const registration = ['Applicant', 'Employer'].includes(type) ? registrationProgress(user, type, { requirementsFile: requirements?.requirementsFile, requestLocation: requirements?.location }) : undefined
-    res.json({ id: String(user._id), pageGuides: user.pageGuides, email: user.email, role: type, emailVerified: ['Applicant', 'Employer'].includes(type) ? Boolean(user.emailVerified) : undefined, needsNameConfirmation: type === 'Applicant' ? Boolean(user.needsNameConfirmation) : undefined, registration, establishmentAddress: type === 'Employer' ? user.establishmentAddress : undefined, companyName: type === 'Employer' ? (user.companyName || requirements?.companyName) : undefined, contactName: type === 'Employer' ? (user.contactName || requirements?.contactName) : undefined, phone: type === 'Employer' ? (user.phone || requirements?.phone) : undefined, profile: user.profile, verificationStatus: type === 'Employer' ? employerVerification.status : type === 'Applicant' ? (user.verificationStatus || 'approved') : undefined, verificationReason: type === 'Employer' ? employerVerification.reason : type === 'Applicant' ? user.verificationReason : undefined, approvalNoticePending: type === 'Employer' ? Boolean(user.approvalNoticePending) : undefined, verificationDocuments: type === 'Applicant' ? summarizeVerificationDocuments(user) : undefined, attentionCount: type === 'Applicant' ? attentionCount(user) : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size, status: requirements.requirementsFile.status, sourceType: requirements.requirementsFile.sourceType, version: requirements.requirementsFile.version } : undefined, requirementsSubmittedAt: type === 'Employer' ? (requirements?.requirementsSubmittedAt || user.requirementsSubmittedAt) : undefined, nsrpVerificationFile: type === 'Applicant' && user.nsrpVerificationFile?.originalName ? { originalName: user.nsrpVerificationFile.originalName, size: user.nsrpVerificationFile.size, uploadedAt: user.nsrpVerificationFile.uploadedAt } : undefined })
+    res.json({ mustChangePassword: type === 'Admin' ? Boolean(user.mustChangePassword) : undefined, adminLevel: type === 'Admin' ? adminLevel(user) : undefined, id: String(user._id), pageGuides: user.pageGuides, email: user.email, role: type, emailVerified: ['Applicant', 'Employer'].includes(type) ? Boolean(user.emailVerified) : undefined, needsNameConfirmation: type === 'Applicant' ? Boolean(user.needsNameConfirmation) : undefined, registration, establishmentAddress: type === 'Employer' ? user.establishmentAddress : undefined, companyName: type === 'Employer' ? (user.companyName || requirements?.companyName) : undefined, contactName: type === 'Employer' ? (user.contactName || requirements?.contactName) : undefined, phone: type === 'Employer' ? (user.phone || requirements?.phone) : undefined, profile: user.profile, verificationStatus: type === 'Employer' ? employerVerification.status : type === 'Applicant' ? (user.verificationStatus || 'approved') : undefined, verificationReason: type === 'Employer' ? employerVerification.reason : type === 'Applicant' ? user.verificationReason : undefined, approvalNoticePending: type === 'Employer' ? Boolean(user.approvalNoticePending) : undefined, verificationDocuments: type === 'Applicant' ? summarizeVerificationDocuments(user) : undefined, attentionCount: type === 'Applicant' ? attentionCount(user) : undefined, requirementsFile: requirements?.requirementsFile ? { originalName: requirements.requirementsFile.originalName, size: requirements.requirementsFile.size, status: requirements.requirementsFile.status, sourceType: requirements.requirementsFile.sourceType, version: requirements.requirementsFile.version } : undefined, requirementsSubmittedAt: type === 'Employer' ? (requirements?.requirementsSubmittedAt || user.requirementsSubmittedAt) : undefined, nsrpVerificationFile: type === 'Applicant' && user.nsrpVerificationFile?.originalName ? { originalName: user.nsrpVerificationFile.originalName, size: user.nsrpVerificationFile.size, uploadedAt: user.nsrpVerificationFile.uploadedAt } : undefined })
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Server error' })
@@ -2029,7 +2045,7 @@ app.put('/api/applicants/:id/verification-documents/:docKey', async (req, res) =
 
     const message = status === 'approved'
       ? `Your ${VERIFICATION_DOC_LABELS[docKey]} was approved.`
-      : `Your ${VERIFICATION_DOC_LABELS[docKey]} was rejected${reason ? `: ${reason}` : ''}. Please re-upload it from your My Documents page.`
+      : `Your ${VERIFICATION_DOC_LABELS[docKey]} needs correction${reason ? `: ${reason}` : ''}. Open My Documents and find this document section. ${docKey.startsWith('validId') ? 'Check the ID type and upload clear front and back images of the same ID.' : 'Upload a clear and complete corrected copy.'} Verification starts again after submission. If replacement is locked or your upload limit is reached, contact PESO.`
     await notify({
       recipient: { id: applicant._id, role: 'Applicant', email: applicant.email },
       type: status === 'approved' ? 'document_approved' : 'document_rejected',
@@ -3678,6 +3694,16 @@ app.get('/api/dashboard', requireApprovedEmployer, async (req, res) => {
     if (!decoded?.email) return res.status(401).json({ error: 'Missing token' })
     const found = await findUserByEmail(decoded.email)
     if (!found || found.type !== decoded.role) return res.status(401).json({ error: 'Unauthorized' })
+    if (found.type === 'Admin' && adminLevel(found.user) === 'staff') {
+      const start = new Date(`${todayInManila()}T00:00:00+08:00`)
+      const [applicants, employers, jobs, hiringUpdates] = await Promise.all([
+        Applicant.countDocuments({ deletedAt: { $exists: false }, verificationStatus: { $in: ['under_review', 'waitlisted'] } }),
+        EmployerRequest.countDocuments({ status: { $in: ['pending', 'under_review'] } }),
+        JobPosting.countDocuments({ status: 'pending' }),
+        HireReport.countDocuments({ reportedAt: { $gte: start } }),
+      ])
+      return res.json({ role: 'Admin', adminLevel: 'staff', tasks: { applicants, employers, jobs, hiringUpdates } })
+    }
     const data = await dashboardService.getDashboard({
       id: String(found.user._id),
       objectId: found.user._id,
@@ -4455,6 +4481,23 @@ app.get('/api/admin/users', async (req, res) => {
       const search = String(req.query.search || '').trim()
       const statusFilter = String(req.query.status || '').trim()
       const filter = {}
+      if (statusFilter && statusFilter !== 'all') {
+        // Match the displayed request status before counting and paginating.
+        // Employers without a request status fall back to their account status.
+        const requests = await EmployerRequest.find().select('email status').lean()
+        const requestByEmail = new Map(requests.map((request) => [request.email.toLowerCase(), request]))
+        const overrides = [...requestByEmail.values()].filter((request) => request.status)
+        const emailPattern = (email) => new RegExp(`^${escapeRegex(email)}$`, 'i')
+        filter.$and = [{ $or: [
+          { email: { $in: overrides.filter((request) => request.status === statusFilter).map((request) => emailPattern(request.email)) } },
+          {
+            email: { $nin: overrides.map((request) => emailPattern(request.email)) },
+            verificationStatus: statusFilter === EMPLOYER_VERIFICATION_STATUS.UNDER_REVIEW
+              ? { $in: [statusFilter, null, ''] }
+              : statusFilter,
+          },
+        ] }]
+      }
       if (search) {
         const pattern = new RegExp(escapeRegex(search), 'i')
         filter.$or = [{ companyName: pattern }, { email: pattern }, { contactName: pattern }, { phone: pattern }]
@@ -4471,7 +4514,7 @@ app.get('/api/admin/users', async (req, res) => {
       const pageEmails = items.map((u) => u.email.toLowerCase())
       const pageRequests = await EmployerRequest.find({ email: { $in: pageEmails.map((email) => new RegExp(`^${escapeRegex(email)}$`, 'i')) } }).lean()
       const pageRequestByEmail = new Map(pageRequests.map((request) => [request.email.toLowerCase(), request]))
-      let mapped = items.map((u) => {
+      const mapped = items.map((u) => {
         const request = pageRequestByEmail.get(u.email.toLowerCase())
         return {
           id: u._id,
@@ -4493,7 +4536,6 @@ app.get('/api/admin/users', async (req, res) => {
           createdAt: u.createdAt,
         }
       })
-      if (statusFilter && statusFilter !== 'all') mapped = mapped.filter((u) => u.approvalStatus === statusFilter)
       return res.json({ items: mapped, total, page, limit, totalPages, sortBy: resolveSort(req.query, EMPLOYER_SORTS, 'companyName').key, order: employerSortOrder === 1 ? 'asc' : 'desc' })
     }
 
@@ -4574,7 +4616,7 @@ app.get('/api/admin/users', async (req, res) => {
       }
     })
 
-    const combined = [...mapAdmin, ...mapEmployer, ...mapEmployerRequests, ...mapApplicant]
+    const combined = [...(req.internalAccount?.adminLevel === 'super_admin' ? mapAdmin : []), ...mapEmployer, ...mapEmployerRequests, ...mapApplicant]
     res.json(combined)
   } catch (err) {
     console.error(err)
@@ -4670,6 +4712,7 @@ if (!isTestEnv) {
     console.log(`Server running on http://localhost:${PORT}`)
     startHireReportReminders()
     initMailer().catch(() => {}) // startup check is non-fatal
+    import('./mailer.js').then(module => module.startEmailDeliveryWorker()).catch(() => console.error('[email] Delivery retry worker unavailable'))
   })
 }
 

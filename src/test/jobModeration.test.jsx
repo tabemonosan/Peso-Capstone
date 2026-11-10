@@ -1,4 +1,5 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { AdminAccessContext } from '../components/AdminAccessContext'
+import { cleanup, fireEvent, render as rtlRender, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import JobModerationSettings from '../components/JobModerationSettings'
 import JobScreeningSummary from '../components/JobScreeningSummary'
@@ -34,3 +35,6 @@ describe('job safety controls', () => {
     expect(screen.getByRole('listitem')).toHaveTextContent('Possible MLM')
   })
 })
+
+// These existing workflows exercise privileges now reserved for Super Admin.
+function render(ui, options) { return rtlRender(<AdminAccessContext.Provider value={{ adminLevel: 'super_admin' }}>{ui}</AdminAccessContext.Provider>, options) }
