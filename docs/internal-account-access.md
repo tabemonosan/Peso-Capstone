@@ -73,3 +73,16 @@ database, refuses existing email addresses, and displays a generated temporary
 password once. Sign in and choose a new password when prompted. With a localhost
 MongoDB connection, running this on your laptop creates the account only in your
 laptop's database.
+
+If an existing Super Admin's password is lost and email recovery is unavailable,
+an operator with database access can run this on the intended computer:
+
+```sh
+node server/scripts/reset-super-admin.js superadmin@peso.local
+```
+
+This resets only the specified enabled Super Admin, displays a new temporary
+password once, invalidates previous sessions, and requires a password change at
+sign-in. It preserves other accounts and refuses missing, disabled, Admin, and
+Staff accounts. The command uses the project `.env`; it does not reset an account
+on another computer when the connection points to localhost.
