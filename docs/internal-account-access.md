@@ -60,3 +60,16 @@ node server/scripts/create-internal-accounts.js
 The script creates missing accounts, hashes random passwords with bcrypt, and
 prints initial credentials once. Re-running it preserves existing accounts.
 No passwords are committed to the repository.
+
+To create an additional Super Admin with a different email, run this from the
+project root on the intended computer:
+
+```sh
+node server/scripts/create-super-admin.js laptop.superadmin@example.com "Laptop Super Admin"
+```
+
+Use an email you own for email recovery. The script uses that computer's `.env`
+database, refuses existing email addresses, and displays a generated temporary
+password once. Sign in and choose a new password when prompted. With a localhost
+MongoDB connection, running this on your laptop creates the account only in your
+laptop's database.
