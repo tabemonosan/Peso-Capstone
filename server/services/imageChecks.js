@@ -36,12 +36,6 @@ export async function processApplicantImages({ accountId, docKey, version, setti
         }
       })
       if (settings.ocrTextReading) {
-        let birthValues
-        if (settings.crossChecks && docKey.startsWith('validId')) {
-          const birthVersion = account.verificationDocuments?.birthCertificate?.versions?.at(-1)?.version
-          const birthFile = birthVersion && await loadDocumentFile(accountId, 'birthCertificate', birthVersion)
-          if (birthFile) birthValues = (await readDocumentOcr(birthFile, (text, confidence) => ({ values: confidence >= WAITLIST_LIMITS.minOcrConfidence ? extractDocumentFields(text) : undefined }), { reserve: reserveOcr }, readers.readOcr)).values
-        }
         const report = await readDocumentOcr(file, (text, confidence) => {
           if (Number.isFinite(confidence) && confidence < WAITLIST_LIMITS.minOcrConfidence) return { comparisons: [{ fieldGroup: 'document', result: 'could_not_read', evidence: 'independent', reliable: false }], findings: [] }
           const normalized = normalizedText(text), nsrp = nsrpValues
@@ -49,7 +43,7 @@ export async function processApplicantImages({ accountId, docKey, version, setti
           const parsed = extractDocumentFields(text)
           if (document.declaredDetails?.idType === 'PhilSys National ID') delete parsed.idNumber
           const expectedNumber = nsrp[{ SSS: 'gsisSss', Passport: 'passportNo', 'Pag-IBIG': 'pagibig' }[document.declaredDetails?.idType]] || document.declaredDetails?.number
-          const cross = settings.crossChecks && Object.keys(parsed).length ? crossChecks({ nsrp: { ...nsrp, idNumber: expectedNumber }, ...(docKey === 'birthCertificate' ? { birth: { values: parsed, evidence: 'independent' } } : { birth: birthValues ? { values: birthValues, evidence: 'independent' } : {}, ids: [{ values: parsed, evidence: 'independent' }] }) }) : null
+          const cross = settings.crossChecks && Object.keys(parsed).length ? crossChecks({ nsrp: { ...nsrp, idNumber: expectedNumber }, ...(docKey === 'birthCertificate' ? { birth: { values: parsed, evidence: 'independent' } } : { ids: [{ values: parsed, evidence: 'independent' }] }) }) : null
           return { comparisons: [...fields.map(([fieldGroup, values]) => ({ fieldGroup, result: values.every(Boolean) && values.every(value => normalized.includes(normalizedText(value))) ? 'match' : 'could_not_read', evidence: 'independent' })), ...(cross?.comparisons || []).map(c => ({ ...c, reliable: Number.isFinite(confidence) && confidence >= WAITLIST_LIMITS.minOcrConfidence }))], findings: cross?.findings || [] }
         }, { reserve: reserveOcr }, readers.readOcr)
         if (report.comparisons) comparisons = report.comparisons
