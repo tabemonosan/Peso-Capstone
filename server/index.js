@@ -13,7 +13,6 @@ import { Interview, ApplicationReport, ApplicationAppeal } from './models/applic
 import { createApplicationWorkflow } from './services/applicationWorkflow.js'
 import { createApplicationWorkflowRouter } from './routes/applicationWorkflow.js'
 import { coveringJobSkill } from '../shared/jobSkills.js'
-import { PHILIPPINE_ID_TYPES } from '../shared/philippineIds.js'
 import { applicantProfileContent } from '../shared/applicantProfile.js'
 import { validatePortfolioLinks } from '../shared/portfolioLinks.js'
 import { resumeError } from '../shared/resume.js'
@@ -535,7 +534,6 @@ const applicantSignupUpload = multer({
   },
 })
 
-const VALID_ID_TYPES = PHILIPPINE_ID_TYPES
 const MAX_UPLOADS_PER_DOC = 5
 // Projection to re-include the select:false buffers when streaming
 const VERIFICATION_DATA_SELECT = VERIFICATION_DOC_KEYS.flatMap((key) => [
@@ -670,14 +668,15 @@ function summarizeVerificationDocuments(applicant, { withUrls = false, includeHi
       required: REQUIRED_DOC_KEYS.includes(key),
       sourceType: key === 'nsrpForm' ? latest?.sourceType || undefined : undefined,
       idType: slot?.idType || undefined,
-      status: currentDocStatus(slot), // missing | pending | approved | rejected
+      status: key === 'birthCertificate' && latest ? 'received' : currentDocStatus(slot), // collected files do not need approval
+      collectionOnly: key === 'birthCertificate',
       referenceOnly: key === 'nsrpForm',
-      locked: key === 'nsrpForm' ? nsrpReferenceLocked(applicant) : currentDocStatus(slot) === 'approved',
+      locked: key === 'nsrpForm' ? nsrpReferenceLocked(applicant) : key !== 'birthCertificate' && currentDocStatus(slot) === 'approved',
       correctionRequest: slot?.correctionRequest?.requestedAt ? slot.correctionRequest : undefined,
       uploadsUsed: slot?.uploads || 0,
       uploadsRemaining: Math.max(0, MAX_UPLOADS_PER_DOC - (slot?.uploads || 0)),
-      resubmitted: (slot?.versions?.length || 0) > 1 && currentDocStatus(slot) === 'pending',
-      ...(includeHistory ? { unresolved: openFlags(latest?.findings).length } : {}),
+      resubmitted: key !== 'birthCertificate' && (slot?.versions?.length || 0) > 1 && currentDocStatus(slot) === 'pending',
+      ...(includeHistory ? { unresolved: key === 'birthCertificate' ? 0 : openFlags(latest?.findings).length } : {}),
       latest: latest
         ? {
             version: latest.version,
@@ -710,7 +709,7 @@ function summarizeVerificationDocuments(applicant, { withUrls = false, includeHi
 // Count of documents that need the user's attention (rejected or missing required)
 function attentionCount(applicant) {
   const docs = applicant?.verificationDocuments || {}
-  return REQUIRED_DOC_KEYS.filter((key) => key === 'nsrpForm' ? !latestVersion(docs[key]) : ['rejected', 'needs_resubmission', 'missing'].includes(currentDocStatus(docs[key]))).length
+  return REQUIRED_DOC_KEYS.filter((key) => ['nsrpForm', 'birthCertificate'].includes(key) ? !latestVersion(docs[key]) : ['rejected', 'needs_resubmission', 'missing'].includes(currentDocStatus(docs[key]))).length
 }
 
 // Recompute the account-level status from the latest version of each required document
@@ -724,7 +723,7 @@ function recomputeVerificationStatus(applicant) {
     applicant.verificationReason = rejected
       .map((key) => `${VERIFICATION_DOC_LABELS[key]}: ${latestVersion(docs[key])?.reviewReason || 'rejected'}`)
       .join(' | ')
-  } else if (latestVersion(docs.nsrpForm) && IDENTITY_DOC_KEYS.every((key) => currentDocStatus(docs[key]) === 'approved')) {
+  } else if (latestVersion(docs.nsrpForm) && latestVersion(docs.birthCertificate) && IDENTITY_DOC_KEYS.every((key) => currentDocStatus(docs[key]) === 'approved')) {
     applicant.verificationStatus = 'approved'
     applicant.verificationReason = undefined
   } else {
@@ -973,19 +972,16 @@ app.post('/api/signup/check-documents', rateLimit({ windowMs: 60000, limit: 10, 
   // Advisory only: quality and declared values, never OCR or account decisions.
   try {
     const details = parseDocumentDetails(req.body?.verificationDetails)
-    let nsrp = {}
-    try { nsrp = JSON.parse(req.body?.nsrpAnswers || '{}') } catch { /* Missing typed details are advisory. */ }
     const issues = []
     for (const [docKey, fileKey, idType] of [['birthCertificate', 'birthCertificate', ''], ['validId1', 'validId1Front', req.body?.id1Type], ['validId2', 'validId2Front', req.body?.id2Type]]) {
       const file = req.files?.[fileKey]?.[0]
       if (!file && docKey === 'validId2' && !idType) continue
       if (!file) { issues.push({ docKey, message: 'Choose a document file.' }); continue }
-      const checked = validateDeclaredDetails(details[docKey], { docKey, idType })
-      for (const message of Object.values(checked.errors)) issues.push({ docKey, message })
-      if (checked.warnings.includes('id_expired')) issues.push({ docKey, message: 'This ID may have expired. Choose a current ID or explain the difference.' })
-      const nsrpKey = { SSS: 'gsisSss', Passport: 'passportNo', 'Pag-IBIG': 'pagibig', 'PhilHealth ID': 'philhealth', 'TIN ID': 'tin' }[idType]
-      if (nsrpKey && nsrp[nsrpKey] && checked.details.number && String(nsrp[nsrpKey]).replace(/[\s-]/g, '').toUpperCase() !== checked.details.number) issues.push({ docKey, message: 'The ID number you entered may not match your NSRP. Please check your typed details.' })
-      if (idType && !req.files?.[`${docKey}Back`]?.length) issues.push({ docKey, message: 'If your ID has information on the back, add a photo of that side.' })
+      if (docKey === 'birthCertificate') {
+        const checked = validateDeclaredDetails(details[docKey], { docKey, idType })
+        for (const message of Object.values(checked.errors)) issues.push({ docKey, message })
+      }
+      if (docKey === 'birthCertificate') continue
       try {
         const quality = await inspectDocument(file)
         if (quality.warnings.some(w => ['blur', 'crop', 'dark', 'glare'].includes(w))) issues.push({ docKey, message: 'The photo may be blurry, cropped or difficult to read. Consider taking a clearer photo.' })
@@ -1065,7 +1061,7 @@ app.post('/api/signup', applicantSignupUpload.fields([
     const fileFor = (key) => files[key]?.[0]
     if (!BIRTH_COPY_TYPES.includes(parseDocumentDetails(req.body?.verificationDetails).birthCertificate?.copyType)) fieldErrors.birthCertificate = 'Select the birth certificate copy type.'
     if (!fileFor('birthCertificate')) fieldErrors.birthCertificate = 'Birth certificate is required.'
-    if (!VALID_ID_TYPES.includes(id1Type) || !fileFor('validId1Front')) fieldErrors.validId1 = 'Choose a valid type and upload the front of Valid ID #1.'
+    if (!fileFor('validId1Front')) fieldErrors.validId1 = 'Upload the front of Valid ID #1.'
     if (nsrpMode === 'upload') {
       if (!fileFor('nsrpFile')) fieldErrors.nsrpFile = 'Upload your filled NSRP form (PDF only).'
       else if (fileFor('nsrpFile').size > VERIFICATION_MAX_BYTES) fieldErrors.nsrpFile = 'The NSRP form must be 5 MB or smaller.'
@@ -1082,8 +1078,7 @@ app.post('/api/signup', applicantSignupUpload.fields([
       fieldErrors.verificationDocuments = 'Verification documents must be 5 MB or smaller.'
     }
     const id2Used = Boolean(fileFor('validId2Front') || fileFor('validId2Back') || id2Type)
-    if (id2Used && (!VALID_ID_TYPES.includes(id2Type) || !fileFor('validId2Front'))) fieldErrors.validId2 = 'Choose a valid type and upload the front of Valid ID #2.'
-    if (id2Used && id1Type === id2Type) fieldErrors.validId2 = 'Choose a different type for Valid ID #2.'
+    if (id2Used && !fileFor('validId2Front')) fieldErrors.validId2 = 'Upload the front of Valid ID #2.'
     if (documentFiles.some((key) => fileFor(key) && !fileMatchesDeclaredType(fileFor(key)))) {
       fieldErrors.verificationDocuments = 'One or more uploaded files do not match their declared file type.'
     }
@@ -1132,7 +1127,7 @@ app.post('/api/signup', applicantSignupUpload.fields([
     const documentReviews = {}
     const declaredDocuments = parseDocumentDetails(req.body?.verificationDetails)
     if ((await nsrpAutomation.getSettings()).imageChecks) {
-      for (const [slot, field, idType] of [['birthCertificate', 'birthCertificate', ''], ['validId1', 'validId1Front', id1Type], ['validId2', 'validId2Front', id2Type]]) {
+      for (const [slot, field, idType] of [['validId1', 'validId1Front', id1Type], ['validId2', 'validId2Front', id2Type]]) {
         if (!fileFor(field)) continue
         try {
           documentReviews[slot] = await prepareDocument(fileFor(field), slot, idType, declaredDocuments[slot], slot === 'validId2' ? declaredDocuments.validId1?.number : undefined, answers || {})
@@ -1467,7 +1462,7 @@ async function appendVerificationVersion(applicant, docKey, file, idType = '', s
   applicant.verificationDocuments = applicant.verificationDocuments || {}
   const slot = applicant.verificationDocuments[docKey] || { uploads: 0, versions: [] }
   const current = latestVersion(slot)
-  if ((docKey === 'nsrpForm' ? nsrpReferenceLocked(applicant) : current?.status === 'approved') && docKey !== 'supportingExplanation' && !await consistencyWaitlist.canCorrect(applicant._id, docKey)) {
+  if ((docKey === 'nsrpForm' ? nsrpReferenceLocked(applicant) : docKey !== 'birthCertificate' && current?.status === 'approved') && docKey !== 'supportingExplanation' && !await consistencyWaitlist.canCorrect(applicant._id, docKey)) {
     const error = new Error(`${VERIFICATION_DOC_LABELS[docKey]} is already approved and locked.`)
     error.status = 409
     throw error
@@ -1489,7 +1484,7 @@ async function appendVerificationVersion(applicant, docKey, file, idType = '', s
     if (backFile) await storeDocumentFile(applicant._id, docKey, versionNumber, 'back', backFile)
   } catch (error) { await cleanup(); throw error }
   if (docKey === 'nsrpForm') reopenIdentityDocuments(applicant, 'Applicant')
-  if (current && (['pending', 'rejected', 'needs_resubmission'].includes(current.status) || ['supportingExplanation', 'nsrpForm'].includes(docKey))) current.status = 'superseded'
+  if (current && (docKey === 'birthCertificate' || ['pending', 'rejected', 'needs_resubmission'].includes(current.status) || ['supportingExplanation', 'nsrpForm'].includes(docKey))) current.status = 'superseded'
   const version = {
     originalName: file.originalname,
     storedName: crypto.randomBytes(16).toString('hex'),
@@ -1510,7 +1505,7 @@ async function appendVerificationVersion(applicant, docKey, file, idType = '', s
   }
   slot.uploads = (slot.uploads || 0) + 1
   slot.versions = [...(slot.versions || []), version]
-  if (idType) slot.idType = idType
+  if (docKey.startsWith('validId')) slot.idType = idType || undefined
   applicant.verificationDocuments[docKey] = slot
   recomputeVerificationStatus(applicant)
   return { slot, version, cleanup }
@@ -1671,18 +1666,17 @@ app.post('/api/profile/verification-documents/:docKey', verificationUpload.field
     }
 
     const idType = typeof req.body.idType === 'string' ? req.body.idType.trim() : ''
-    if (docKey.startsWith('validId') && !idType) return res.status(400).json({ error: 'ID type is required' })
 
     const applicant = await Applicant.findOne({ email: decoded.email })
     if (!applicant) return res.status(404).json({ error: 'Applicant not found' })
 
     // Ownership + account state checks: restricted accounts cannot upload
     if (applicant.verificationStatus === 'restricted') return res.status(403).json({ error: 'This account is restricted. Please contact PESO support.' })
-    if (currentDocStatus(applicant.verificationDocuments?.[docKey]) === 'approved' && !await consistencyWaitlist.canCorrect(applicant._id, docKey)) return res.status(409).json({ error: 'This document is approved and locked. Request a correction first.' })
+    if (docKey !== 'birthCertificate' && currentDocStatus(applicant.verificationDocuments?.[docKey]) === 'approved' && !await consistencyWaitlist.canCorrect(applicant._id, docKey)) return res.status(409).json({ error: 'This document is approved and locked. Request a correction first.' })
 
     const declared = parseDocumentDetails(req.body?.verificationDetails)
     if (docKey === 'birthCertificate' && !BIRTH_COPY_TYPES.includes(declared.copyType)) return res.status(422).json({ error: 'Select the birth certificate copy type.' })
-    if (docKey !== 'nsrpForm' && (await nsrpAutomation.getSettings()).imageChecks) {
+    if (!['nsrpForm', 'birthCertificate'].includes(docKey) && (await nsrpAutomation.getSettings()).imageChecks) {
       file.verificationReview = docKey === 'supportingExplanation' ? { quality: await inspectDocument(file) } : await prepareDocument(file, docKey, idType, declared, applicant.verificationDocuments?.[docKey === 'validId1' ? 'validId2' : 'validId1']?.versions?.at(-1)?.declaredDetails?.number, applicant.profile?.nsrp)
       if (backFile) file.verificationReview.quality.warnings.push(...(await inspectDocument(backFile)).warnings)
     }
@@ -1700,7 +1694,7 @@ app.post('/api/profile/verification-documents/:docKey', verificationUpload.field
     await scheduleConsistency(applicant._id, docKey, applicant.$locals.consistencyReservation, req.ip)
 
 
-    res.json({ ok: true, docKey, version: version.version, status: 'pending', uploadsRemaining: MAX_UPLOADS_PER_DOC - slot.uploads, document: { originalName: version.originalName, size: version.size, uploadedAt: version.uploadedAt } })
+    res.json({ ok: true, docKey, version: version.version, status: docKey === 'birthCertificate' ? 'received' : 'pending', uploadsRemaining: MAX_UPLOADS_PER_DOC - slot.uploads, document: { originalName: version.originalName, size: version.size, uploadedAt: version.uploadedAt } })
   } catch (err) {
     if (err.status) {
       if (err.status === 422) {

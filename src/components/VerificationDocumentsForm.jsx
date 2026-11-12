@@ -108,13 +108,12 @@ function validateFile(file) {
   return null
 }
 
-// Required: nsrpForm, birthCertificate, id1.type + id1.front. Optional: id1.back, id2 (type+front required if used).
+// Birth certificate and ID front are required; ID type is optional metadata.
 export function validateVerificationDocs(docs) {
   if (!docs.birthCertificate) return false
-  if (!docs.id1.type || !docs.id1.front) return false
+  if (!docs.id1.front) return false
   const id2Used = docs.id2.type || docs.id2.front || docs.id2.back
-  if (id2Used && (!docs.id2.type || !docs.id2.front)) return false
-  if (docs.id1.type && docs.id2.type && docs.id1.type === docs.id2.type) return false
+  if (id2Used && !docs.id2.front) return false
   return true
 }
 
@@ -164,9 +163,8 @@ export default function VerificationDocumentsForm({ docs, setDocs, disabled, fie
     await acceptFile(path, file)
   }
 
-  const id1Type = docs.id1.type
-  const id2Options = ID_TYPE_OPTIONS.filter((option) => option !== id1Type)
-  const helperText = "Upload clear, uncropped photos or scans (JPG, PNG, or PDF, max 5 MB each). An admin will review your documents before you can browse jobs."
+  const id2Options = ID_TYPE_OPTIONS
+  const helperText = "Upload clear, uncropped photos or scans (JPG, PNG, or PDF, max 5 MB each). The name on your ID is compared with your NSRP. ID type is optional."
 
   return (
     <fieldset className="space-y-4 rounded-[10px] border border-[var(--peso-line-strong)] bg-[var(--peso-canvas)] p-4">
@@ -197,12 +195,11 @@ export default function VerificationDocumentsForm({ docs, setDocs, disabled, fie
           onChange={(e) => setDocs((current) => ({ ...current, id1: { ...current.id1, type: e.target.value, number: '', expiry: '', format: '' } }))}
           className={selectCls}
         >
-          <option value="">Select ID type…</option>
+          <option value="">ID type</option>
           {ID_TYPE_OPTIONS.map((option) => (
             <option key={option} value={option}>{option}</option>
           ))}
         </select>
-        <DeclaredDocumentFields docKey="validId1" idType={docs.id1.type} value={docs.id1} onChange={value => setDocs(current => ({ ...current, id1: { ...current.id1, ...value } }))} disabled={disabled} />
         <FileField
           label="Front of ID"
           required
@@ -238,17 +235,12 @@ export default function VerificationDocumentsForm({ docs, setDocs, disabled, fie
           onChange={(e) => setDocs((current) => ({ ...current, id2: { ...current.id2, type: e.target.value, number: '', expiry: '', format: '' } }))}
           className={selectCls}
         >
-          <option value="">Select ID type…</option>
+          <option value="">ID type</option>
           {id2Options.map((option) => (
             <option key={option} value={option}>{option}</option>
           ))}
         </select>
-        {id1Type && docs.id2.type === id1Type && (
-          <p className="text-xs font-medium text-rose-600">Valid ID #2 must be a different ID type than ID #1.</p>
-        )}
-        {docs.id2.type && (
           <>
-            <DeclaredDocumentFields docKey="validId2" idType={docs.id2.type} value={docs.id2} onChange={value => setDocs(current => ({ ...current, id2: { ...current.id2, ...value } }))} disabled={disabled} />
             <FileField
               label="Front of ID"
               required
@@ -267,7 +259,6 @@ export default function VerificationDocumentsForm({ docs, setDocs, disabled, fie
               onRemove={() => setFile(["id2", "back"], null)}
             />
           </>
-        )}
       </div>}
 
       {fieldErrors.validId2 && <p role="alert" className="text-xs font-medium text-rose-600">{fieldErrors.validId2}</p>}

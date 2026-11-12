@@ -4,10 +4,11 @@ import { isSharedPhoneFinding } from '../../shared/verificationFindings.js'
 // Owner-facing explanations are templates, never raw findings, sampling details,
 // extracted values, provider errors, private notes or comparison rule identifiers.
 export function documentReviewMessage(docKey, document, reason = '') {
+  if (docKey === 'birthCertificate' && document) return 'Supporting document received. This file is not verified or compared with your NSRP.'
   if (!document) return 'This required document has not been submitted yet.'
   if (document.status === 'approved') return 'This document is verified. No admin review is needed.'
   if (['rejected', 'needs_resubmission'].includes(document.status)) return 'PESO needs a corrected copy of this document. Open My Documents to review the feedback and make changes.'
-  if (docKey === 'nsrpForm') return 'Your NSRP is the registration reference used to check your birth certificate and IDs. It does not need separate approval.'
+  if (docKey === 'nsrpForm') return 'Your NSRP is the registration reference used to check your IDs. It does not need separate approval.'
   const reasons = [...(document.reviewReasons || []), reason]
   if (reasons.some(r => ['Could not be read', 'Not independent', 'Retake requested', 'Quality warning', 'Technical attempts: admin review'].includes(r))) return 'The system could not read enough clear information to verify this document automatically. You can submit a clearer copy for review.'
   if (reasons.includes('Explanation') || document.explanation?.status === 'submitted') return 'Your explanation is waiting for PESO staff review. You can still correct this document if needed.'
@@ -24,7 +25,7 @@ export async function applicantReviewSummary(account, automation, consistency) {
     decisions = await automation.decisions().find({ role: 'Applicant', accountId: account._id }, { projection: { docKey: 1, version: 1, reason: 1 } }).toArray()
   } catch { /* Use safe document metadata when decision details are unavailable. */ }
   const status = consistency?.status || account.verificationStatus
-  const documents = REQUIRED_DOC_KEYS.filter(docKey => docKey !== 'nsrpForm' || !account.verificationDocuments?.nsrpForm?.versions?.length).map(docKey => {
+  const documents = REQUIRED_DOC_KEYS.filter(docKey => !['nsrpForm', 'birthCertificate'].includes(docKey) || !account.verificationDocuments?.[docKey]?.versions?.length).map(docKey => {
     const slot = account.verificationDocuments?.[docKey], latest = slot?.versions?.at(-1)
     const decision = decisions.find(d => (d.docKey || 'nsrpForm') === docKey && d.version === latest?.version)
     const correction = consistency?.issues?.filter(i => i.document === docKey || docKey === 'nsrpForm' && i.chancesLeft !== null) || []

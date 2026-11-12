@@ -7,6 +7,7 @@ export function parseDocumentDetails(value) {
   catch { throw new DocumentImageError('The declared document details could not be read.') }
 }
 export async function prepareDocument(file, docKey, idType, details = {}, otherNumber, nsrp = {}) {
+  if (docKey.startsWith('validId')) return { quality: await inspectDocument(file), declaredDetails: idType ? { idType } : {}, findings: [] }
   const validation = validateDeclaredDetails(details, { docKey, idType, otherNumber })
   if (Object.keys(validation.errors).length) throw new DocumentImageError(Object.values(validation.errors).join(' '))
   if (idType === PHILSYS_TYPE) delete validation.details.number

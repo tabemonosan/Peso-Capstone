@@ -8,7 +8,7 @@ export const PAGE_GUIDES = {
     ...common,
     dashboard: { title: 'Welcome to your workspace', tips: ['Check your account and document status here.', 'Once verified, browse jobs and follow your applications.', 'Use the navigation above to explore each page.'] },
     profile: { title: 'Keep your profile up to date', tips: ['Update your contact information, skills, and qualifications.', 'Open Manage my documents to view or correct your verification files.'] },
-    documents: { title: 'Check your verification documents', tips: ['Your NSRP is the reference for your birth certificate and ID checks.', 'Upload clear copies and both sides of your valid ID.', 'If a document is flagged, read the feedback and upload a correction or explain a difference.'] },
+    documents: { title: 'Check your verification documents', tips: ['Your NSRP is the reference for your ID checks. Birth certificates are collected as supporting files only.', 'Upload clear copies and both sides of your valid ID.', 'If a document is flagged, read the feedback and upload a correction or explain a difference.'] },
     jobs: { title: 'Find a job that fits', tips: ['Use the filters to narrow jobs by location and skills.', 'Open a job to read its requirements before applying.', 'Track your next steps in My applications.'] },
     'my-applications': { title: 'Follow your applications', tips: ['Check application decisions, referrals, and interview schedules.', 'Open an application to see its available actions and next steps.'] },
     'my-reputation': { title: 'Understand your reputation', tips: ['View your points and the events that changed them.', 'Read the policy to understand how points are recorded.'] },

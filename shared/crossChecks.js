@@ -1,4 +1,4 @@
-export const CROSS_RULES_VERSION = '2026-11-06.3'
+export const CROSS_RULES_VERSION = '2026-11-13.4'
 export const NO_MIDDLE = new Set(['', 'nomiddlename', 'n/a', 'na', 'nmn'])
 export function normalizeName(value) {
   return String(value || '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/\bma\.?(?=\s|$)/g, 'maria').replace(/\bsto\.?(?=\s|$)/g, 'santo').replace(/[^\p{L}\p{N}]/gu, '')
@@ -58,36 +58,42 @@ function parts(values = {}) {
   if (values.fullName.includes(',')) { const [surname, rest] = values.fullName.split(','); const [firstName, ...middle] = rest.trim().split(/\s+/); return { ...values, surname, firstName, middleName: middle.join(' ') } }
   return { ...values, mononym: true, firstName: values.fullName }
 }
-export function crossChecks({ nsrp = {}, birth = {}, ids = [] } = {}) {
+export function crossChecks({ nsrp = {}, ids = [] } = {}) {
   const findings = [], comparisons = []
-  const birthValues = parts(birth.values)
-  const compare = (document, label, baseline, reference) => {
-    const values = parts(document.values), independent = document.evidence === 'independent'
-    for (const field of ['surname', 'firstName', 'middleName', 'suffix', 'dob', 'sex', 'placeOfBirth', ...(label === 'id' ? ['idNumber'] : [])]) {
-      const a = values[field], b = baseline[field]
-      let result = field === 'dob' ? compareDate(a, b) : field === 'idNumber' ? !a || !b ? 'could_not_read' : normalizeName(a) === normalizeName(b) ? 'match' : 'significant' : compareName(a, b, { middle: field === 'middleName' })
-      let ruleId = `cross_${label}_${reference}_${field}`
-      if (field === 'surname' && label === 'id' && result === 'significant' && nsrp.sex === 'Female' && ['Married', 'Widowed', 'Separated'].includes(nsrp.civilStatus) && birthValues.surname && normalizeName(birthValues.surname) === normalizeName(nsrp.middleName)) { result = 'info'; ruleId = 'cross_married_name' }
-      if (field === 'surname' && label === 'birth' && result === 'significant' && nsrp.sex === 'Female' && ['Married', 'Widowed', 'Separated'].includes(nsrp.civilStatus) && normalizeName(a) === normalizeName(nsrp.middleName)) { result = 'info'; ruleId = 'cross_married_name' }
-      if ((values.mononym || baseline.mononym) && ['surname', 'middleName'].includes(field)) { result = 'info'; ruleId = 'cross_mononym' }
-      // Sex only avoids false flags; it can never introduce an approval-blocking finding.
-      if (field === 'sex' && result !== 'match') result = 'info'
-      if (['middleName', 'suffix'].includes(field) && result === 'significant') result = 'minor'
-      const evidence = independent ? 'independent' : 'self-declared'
-      const fieldGroup = ['surname', 'firstName', 'middleName', 'suffix'].includes(field) ? 'name' : field === 'dob' ? 'birth date' : field === 'idNumber' ? 'ID number' : field
-      comparisons.push({ ruleId, fieldGroup, result, evidence })
-      if (result !== 'match') findings.push({ ruleId, code: ruleId, severity: ['info', 'could_not_read'].includes(result) ? 'info' : result === 'significant' && independent ? 'critical' : 'warning', fieldGroup, evidence, status: 'open', approvalBlocking: ['name', 'birth date'].includes(fieldGroup) })
+  for (const document of ids) {
+    const values = document.values || {}, baseline = parts(nsrp)
+    let result = 'could_not_read'
+    if (values.fullName) {
+      const expected = [baseline.firstName, baseline.middleName, baseline.surname, baseline.suffix].filter(Boolean).join(' ')
+      const surnameFirst = [baseline.surname, baseline.firstName, baseline.middleName, baseline.suffix].filter(Boolean).join(' ')
+      const required = [baseline.firstName, baseline.surname, baseline.suffix].filter(Boolean).join(' ')
+      const requiredSurnameFirst = [baseline.surname, baseline.firstName, baseline.suffix].filter(Boolean).join(' ')
+      if (baseline.firstName && (baseline.surname || baseline.mononym)) {
+        const candidates = [expected, surnameFirst, required, requiredSurnameFirst]
+        const results = candidates.map(name => compareName(values.fullName, name))
+        result = results.includes('match') ? 'match' : results.includes('minor') ? 'minor' : 'significant'
+      }
+    } else if (values.firstName && values.surname && baseline.firstName && baseline.surname) {
+      const results = ['surname', 'firstName', ...(values.middleName && baseline.middleName ? ['middleName'] : []), ...(values.suffix && baseline.suffix ? ['suffix'] : [])].map(field => compareName(values[field], baseline[field], { middle: field === 'middleName' }))
+      result = results.includes('significant') ? 'significant' : results.includes('minor') ? 'minor' : 'match'
     }
+    const evidence = document.evidence === 'independent' ? 'independent' : 'self-declared'
+    const comparison = { ruleId: 'cross_id_nsrp_name', fieldGroup: 'name', result, evidence }
+    comparisons.push(comparison)
+    if (result !== 'match') findings.push({ ...comparison, code: comparison.ruleId, severity: result === 'could_not_read' ? 'info' : result === 'significant' && evidence === 'independent' ? 'critical' : 'warning', status: 'open', approvalBlocking: true })
   }
-  compare(birth, 'birth', nsrp, 'nsrp')
-  for (const id of ids) compare(id, 'id', nsrp, 'nsrp')
-  const significant = comparisons.some(c => c.evidence === 'independent' && c.result === 'significant')
-  const minor = comparisons.filter(c => ['minor', 'significant'].includes(c.result)).length
-  return { rulesVersion: CROSS_RULES_VERSION, level: significant ? 'needs attention' : minor > 1 ? 'minor differences' : 'consistent', comparisons, findings: [...new Map(findings.map(f => [f.ruleId, f])).values()], independentComparisons: comparisons.filter(c => c.evidence === 'independent' && c.result === 'match' && c.fieldGroup !== 'sex').length }
+  return { rulesVersion: CROSS_RULES_VERSION, level: comparisons.some(c => c.result === 'significant' && c.evidence === 'independent') ? 'needs attention' : comparisons.some(c => c.result === 'minor') ? 'minor differences' : 'consistent', comparisons, findings, independentComparisons: comparisons.filter(c => c.evidence === 'independent' && c.result === 'match').length }
+}
+// A combined row has comma-separated surname and given/middle names beneath
+// these labels. The 'Last Name' label itself may be misread by OCR.
+export function isCombinedNameHeader(line) {
+  const normalized = String(line || '').toLowerCase().replace(/[^a-z]/g, '')
+  return normalized.includes('firstname') && normalized.includes('middlename')
 }
 // Extract only labeled identity fields used by verification. OCR text remains transient.
 export function extractDocumentFields(text = '') {
   const aliases = {
+    fullName: '(?:full\\s*name|name)',
     surname: '(?:surname|last\\s*name|family\\s*name)',
     firstName: '(?:first\\s*name|given\\s*names?)',
     middleName: 'middle\\s*name',
@@ -99,18 +105,13 @@ export function extractDocumentFields(text = '') {
   }
   const lines = String(text || '').replace(/\r/g, '').split('\n')
   const output = {}
-  const nameHeader = lines.findIndex(line => {
-    const normalized = line.toLowerCase().replace(/[^a-z]/g, '')
-    return normalized.includes('lastname') && normalized.includes('firstname') && normalized.includes('middlename')
-  })
+  const nameHeader = lines.findIndex(isCombinedNameHeader)
   if (nameHeader >= 0) {
     for (const line of lines.slice(nameHeader + 1, nameHeader + 4)) {
-      const match = /([A-Z?][A-Z?'-]{1,}),\s*([A-Z?][A-Z?'-]{1,})\s+([A-Z?][A-Z?' -]*)/i.exec(line)
+      const match = /^\s*([^,]+),\s*([\p{L}?' -]+)\s*$/u.exec(line.replace(/[\s:;|.]+$/, ''))
       if (!match) continue
-      output.surname = match[1].trim().slice(0, 120)
-      output.firstName = match[2].trim().slice(0, 120)
-      const middle = match[3].trim().replace(/\s+/g, ' ')
-      if (middle) output.middleName = middle.slice(0, 120)
+      const surname = match[1].trim().replace(/^(?:(?:lw|[aoilw?])\s+)+(?=[A-Z])/, '')
+      output.fullName = `${surname}, ${match[2].trim()}`.slice(0, 240)
       break
     }
   }

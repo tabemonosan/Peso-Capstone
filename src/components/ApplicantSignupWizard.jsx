@@ -531,7 +531,6 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
       if (resume && resumeError(resume)) localErrors.resume = resumeError(resume)
       if (!BIRTH_COPY_TYPES.includes(docs.birthDetails?.copyType)) localErrors.birthCertificate = 'Select the birth certificate copy type.'
       if (!validateVerificationDocs(docs)) localErrors.validId2 = "Add a birth certificate and complete Valid ID #1."
-      if (docs.id1.type && docs.id2.type && docs.id1.type === docs.id2.type) localErrors.validId2 = "Choose a different type for Valid ID #2."
       if (Object.keys(localErrors).length) showErrors(localErrors)
       return Object.keys(localErrors).length === 0
     }

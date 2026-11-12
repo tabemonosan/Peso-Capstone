@@ -5,7 +5,7 @@ import AdminWaitlistActions from '../components/AdminWaitlistActions'
 import CheckDocumentsButton from '../components/CheckDocumentsButton'
 import MyDocumentsModal from '../components/MyDocumentsModal'
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
-const state = { waitlisted: true, status: 'waitlisted', contact: 'SAMPLE PESO contact', officeHours: 'SAMPLE office hours', issues: [{ document: 'birthCertificate', label: 'Birth Certificate', fieldGroup: 'birth date', message: 'The date of birth we read may not match your NSRP.', chancesLeft: 0, canResubmit: false }] }
+const state = { waitlisted: true, status: 'waitlisted', contact: 'SAMPLE PESO contact', officeHours: 'SAMPLE office hours', issues: [{ document: 'validId1', label: 'Valid ID #1', fieldGroup: 'birth date', message: 'The date of birth we read may not match your NSRP.', chancesLeft: 0, canResubmit: false }] }
 it('shows neutral reasons, chances, office details and approximate-reading guidance', () => {
   render(<ConsistencyWaitlistCard state={state} />)
   expect(screen.getByRole('heading', { name: 'Why is my account waitlisted?' })).toBeInTheDocument()
@@ -20,7 +20,7 @@ it('shows checking status without telling an applicant they are waitlisted', () 
   expect(screen.queryByRole('heading')).not.toBeInTheDocument()
 })
 it('keeps explanations available while upload chances are exhausted', () => {
-  render(<MyDocumentsModal token="sample" onClose={() => {}} info={{ verificationStatus: 'waitlisted', consistency: state, documents: [{ docKey: 'birthCertificate', label: 'Birth Certificate', status: 'pending', uploadsRemaining: 4, latest: { version: 1 } }] }} />)
+  render(<MyDocumentsModal token="sample" onClose={() => {}} info={{ verificationStatus: 'waitlisted', consistency: state, documents: [{ docKey: 'validId1', label: 'Valid ID #1', status: 'pending', uploadsRemaining: 4, latest: { version: 1 } }] }} />)
   expect(screen.getByRole('button', { name: 'Explain a difference' })).toBeEnabled()
   expect(screen.queryByRole('button', { name: /Resubmit|Replace|Upload document/i })).not.toBeInTheDocument()
 })
@@ -32,13 +32,13 @@ it('allows a pending birth certificate replacement when only the ID has an exhau
   expect(within(birth).getByRole('button', { name: 'Upload', exact: true })).toBeEnabled()
 })
 it('does not request an explanation or admin review for a verified document', () => {
-  render(<MyDocumentsModal token="sample" onClose={() => {}} info={{ verificationStatus: 'approved', documents: [{ docKey: 'birthCertificate', label: 'Birth Certificate', status: 'approved', latest: { version: 1 } }] }} />)
+  render(<MyDocumentsModal token="sample" onClose={() => {}} info={{ verificationStatus: 'approved', documents: [{ docKey: 'validId1', label: 'Valid ID #1', status: 'approved', latest: { version: 1 } }] }} />)
   expect(screen.getByText('Verified')).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Explain a difference' })).not.toBeInTheDocument()
   expect(screen.queryByText(/Waiting for PESO review/)).not.toBeInTheDocument()
 })
 it('shows an unprocessed document as checking without requesting an explanation', () => {
-  render(<MyDocumentsModal token="sample" onClose={() => {}} info={{ verificationStatus: 'under_review', documents: [{ docKey: 'birthCertificate', label: 'Birth Certificate', status: 'pending', latest: { version: 1 } }] }} />)
+  render(<MyDocumentsModal token="sample" onClose={() => {}} info={{ verificationStatus: 'under_review', documents: [{ docKey: 'validId1', label: 'Valid ID #1', status: 'pending', latest: { version: 1 } }] }} />)
   expect(screen.getByText('Checking')).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Explain a difference' })).not.toBeInTheDocument()
 })
@@ -64,4 +64,14 @@ it('preflight is advisory and sends only typed data and uploaded files', async (
   expect(await screen.findByText(/Please check the ID expiry/)).toBeInTheDocument()
   expect(screen.getByText(/does not read document text or block submission/)).toBeInTheDocument()
   expect(fetcher.mock.calls[0][0]).toMatch(/check-documents$/)
+})
+
+it.each(['pending', 'rejected', 'needs_resubmission', 'approved', 'received'])('shows a collected birth certificate as Received for legacy status %s', status => {
+ render(<MyDocumentsModal token="sample" onClose={() => {}} info={{ verificationStatus: 'under_review', consistency: { checking: true }, review: { documents: [{ docKey: 'birthCertificate', needsReview: true, reason: 'Could not be read' }] }, documents: [{ docKey: 'birthCertificate', label: 'Birth Certificate', status, uploadsRemaining: 3, latest: { version: 1 } }] }} />)
+ const card = screen.getByText('Birth Certificate').closest('li')
+ expect(within(card).getByText('Received')).toBeInTheDocument()
+ expect(within(card).getByText(/not verified or compared/)).toBeInTheDocument()
+ expect(within(card).queryByText(/Could not be read|Checking|Flagged for review/)).not.toBeInTheDocument()
+ expect(within(card).queryByRole('button', { name: 'Explain a difference' })).not.toBeInTheDocument()
+ expect(within(card).queryByText('How to correct this submission')).not.toBeInTheDocument()
 })

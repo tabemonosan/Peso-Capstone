@@ -225,6 +225,7 @@ export function createNsrpAutomation({ Applicant, Employer, EmployerRequest, not
     const set = {}, inc = {}
     let changedFindings = false
     for (const [docKey, slot] of Object.entries(account.verificationDocuments || {})) {
+      if (docKey === 'birthCertificate') continue
       const document = slot.versions?.at(-1)
       if (!document) continue
       const previousRules = (document.findings || []).filter(f => registrationDuplicates.has(f.ruleId || f.code)).map(f => f.ruleId || f.code).sort().join(',')

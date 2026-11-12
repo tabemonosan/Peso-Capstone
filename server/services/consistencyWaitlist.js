@@ -21,10 +21,11 @@ export function createConsistencyWaitlist({ Applicant, automation, notify, notif
     // Refresh obsolete phone flags and flags already settled by staff approval.
     // A policy recheck does not count as an applicant correction attempt.
     const approvedIssue = account.consistencyState?.issues?.some(issue => isManuallyApproved(latest(account, issue.docKey)))
-    const obsoleteIssue = account.consistencyState?.issues?.some(issue => issue.reasonCode === 'cross_check_mismatch' && !WAITLIST_GROUPS.includes(issue.fieldGroup))
+    const obsoleteIssue = account.consistencyState?.issues?.some(issue => !WAITLIST_DOCUMENTS.includes(issue.docKey) || issue.reasonCode === 'cross_check_mismatch' && !WAITLIST_GROUPS.includes(issue.fieldGroup))
     const oldDuplicateReview = account.consistencyState?.rulesVersion !== WAITLIST_RULES_VERSION && account.consistencyState?.issues?.some(issue => issue.reasonCode === 'staff_review')
     const refreshedDuplicateReview = account.verificationStatus === 'waitlisted' && account.consistencyState?.status !== 'checking' && account.consistencyState?.issues?.some(issue => issue.reasonCode === 'staff_review') && await automation.refreshDuplicateFindings(id)
-    if (account.verificationStatus === 'waitlisted' && account.consistencyState?.status !== 'checking' && (approvedIssue || obsoleteIssue || oldDuplicateReview || refreshedDuplicateReview || account.consistencyState?.rulesVersion !== WAITLIST_RULES_VERSION && Object.values(account.verificationDocuments || {}).some(slot => slot.versions?.at(-1)?.findings?.some(isSharedPhoneFinding)))) {
+    const policyChanged = Boolean(account.consistencyState?.rulesVersion && account.consistencyState.rulesVersion !== WAITLIST_RULES_VERSION)
+    if (['under_review', 'waitlisted'].includes(account.verificationStatus) && account.consistencyState?.status !== 'checking' && (policyChanged || account.verificationStatus === 'waitlisted' && (approvedIssue || obsoleteIssue || oldDuplicateReview || refreshedDuplicateReview || account.consistencyState?.rulesVersion !== WAITLIST_RULES_VERSION && Object.values(account.verificationDocuments || {}).some(slot => slot.versions?.at(-1)?.findings?.some(isSharedPhoneFinding))))) {
       await begin(id, 'policy', undefined, ip)
       account = await get(id)
     }
@@ -94,7 +95,7 @@ export function createConsistencyWaitlist({ Applicant, automation, notify, notif
       const account = await get(id)
       if (account?.consistencyState?.token !== token) return
       const work = (async () => {
-        for (const docKey of ['birthCertificate', 'validId1', 'validId2']) {
+        for (const docKey of ['validId1', 'validId2']) {
           if (isManuallyApproved(latest(account, docKey))) continue
           const version = latest(account, docKey)?.version
           if (version) {
@@ -104,7 +105,7 @@ export function createConsistencyWaitlist({ Applicant, automation, notify, notif
         }
         // Refresh all comparisons before deciding, so an old mismatch on another
         // document cannot block a clean correction against the current reference.
-        for (const docKey of ['birthCertificate', 'validId1', 'validId2']) {
+        for (const docKey of ['validId1', 'validId2']) {
           if (isManuallyApproved(latest(account, docKey))) continue
           if (latest(account, docKey)?.version) await verifyDocument({ role: 'Applicant', accountId: id, docKey, checkToken: token, ip })
         }
@@ -128,7 +129,7 @@ export function createConsistencyWaitlist({ Applicant, automation, notify, notif
     if (!result.modifiedCount) return
     // Notify staff after scanning, only if this upload still needs review.
     const changed = latest(account, state.changedDoc)
-    if (['birthCertificate', 'validId1', 'validId2'].includes(state.changedDoc) && changed?.status === 'pending') {
+    if (['validId1', 'validId2'].includes(state.changedDoc) && changed?.status === 'pending') {
       await notifyAdmins({ type: 'document_resubmitted', title: 'Document needs review', message: 'An uploaded document could not be verified automatically. Open the document review queue.', link: '/verification-flagged', metadata: { applicantId: String(account._id), docKey: state.changedDoc } })
     }
     const transition = !active && outcome === 'complete' ? await recomputeApplicant(id) : null

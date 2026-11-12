@@ -5,8 +5,8 @@
 // stored legacy resume data is kept in the database but unreachable from the UI.
 export const VERIFICATION_DOC_KEYS = ['nsrpForm', 'birthCertificate', 'validId1', 'validId2', 'supportingExplanation']
 export const REQUIRED_DOC_KEYS = ['nsrpForm', 'birthCertificate', 'validId1']
-// NSRP is required registration data, rather than independent identity evidence.
-export const IDENTITY_DOC_KEYS = ['birthCertificate', 'validId1']
+// Only Valid ID #1 requires approval; NSRP and birth certificate require submission.
+export const IDENTITY_DOC_KEYS = ['validId1']
 export const nsrpReferenceLocked = account => Boolean(account.verificationDocuments?.nsrpForm?.versions?.length && account.verificationStatus === 'approved')
 
 export const VERIFICATION_DOC_LABELS = {
