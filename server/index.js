@@ -1,6 +1,7 @@
 import { applicantReputationSummaries } from './services/applicantReputationSummary.js'
 import { adminAccessMiddleware } from './middleware/adminAccess.js'
 import { createInternalAccountsRouter } from './routes/internalAccounts.js'
+import { createChangePasswordRouter } from './routes/changePassword.js'
 import { createPasswordRecoveryRouter } from './routes/passwordRecovery.js'
 import { employerSessionGuard } from './middleware/employerSessions.js'
 import { EmailDelivery } from './models/emailDelivery.js'
@@ -191,6 +192,7 @@ app.use('/api/admin/activity-logs', createAdminActivityRouter({ ActivityLog, Adm
 app.use('/api/admin/email-delivery', createEmailDeliveryRouter({ Model: EmailDelivery, service: { attempt: (...args) => import('./mailer.js').then(module => module.emailDeliveryService.attempt(...args)) } }))
 app.use('/api', applicantSessionGuard({ Applicant, authenticate: authenticateRequest }))
 app.use('/api', employerSessionGuard({ Employer, authenticate: authenticateRequest }))
+app.use('/api/auth', createChangePasswordRouter({ Applicant, Employer, authenticate: authenticateRequest }))
 
 app.get('/api/employer-requirements/current/versions/:version/view', async (req, res) => {
   try {

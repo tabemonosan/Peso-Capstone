@@ -24,7 +24,8 @@ it.each(['super_admin', 'admin', 'staff'])('shows navigation appropriate for %s'
   await waitFor(() => {
     expect(Boolean(within(navigation).queryByRole('button', { name: /Internal Accounts/i }))).toBe(level === 'super_admin')
     expect(Boolean(within(navigation).queryByRole('button', { name: /Account Deletions/i }))).toBe(level !== 'staff')
-    expect(Boolean(within(navigation).queryByRole('button', { name: /Verification Settings/i }))).toBe(level !== 'staff')
+    expect(Boolean(within(navigation).queryByRole('button', { name: /Verification Settings/i }))).toBe(level === 'super_admin')
+    expect(Boolean(within(navigation).queryByRole('button', { name: /Email Delivery/i }))).toBe(level === 'super_admin')
   })
   expect(within(navigation).getByRole('button', { name: /Review Notes/i })).toBeInTheDocument()
 })
@@ -47,4 +48,13 @@ it('shows automation settings as read-only for normal Admin', async () => {
   expect(checkbox).toBeDisabled()
   fireEvent.click(screen.getByRole('button', { name: 'Save verification rules' }))
   expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+})
+
+
+it.each(['admin', 'super_admin'])('shows staff recommendations without a note form for %s', async level => {
+  vi.stubGlobal('fetch', vi.fn(async input => ({ ok: true, json: async () => input.includes('/review-notes') ? { items: [{ _id: 'note1', recommendation: 'approve', authorEmail: 'staff@example.com', note: 'Staff checked the documents.', entityType: 'Applicant', entityId: 'app1', createdAt: new Date().toISOString() }], total: 1 } : { verificationStatus: 'approved', documents: [] } })))
+  render(<AdminAccessContext.Provider value={{ adminLevel: level }}><VerificationDocsReviewModal applicant={{ id: 'app1', email: 'applicant@example.com' }} token="reviewer-token" onClose={() => {}} onRestrict={() => {}} /></AdminAccessContext.Provider>)
+  expect(await screen.findByText('Staff checked the documents.')).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Add note' })).not.toBeInTheDocument()
+  expect(screen.queryByLabelText('Recommendation')).not.toBeInTheDocument()
 })

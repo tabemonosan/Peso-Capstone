@@ -58,3 +58,23 @@ it('keeps birthplace and ID-number differences advisory for automatic approval',
  expect(otherFields.length).toBeGreaterThan(0)
  expect(otherFields.every(f => f.approvalBlocking === false)).toBe(true)
 })
+
+it('compares ID details with NSRP and excludes birth certificate comparisons', () => {
+ const report = crossChecks({
+  nsrp: { firstName: 'Maria', surname: 'Cruz', dob: '1990-04-12', idNumber: '1234567890' },
+  birth: { values: { firstName: 'Different', surname: 'Person', dob: '1980-02-03' }, evidence: 'independent' },
+  ids: [{ values: { firstName: 'Maria', surname: 'Cruz', dob: '1990-04-12', idNumber: '1234567890' }, evidence: 'independent' }],
+ })
+ expect(report.comparisons.some(item => item.ruleId.endsWith('_nsrp_firstName'))).toBe(true)
+ expect(report.comparisons.some(item => item.ruleId.endsWith('_birth_firstName'))).toBe(false)
+ expect(report.comparisons.some(item => item.ruleId.endsWith('_nsrp_firstName'))).toBe(true)
+ expect(report.comparisons.some(item => item.ruleId.endsWith('_birth_firstName'))).toBe(false)
+})
+
+it('extracts comparison fields from common ID labels with varied separators', () => {
+ expect(extractDocumentFields('LAST NAME SANTOS\nGiven Name: MARIA\nDOB 1990-04-12\nDriver?s License No. D12-34-567890\nGender: Female')).toMatchObject({ surname: 'SANTOS', firstName: 'MARIA', dob: '1990-04-12', idNumber: 'D12-34-567890', sex: 'Female' })
+})
+
+it('extracts comma-formatted Driver license name under a shared name header', () => { expect(extractDocumentFields('Last Name, First Name, Middle Name\nSAMONTE, ICY DMITRI NAGRAMPA')).toMatchObject({ surname: 'SAMONTE', firstName: 'ICY', middleName: 'DMITRI NAGRAMPA' }) })
+
+it('extracts the driver-license layout from the applicant OCR preview', () => { expect(extractDocumentFields('a Last Name, First Name. Middle Name\nlw SAMONTE, ICY DMITRI NAGRAMPA\nho by Sax oni Weight tke) Height(m)')).toMatchObject({ surname: 'SAMONTE', firstName: 'ICY', middleName: 'DMITRI NAGRAMPA' }) })

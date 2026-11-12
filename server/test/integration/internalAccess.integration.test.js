@@ -105,8 +105,8 @@ describe('internal access levels', () => {
       ['put', '/api/admin/job-moderation/settings'],
     ]) expect((await request(app)[method](path).set(headers).send({ adminLevel: 'super_admin' })).status, `${method} ${path}`).toBe(403)
   })
-  it('allows normal admins to decide and inspect settings but reserves settings changes and deletion decisions for Super Admin', async () => {
-    expect((await request(app).get('/api/admin/nsrp-automation/settings').set(auth('admin'))).status).toBe(200)
+  it('allows normal admins to decide but reserves settings access and deletion decisions for Super Admin', async () => {
+    expect((await request(app).get('/api/admin/nsrp-automation/settings').set(auth('admin'))).status).toBe(403)
     expect((await request(app).put('/api/admin/nsrp-automation/settings').set(auth('admin')).send({})).status).toBe(403)
     expect((await request(app).get('/api/account-deletion/requests').set(auth('admin'))).status).toBe(200)
     expect((await request(app).put(`/api/account-deletion/requests/${new mongoose.Types.ObjectId()}`).set(auth('admin')).send({ status: 'approved' })).status).toBe(403)
@@ -191,5 +191,36 @@ describe('internal access levels', () => {
     expect(dashboard.status).toBe(200)
     expect(dashboard.body).toMatchObject({ adminLevel: 'staff', tasks: { applicants: 0, jobs: 0 } })
     expect(dashboard.body.stats).toBeUndefined()
+  })
+})
+
+
+describe('staff notes and restricted pages', () => {
+  it('keeps staff notes private from other staff, hides old administrator notes, and prevents administrator authors', async () => {
+    const applicant = await Applicant.create({ email: 'notes-target@example.com', passwordHash: 'unused' })
+    const staff = accounts.find(a => a.adminLevel === 'staff')
+    const other = await Admin.create({ email: 'other-staff@example.com', passwordHash: 'unused', adminLevel: 'staff' })
+    for (const author of [...accounts, other]) await AdminReviewNote.create({ entityType: 'Applicant', entityId: applicant._id, authorId: author._id, authorEmail: author.email, authorLevel: author.adminLevel, note: author.email })
+    for (const query of [{}, { entityType: 'Applicant', entityId: String(applicant._id) }]) {
+      const own = await request(app).get('/api/admin/review-notes').set(auth('staff')).query({ ...query, authorId: String(other._id) })
+      expect(own.status).toBe(200)
+      expect(own.body.total).toBe(1)
+      expect(own.body.items[0].authorId).toBe(String(staff._id))
+      for (const level of ['admin', 'super_admin']) {
+        const list = await request(app).get('/api/admin/review-notes').set(auth(level)).query(query)
+        expect(list.body.total).toBe(2)
+        expect(list.body.items.every(note => note.authorLevel === 'staff')).toBe(true)
+        expect((await request(app).post('/api/admin/review-notes').set(auth(level)).send({ entityType: 'Applicant', entityId: String(applicant._id), note: 'Forbidden' })).status).toBe(403)
+      }
+    }
+    expect(await AdminReviewNote.countDocuments()).toBe(4)
+  })
+  it.each(['admin', 'staff'])('blocks %s from email delivery and verification settings APIs', async level => {
+    for (const path of ['/api/admin/email-delivery', '/api/admin/email-delivery/settings', '/api/admin/nsrp-automation/settings']) {
+      expect((await request(app).get(path).set(auth(level))).status).toBe(403)
+    }
+  })
+  it('allows Super Admin to access email delivery and verification settings', async () => {
+    for (const path of ['/api/admin/email-delivery', '/api/admin/nsrp-automation/settings']) expect((await request(app).get(path).set(auth('super_admin'))).status).toBe(200)
   })
 })

@@ -80,17 +80,52 @@ export function crossChecks({ nsrp = {}, birth = {}, ids = [] } = {}) {
     }
   }
   compare(birth, 'birth', nsrp, 'nsrp')
-  for (const id of ids) { compare(id, 'id', nsrp, 'nsrp'); if (birth.values) compare(id, 'id', birthValues, 'birth') }
+  for (const id of ids) compare(id, 'id', nsrp, 'nsrp')
   const significant = comparisons.some(c => c.evidence === 'independent' && c.result === 'significant')
   const minor = comparisons.filter(c => ['minor', 'significant'].includes(c.result)).length
   return { rulesVersion: CROSS_RULES_VERSION, level: significant ? 'needs attention' : minor > 1 ? 'minor differences' : 'consistent', comparisons, findings: [...new Map(findings.map(f => [f.ruleId, f])).values()], independentComparisons: comparisons.filter(c => c.evidence === 'independent' && c.result === 'match' && c.fieldGroup !== 'sex').length }
 }
-// English labelled fields only. Used transiently; unlabelled OCR remains inconclusive.
+// Extract only labeled identity fields used by verification. OCR text remains transient.
 export function extractDocumentFields(text = '') {
-  const aliases = { surname: '(?:surname|last name)', firstName: '(?:first name|given names?)', middleName: 'middle name', dob: '(?:date of birth|birth date|dob)', sex: 'sex', placeOfBirth: 'place of birth', idNumber: '(?:id number|passport no\\.?)' }
-  return Object.fromEntries(Object.entries(aliases).flatMap(([key, label]) => {
-    const match = new RegExp('(?:^|\\n)\\s*' + label + '\\s*[:=]\\s*([^\\n]+)', 'i').exec(text)
-    return match ? [[key, match[1].trim().slice(0, 120)]] : []
-  }))
+  const aliases = {
+    surname: '(?:surname|last\\s*name|family\\s*name)',
+    firstName: '(?:first\\s*name|given\\s*names?)',
+    middleName: 'middle\\s*name',
+    suffix: 'suffix',
+    dob: '(?:date\\s*of\\s*birth|birth\\s*date|dob)',
+    sex: '(?:sex|gender)',
+    placeOfBirth: 'place\\s*of\\s*birth',
+    idNumber: '(?:id\\s*(?:number|no\\.?|#)|license\\s*(?:number|no\\.?|#)|driver.?s?\\s*license\\s*(?:number|no\\.?|#)|passport\\s*(?:number|no\\.?))',
+  }
+  const lines = String(text || '').replace(/\r/g, '').split('\n')
+  const output = {}
+  const nameHeader = lines.findIndex(line => {
+    const normalized = line.toLowerCase().replace(/[^a-z]/g, '')
+    return normalized.includes('lastname') && normalized.includes('firstname') && normalized.includes('middlename')
+  })
+  if (nameHeader >= 0) {
+    for (const line of lines.slice(nameHeader + 1, nameHeader + 4)) {
+      const match = /([A-Z?][A-Z?'-]{1,}),\s*([A-Z?][A-Z?'-]{1,})\s+([A-Z?][A-Z?' -]*)/i.exec(line)
+      if (!match) continue
+      output.surname = match[1].trim().slice(0, 120)
+      output.firstName = match[2].trim().slice(0, 120)
+      const middle = match[3].trim().replace(/\s+/g, ' ')
+      if (middle) output.middleName = middle.slice(0, 120)
+      break
+    }
+  }
+  for (const [key, label] of Object.entries(aliases)) {
+    if (output[key]) continue
+    const pattern = new RegExp('^\\s*' + label + '\\s*(?::|=|-)?\\s*(.*?)\\s*$', 'i')
+    for (let index = 0; index < lines.length; index++) {
+      const match = pattern.exec(lines[index])
+      if (!match) continue
+      const value = match[1].replace(/^[#:\-\s]+|[#\s]+$/g, '').trim()
+      if (value) { output[key] = value.slice(0, 120); break }
+      const next = lines[index + 1]?.trim()
+      if (next && !Object.values(aliases).some(alias => new RegExp('^\\s*' + alias + '\\b', 'i').test(next))) { output[key] = next.slice(0, 120); break }
+    }
+  }
+  return output
 }
 export const EXPLANATION_CATEGORIES = ['Married name', 'Corrected record', 'Late-registered birth', 'ID name variant', 'Other']

@@ -165,3 +165,32 @@ describe('Super Admin password reset', () => {
     expect((await request(app).post(`/api/admin/internal-accounts/${users.staff._id}/reset-password`).set(auth(token)).send({ reason: 'Reset' })).status).toBe(409)
   })
 })
+
+
+describe('current password reuse', () => {
+  it.each(['Applicant', 'Employer'])('rejects the current %s password without consuming the recovery token', async role => {
+    const email = users[role].email, resetToken = await proof(email)
+    const rejected = await request(app).post(`${base}/reset`).send({ email, resetToken, newPassword: oldPassword })
+    expect(rejected.status).toBe(400)
+    expect(rejected.body.error).toMatch(/different from your current password/)
+    expect((await login(email)).status).toBe(200)
+    expect((await request(app).post(`${base}/reset`).send({ email, resetToken, newPassword })).status).toBe(200)
+  })
+  it.each(['Applicant', 'Employer'])('requires a different password while signed in as %s and revokes old sessions', async role => {
+    const email = users[role].email, signedIn = await login(email)
+    const change = body => request(app).post('/api/auth/change-password').set(auth(signedIn.body.token)).send(body)
+    expect((await change({ currentPassword: 'wrong', newPassword })).status).toBe(400)
+    const rejected = await change({ currentPassword: oldPassword, newPassword: oldPassword })
+    expect(rejected.status).toBe(400)
+    expect(rejected.body.error).toMatch(/different from your current password/)
+    expect((await change({ currentPassword: oldPassword, newPassword })).status).toBe(200)
+    expect((await request(app).get('/api/profile').set(auth(signedIn.body.token))).status).toBe(401)
+    expect((await change({ currentPassword: newPassword, newPassword: oldPassword })).status).toBe(401)
+    expect((await login(email, newPassword)).status).toBe(200)
+    const nextToken = (await login(email, newPassword)).body.token
+    expect((await request(app).post('/api/auth/change-password').set(auth(nextToken)).send({ currentPassword: newPassword, newPassword: oldPassword })).status).toBe(200)
+  })
+  it('requires authentication for signed-in password changes', async () => {
+    expect((await request(app).post('/api/auth/change-password').send({ currentPassword: oldPassword, newPassword })).status).toBe(401)
+  })
+})
