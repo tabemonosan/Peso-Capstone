@@ -25,7 +25,7 @@ export class PhilSysQrSignatureProvider {
       const payload = envelope.payload()
       // Whitelist only fields needed for transient comparisons. Never expose the payload.
       const values = { firstName: payload.firstName, surname: payload.surname, middleName: payload.middleName, dob: payload.dob || payload.birthDate }
-      if (!values.firstName || !values.surname || !values.dob) return result(provider, 'inconclusive')
+      if (!values.firstName || !values.surname) return result(provider, 'inconclusive')
       const report = crossChecks({ nsrp: context.nsrp, ids: [{ values, evidence: 'independent' }] })
       return result(provider, 'verified', 'high', report.findings, { verifiedQr: true, comparisons: report.comparisons })
     } catch { return result(provider, 'unavailable') }

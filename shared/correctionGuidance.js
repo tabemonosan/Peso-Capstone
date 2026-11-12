@@ -9,7 +9,7 @@ export function correctionGuidance({ docKey, canReplace = true, remaining, emplo
     : docKey === 'nsrpForm'
       ? 'Use Update NSRP below to correct your registration details, or replace your uploaded NSRP file if that option is available.'
       : docKey?.startsWith('validId')
-        ? 'In this document section, choose the correct ID type and upload clear front and back images of the same ID. Check the ID number and expiry date.'
+        ? 'In this document section, upload clear front and back images of the same ID. Make sure the name is readable and matches your NSRP. ID type is optional.'
         : 'In this document section, upload a clear, complete birth certificate with every edge and the printed details visible.'
   return {
     title: 'How to correct this submission',

@@ -281,8 +281,9 @@ export default function VerificationDocsReviewModal({ applicant, token, onClose,
                     {doc.label}{doc.idType ? ` — ${doc.idType}` : ""}
                     {doc.latest ? ` (v${doc.latest.version})` : ""}
                   </span>
-                  {badge(doc.referenceOnly && doc.latest ? 'Registration reference' : doc.status)}
-                  {doc.referenceOnly && <p className="w-full text-xs text-slate-600">NSRP supplies the registration details for birth certificate and ID comparisons. No separate approval is needed.</p>}
+                  {badge(doc.collectionOnly && doc.latest ? 'Received' : doc.referenceOnly && doc.latest ? 'Registration reference' : doc.status)}
+                  {doc.collectionOnly && <p className="w-full text-xs text-slate-600">Supporting file only. This document is not verified or compared with NSRP.</p>}
+                  {doc.referenceOnly && <p className="w-full text-xs text-slate-600">NSRP supplies the registration details for ID comparisons. No separate approval is needed.</p>}
                   {doc.docKey === "nsrpForm" && doc.sourceType && (
                     <span className="rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
                       {doc.sourceType === "uploaded" ? "Uploaded file" : "Generated online"}

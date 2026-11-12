@@ -18,14 +18,14 @@ function findingsForDocument(account, docKey, document) {
   const siblingPrefix = docKey === 'birthCertificate' ? 'cross_id_' : docKey.startsWith('validId') ? 'cross_birth_' : null
   const own = (document.findings || []).filter(f => !isSharedPhoneFinding(f) && (!siblingPrefix || !String(f.ruleId || f.code || '').startsWith(siblingPrefix)))
   // Duplicate identity claims remain an account-wide approval guard.
-  const duplicates = Object.values(account.verificationDocuments || {}).flatMap(slot => slot.versions?.at(-1)?.findings || []).filter(f => !isSharedPhoneFinding(f) && /duplicate|cross_account/.test(f.ruleId || f.code || ''))
+  const duplicates = Object.entries(account.verificationDocuments || {}).filter(([key]) => key !== 'birthCertificate').flatMap(([, slot]) => slot.versions?.at(-1)?.findings || []).filter(f => !isSharedPhoneFinding(f) && /duplicate|cross_account/.test(f.ruleId || f.code || ''))
   return [...own, ...duplicates]
 }
 export function createVerificationEngine({ Applicant, Employer, EmployerRequest, automation, notify, notifyAdmins, recomputeApplicant, random = () => crypto.randomInt(1000000) / 1000000, providers, beforeApproval } = {}) {
   const decisions = () => automation.decisions()
   async function process({ role, accountId, docKey, ip, checkToken }) {
     // Form 1 supplies the comparison baseline; it cannot verify itself.
-    if (role === 'Applicant' && docKey === 'nsrpForm') return
+    if (role === 'Applicant' && ['nsrpForm', 'birthCertificate'].includes(docKey)) return
     const key = ['nsrpForm', 'employerNsrpForm'].includes(docKey) ? `${role}:${accountId}:` : `${role}:${accountId}:${docKey}:`
     let decisionKey, approved = false, locked = false
     try {
@@ -51,13 +51,13 @@ export function createVerificationEngine({ Applicant, Employer, EmployerRequest,
       const oldDecision = await decisions().findOne({ _id: decisionKey })
       const report = nsrpDocument ? oldDecision.report || (role === 'Applicant' ? checkNsrp(nsrp) : checkNsrp2(record)) : null
       const currentDocument = { ...document, ...(role === 'Applicant' ? { findings: findingsForDocument(account, docKey, document) } : {}), quality: nsrpDocument && document.sourceType === 'generated' ? { passed: true, warnings: [] } : document.quality }
-      const allVersions = role === 'Applicant' ? Object.values(account.verificationDocuments || {}).map(slot => slot.versions?.at(-1)).filter(Boolean) : [document]
+      const allVersions = role === 'Applicant' ? Object.entries(account.verificationDocuments || {}).filter(([key]) => key !== 'birthCertificate').map(([, slot]) => slot.versions?.at(-1)).filter(Boolean) : [document]
       let findings = [...(role === 'Applicant' ? findingsForDocument(account, docKey, document) : allVersions.flatMap(v => v.findings || [])), ...(report?.findings || [])].map(safeFinding)
       let comparisons = [...(document.imageComparisons || [])], verifiedQr = false
       if (docKey === 'nsrpForm') comparisons = allVersions.flatMap(v => v.imageComparisons || [])
       let selectedProvider = new LocalChecksProvider(), providerResult = await selectedProvider.verify(currentDocument, { nsrp })
       if (providers) { selectedProvider = providers; providerResult = await providers.verify(currentDocument, { nsrp, accountId: String(accountId) }) }
-      else if (document.declaredDetails?.idType === 'PhilSys National ID' && settings.philsysQrVerification) {
+      else if (role !== 'Applicant' && document.declaredDetails?.idType === 'PhilSys National ID' && settings.philsysQrVerification) {
         const file = await loadDocumentFile(accountId, docKey, document.version)
         const provider = new PhilSysQrSignatureProvider()
         let raw = ''
@@ -71,7 +71,7 @@ export function createVerificationEngine({ Applicant, Employer, EmployerRequest,
         }
         raw = ''
       }
-      if (document.declaredDetails?.number) {
+      if (role !== 'Applicant' && document.declaredDetails?.number) {
         const kind = { Passport: 'passport', SSS: 'sss', 'Pag-IBIG': 'pagibig' }[document.declaredDetails.idType]
         if (kind) {
           const id = await automation.hash(kind, kind === 'passport' ? normalizedText(document.declaredDetails.number) : document.declaredDetails.number.replace(/\D/g, ''))
@@ -84,7 +84,7 @@ export function createVerificationEngine({ Applicant, Employer, EmployerRequest,
       comparisons.push(...(providerResult.comparisons || [])); verifiedQr = providerResult.verifiedQr === true
       const context = { settings, docKey, document: currentDocument, account: { ...account, employerType: record.registrationDetails?.employerType }, findings, comparisons, verifiedQr, pendingExplanation: allVersions.some(v => ['requested', 'submitted'].includes(v.explanation?.status)) }
       let reason = decisionReason(context), sampled = false
-      if (document.qr?.domain && !document.qr.allowlisted) reason = 'Flagged'
+      if (role !== 'Applicant' && document.qr?.domain && !document.qr.allowlisted) reason = 'Flagged'
       const base = `${path}.${versions.length - 1}`, at = new Date()
       if (verifiedQr && role === 'Applicant') await model.collection.updateOne({ _id: record._id, ...(checkToken ? { 'consistencyState.token': checkToken, 'consistencyState.status': 'checking' } : {}), [`${base}.version`]: document.version, [`${path}`]: { $size: versions.length } }, { $set: { [`${base}.imageComparisons`]: [...(document.imageComparisons || []), ...(providerResult.comparisons || []).map(c => ({ ...c, reliable: true }))] } })
       if (providerResult.result === 'failed') {
@@ -103,7 +103,7 @@ export function createVerificationEngine({ Applicant, Employer, EmployerRequest,
         if (!reason) {
           if (beforeApproval) await beforeApproval()
           const freshSettings = await automation.getSettings(), freshAccount = await accountModel.findById(accountId).select('+holdAutoApproval').lean()
-          const freshVersions = role === 'Applicant' ? Object.values(freshAccount.verificationDocuments || {}).map(slot => slot.versions?.at(-1)).filter(Boolean) : allVersions
+          const freshVersions = role === 'Applicant' ? Object.entries(freshAccount.verificationDocuments || {}).filter(([key]) => key !== 'birthCertificate').map(([, slot]) => slot.versions?.at(-1)).filter(Boolean) : allVersions
           const freshFindings = role === 'Applicant' ? findingsForDocument(freshAccount, docKey, freshAccount.verificationDocuments?.[docKey]?.versions?.at(-1) || {}) : freshVersions.flatMap(v => v.findings || [])
           reason = decisionReason({ ...context, settings: freshSettings, account: { ...freshAccount, employerType: record.registrationDetails?.employerType }, findings: [...findings, ...freshFindings.map(safeFinding)], pendingExplanation: freshVersions.some(v => ['requested', 'submitted'].includes(v.explanation?.status)) })
           if (role === 'Applicant' && (account.verificationDocuments?.nsrpForm?.versions?.length || 0) !== (freshAccount.verificationDocuments?.nsrpForm?.versions?.length || 0)) reason = 'Registration reference changed'

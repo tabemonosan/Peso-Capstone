@@ -27,6 +27,6 @@ export default function ApplicantReviewStatus({ token, onManageDocuments }) {
     {review?.documents.length > 0 && <ul className="mt-4 space-y-3">{review.documents.map(doc => <li key={doc.docKey} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm"><p className="font-semibold">{doc.label}</p><p className="mt-1 text-slate-700">{doc.reason}</p><p className="mt-2 text-xs text-slate-600">{doc.canUpdate ? `You can update this document. ${doc.uploadsRemaining} of 5 uploads left.` : 'Open My Documents for the available next steps.'}</p></li>)}</ul>}
     {error && <p role="status" className="mt-3 text-sm text-slate-600">{error}</p>}
     <button type="button" onClick={onManageDocuments} className="mt-4 rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white">Review and update documents</button>
-    <p className="mt-2 text-xs text-slate-500">NSRP supplies the reference for birth certificate and ID checks; no separate approval is needed. You can correct it while your account is under review. Changes reopen earlier identity document approvals for another check.</p>
+    <p className="mt-2 text-xs text-slate-500">NSRP supplies the reference for ID checks; no separate approval is needed. You can correct it while your account is under review. Changes reopen earlier identity document approvals for another check.</p>
   </section>
 }

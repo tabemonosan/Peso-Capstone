@@ -97,7 +97,8 @@ export function createInternalAccountsRouter({ Admin, Applicant, Employer, Accou
     res.json(safeAccount(updated))
   })
   router.get('/review-notes', requirePermission('notes'), async (req, res) => {
-    const filter = {}
+    const filter = { authorLevel: 'staff' }
+    if (req.internalAccount.adminLevel === 'staff') filter.authorId = req.internalAccount._id
     if (req.query.entityType) {
       if (!noteSchema.path('entityType').enumValues.includes(req.query.entityType)) return res.status(400).json({ error: 'Invalid record type.' })
       if (req.query.entityType === 'AccountDeletionRequest' && !adminCan(req.internalAccount, 'decide')) return res.status(403).json({ error: 'Deletion requests are unavailable for this account.' })
@@ -109,7 +110,7 @@ export function createInternalAccountsRouter({ Admin, Applicant, Employer, Accou
     }
     res.json(await paginateQuery(AdminReviewNote, filter, { ...parsePagination(req.query, { defaultLimit: 20 }), sort: { createdAt: -1 } }))
   })
-  router.post('/review-notes', requirePermission('notes'), async (req, res) => {
+  router.post('/review-notes', requirePermission('writeNotes'), async (req, res) => {
     const { entityType, entityId, recommendation = 'note', note } = req.body || {}
     if (!noteSchema.path('entityType').enumValues.includes(entityType) || !mongoose.isValidObjectId(entityId) || !noteSchema.path('recommendation').enumValues.includes(recommendation) || typeof note !== 'string' || !note.trim() || note.length > 1000) return res.status(400).json({ error: 'Choose a record, recommendation, and note (up to 1,000 characters).' })
     if (entityType === 'AccountDeletionRequest' && !adminCan(req.internalAccount, 'decide')) return res.status(403).json({ error: 'Deletion requests are unavailable for this account.' })

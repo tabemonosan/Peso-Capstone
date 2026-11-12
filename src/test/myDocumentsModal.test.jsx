@@ -35,10 +35,10 @@ const docs = [
 describe('MyDocumentsModal file viewers', () => {
   it('shows automatic scanning instead of stale review flags during a recheck', () => {
     render(<MyDocumentsModal token="token" onClose={() => {}} info={{
-      verificationStatus: 'waitlisted', consistency: { checking: true, waitlisted: true, issues: [{ document: 'birthCertificate', chancesLeft: 2 }] },
-      documents: [{ ...docs[1], status: 'pending' }], review: { documents: [{ docKey: 'birthCertificate', needsReview: true, reason: 'Old review message' }] },
+      verificationStatus: 'waitlisted', consistency: { checking: true, waitlisted: true, issues: [{ document: 'validId1', chancesLeft: 2 }] },
+      documents: [{ ...docs[2], status: 'pending' }], review: { documents: [{ docKey: 'validId1', needsReview: true, reason: 'Old review message' }] },
     }} />)
-    const row = screen.getByText('Birth Certificate').closest('li')
+    const row = screen.getByText(/Valid ID #1/).closest('li')
     expect(within(row).getByText('Checking')).toBeInTheDocument()
     expect(within(row).getByText(/Scanning your upload/)).toBeInTheDocument()
     expect(screen.queryByText('Old review message')).not.toBeInTheDocument()
@@ -49,7 +49,7 @@ describe('MyDocumentsModal file viewers', () => {
     const doc = docs[index]
     render(<MyDocumentsModal token="token" onClose={() => {}} info={{ verificationStatus: 'under_review', documents: [{ ...doc, uploadsRemaining: 4 }] }} />)
     const row = screen.getByText(new RegExp(doc.label)).closest('li')
-    expect(within(row).getByRole('combobox', { name: 'ID type' })).toHaveValue(doc.idType)
+    expect(within(row).getByRole('combobox', { name: 'ID type (optional)' })).toHaveValue(doc.idType)
     expect(within(row).queryByLabelText('ID number')).not.toBeInTheDocument()
     const file = new File(['sample'], 'replacement.png', { type: 'image/png' })
     const back = new File(['sample back'], 'replacement-back.png', { type: 'image/png' })
@@ -96,7 +96,7 @@ describe('MyDocumentsModal file viewers', () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => ({ ok: true }) })
     render(<MyDocumentsModal token="token" onClose={() => {}} onUpdated={onUpdated} info={{ documents: [
       { ...docs[0], required: true, status: 'approved' },
-      { ...docs[1], required: true, status: 'rejected', uploadsRemaining: 3, latest: { ...docs[1].latest, reviewReason: 'Please upload a clear copy' } },
+      { ...docs[3], required: true, status: 'rejected', uploadsRemaining: 3, latest: { ...docs[3].latest, reviewReason: 'Please upload a clear copy' } },
       { ...docs[2], required: true, status: 'pending' },
     ] }} />)
     const pending = screen.getByText(/Valid ID #1/).closest('li')
@@ -142,4 +142,13 @@ describe('MyDocumentsModal file viewers', () => {
     expect(open).toHaveBeenNthCalledWith(1, 'http://localhost:4000/signed/id1-front', '_blank')
     expect(open).toHaveBeenNthCalledWith(2, 'http://localhost:4000/signed/id1-back', '_blank')
   })
+})
+
+it('enables uploading both ID sides with no selected ID type', () => {
+ render(<MyDocumentsModal token="token" onClose={() => {}} info={{ verificationStatus: 'under_review', documents: [{ docKey: 'validId1', label: 'Valid ID #1', status: 'pending', uploadsRemaining: 4 }] }} />)
+ const file = new File(['sample'], 'id.png', { type: 'image/png' })
+ expect(screen.getByRole('combobox', { name: 'ID type (optional)' })).toHaveValue('')
+ fireEvent.change(screen.getByLabelText('Choose Valid ID #1 front file'), { target: { files: [file] } })
+ fireEvent.change(screen.getByLabelText('Choose Valid ID #1 back file'), { target: { files: [file] } })
+ expect(screen.getByRole('button', { name: 'Upload', exact: true })).toBeEnabled()
 })

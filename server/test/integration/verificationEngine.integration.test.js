@@ -14,11 +14,11 @@ const EmployerRequest = mongoose.model('EmployerRequest')
 const notify = vi.fn(async () => {}), notifyAdmins = vi.fn(async () => {})
 let automation, engine, sequence = 0
 const version = extra => ({ version: 1, status: 'pending', quality: { passed: true, warnings: [] }, imageComparisons: ['name', 'birth date'].map(fieldGroup => ({ fieldGroup, result: 'match', evidence: 'independent' })), ...extra })
-async function account(extra = {}, docKey = 'birthCertificate', accountExtra = {}) {
+async function account(extra = {}, docKey = 'validId1', accountExtra = {}) {
   return Applicant.create({ email: `engine-${++sequence}@example.invalid`, passwordHash: 'test', emailVerified: true, phone: '09171234567', nsrpAutoEnabledAtCreation: true, profile: { nsrp: validNsrpAnswers() }, verificationDocuments: { [docKey]: { versions: [version(extra)] } }, ...accountExtra })
 }
-const run = (user, docKey = 'birthCertificate', instance = engine) => instance.process({ role: 'Applicant', accountId: user._id, docKey, ip: '192.0.2.7' })
-const saved = (user, docKey = 'birthCertificate') => Applicant.findById(user._id).lean().then(a => a.verificationDocuments[docKey].versions.at(-1))
+const run = (user, docKey = 'validId1', instance = engine) => instance.process({ role: 'Applicant', accountId: user._id, docKey, ip: '192.0.2.7' })
+const saved = (user, docKey = 'validId1') => Applicant.findById(user._id).lean().then(a => a.verificationDocuments[docKey].versions.at(-1))
 beforeAll(startTestDb, 180000)
 afterAll(async () => { vi.unstubAllEnvs(); await stopTestDb() })
 beforeEach(async () => {
@@ -27,7 +27,7 @@ beforeEach(async () => {
  await automation.updateSettings({ auditPercent: 0, dataChecks: false }, 'test-admin')
  engine = createVerificationEngine({ Applicant, Employer, EmployerRequest, automation, notify, notifyAdmins, recomputeApplicant: async () => {}, random: () => 0.5 })
 })
-it.each(['birthCertificate', 'validId1'])('approves an unflagged %s with independent evidence once under concurrency', async docKey => {
+it.each(['validId1', 'validId2'])('approves an unflagged %s with independent evidence once under concurrency', async docKey => {
  const user = await account({}, docKey)
  await Promise.all([run(user, docKey), run(user, docKey), run(user, docKey)])
  expect(await saved(user, docKey)).toMatchObject({ status: 'approved', approvedBy: 'system', autoApproved: true, provider: 'LocalChecksProvider' })
@@ -42,26 +42,26 @@ it('does not send an unflagged applicant document to admin review for random sam
  expect((await saved(user)).status).toBe('approved')
  expect((await automation.decisions().findOne({ accountId: user._id })).sampleDraw).toBeUndefined()
 })
-it('keeps an ID mismatch on the ID without copying it onto the birth certificate', async () => {
- const mismatch = { ruleId: 'cross_id_nsrp_dob', severity: 'critical', fieldGroup: 'birth date', evidence: 'independent', status: 'open', approvalBlocking: true }
- const user = await account({}, 'birthCertificate', { verificationDocuments: {
-  // Include contamination from an older engine decision on the birth record.
-  birthCertificate: { versions: [version({ findings: [mismatch] })] },
-  validId1: { versions: [version({ findings: [mismatch] })] },
+it('skips birth certificates without calling providers or recording decisions', async () => {
+ const user = await account({}, 'birthCertificate')
+ const verify = vi.fn()
+ const instance = createVerificationEngine({ Applicant, Employer, EmployerRequest, automation, notify, providers: { verify } })
+ await run(user, 'birthCertificate', instance)
+ expect(verify).not.toHaveBeenCalled()
+ expect((await saved(user, 'birthCertificate')).status).toBe('pending')
+ expect(await automation.decisions().countDocuments({ accountId: user._id })).toBe(0)
+})
+it('ignores old birth-certificate flags while retaining duplicate guards on IDs', async () => {
+ const duplicate = { ruleId: 'duplicate_sss', severity: 'critical', status: 'open' }
+ const user = await account({}, 'validId1', { verificationDocuments: {
+  birthCertificate: { versions: [version({ findings: [duplicate], explanation: { status: 'submitted' } })] },
+  validId1: { versions: [version()] }, validId2: { versions: [version()] },
  } })
  await run(user)
  expect((await saved(user)).status).toBe('approved')
- expect((await saved(user)).findings).toEqual([])
- await run(user, 'validId1')
- expect(await saved(user, 'validId1')).toMatchObject({ status: 'pending', reviewReasons: ['Flagged'] })
-})
-it('retains account-wide duplicate identity guards when checking another document', async () => {
- const duplicate = { ruleId: 'duplicate_sss', severity: 'critical', fieldGroup: 'identifiers', status: 'open' }
- const user = await account({}, 'birthCertificate', { verificationDocuments: {
-  birthCertificate: { versions: [version()] }, validId1: { versions: [version({ findings: [duplicate] })] },
- } })
- await run(user)
- expect(await saved(user)).toMatchObject({ status: 'pending', reviewReasons: ['Flagged'] })
+ await Applicant.updateOne({ _id: user._id }, { $set: { 'verificationDocuments.validId1.versions.0.findings': [duplicate] } })
+ await run(user, 'validId2')
+ expect(await saved(user, 'validId2')).toMatchObject({ status: 'pending', reviewReasons: ['Flagged'] })
 })
 it('enforces the shared rolling IP/mobile quota', async () => {
  const users = await Promise.all(Array.from({ length: 6 }, () => account()))
@@ -80,29 +80,29 @@ it('requires independent evidence by default and supports the explicit typed-onl
 it('rechecks the kill switch immediately before writing an approval', async () => {
  const user = await account()
  const instance = createVerificationEngine({ Applicant, Employer, EmployerRequest, automation, notify, notifyAdmins, recomputeApplicant: async () => {}, beforeApproval: () => automation.updateSettings({ automaticApproval: false }, 'test-admin') })
- await run(user, 'birthCertificate', instance)
+ await run(user, 'validId1', instance)
  expect((await saved(user)).status).toBe('pending'); expect(notify).not.toHaveBeenCalled()
 })
 it('does not approve identity evidence against an NSRP reference replaced during the check', async () => {
- const user = await account({}, 'birthCertificate', { verificationDocuments: { birthCertificate: { versions: [version()] }, nsrpForm: { versions: [version({ sourceType: 'generated' })] } } })
+ const user = await account({}, 'validId1', { verificationDocuments: { validId1: { versions: [version()] }, nsrpForm: { versions: [version({ sourceType: 'generated' })] } } })
  const instance = createVerificationEngine({ Applicant, Employer, EmployerRequest, automation, notify, notifyAdmins, recomputeApplicant: async () => {}, beforeApproval: async () => {
   await Applicant.updateOne({ _id: user._id }, { $push: { 'verificationDocuments.nsrpForm.versions': version({ version: 2, sourceType: 'generated' }) } })
  } })
- await run(user, 'birthCertificate', instance)
+ await run(user, 'validId1', instance)
  expect(await saved(user)).toMatchObject({ status: 'pending', reviewReasons: ['Registration reference changed'] })
  expect(notify).not.toHaveBeenCalled()
 })
 it('keeps pending explanations in staff review', async () => {
- for (const [extra, docKey, expected] of [[{ explanation: { status: 'submitted' } }, 'birthCertificate', 'Explanation']]) {
+ for (const [extra, docKey, expected] of [[{ explanation: { status: 'submitted' } }, 'validId1', 'Explanation']]) {
   const user = await account(extra, docKey); await run(user, docKey)
   expect((await saved(user, docKey)).reviewReasons).toContain(expected)
  }
 })
 it('automatically verifies a clean replacement while preserving the previous version', async () => {
  const user = await account({ status: 'needs_resubmission' })
- await Applicant.updateOne({ _id: user._id }, { $push: { 'verificationDocuments.birthCertificate.versions': version({ version: 2 }) } })
+ await Applicant.updateOne({ _id: user._id }, { $push: { 'verificationDocuments.validId1.versions': version({ version: 2 }) } })
  await run(user)
- const versions = (await Applicant.findById(user._id)).verificationDocuments.birthCertificate.versions
+ const versions = (await Applicant.findById(user._id)).verificationDocuments.validId1.versions
  expect(versions[0].status).toBe('needs_resubmission')
  expect(versions[1]).toMatchObject({ version: 2, status: 'approved', autoApproved: true })
 })
@@ -116,7 +116,7 @@ it('provider errors leave status pending and emit only a fixed redacted message'
  const log = vi.spyOn(console, 'error').mockImplementation(() => {})
  try {
   const user = await account(), instance = createVerificationEngine({ Applicant, Employer, EmployerRequest, automation, notify, notifyAdmins, recomputeApplicant: async () => {}, providers: { verify: async () => { throw new Error('PRIVATE Juan 1990-01-01 P123456') } } })
-  await run(user, 'birthCertificate', instance)
+  await run(user, 'validId1', instance)
   expect((await saved(user)).status).toBe('pending')
   expect(JSON.stringify(log.mock.calls)).not.toMatch(/PRIVATE|Juan|1990|P123456/)
  } finally { log.mockRestore() }
@@ -124,24 +124,25 @@ it('provider errors leave status pending and emit only a fixed redacted message'
 it('routes three technical failures to an admin without declining and counts each version once', async () => {
  const user = await account(), instance = createVerificationEngine({ Applicant, Employer, EmployerRequest, automation, notify, notifyAdmins, recomputeApplicant: async () => {}, providers: { verify: async () => ({ provider: 'Test', result: 'failed', assurance: 'low', findings: [] }) } })
  for (let attempt = 1; attempt <= 3; attempt++) {
-  if (attempt > 1) await Applicant.updateOne({ _id: user._id }, { $push: { 'verificationDocuments.birthCertificate.versions': version({ version: attempt }) } })
-  await run(user, 'birthCertificate', instance)
+  if (attempt > 1) await Applicant.updateOne({ _id: user._id }, { $push: { 'verificationDocuments.validId1.versions': version({ version: attempt }) } })
+  await run(user, 'validId1', instance)
  }
  expect(await saved(user)).toMatchObject({ status: 'pending', technicalAttempts: 3, reviewReasons: ['Technical attempts: admin review'] })
- await run(user, 'birthCertificate', instance)
- expect((await Applicant.findById(user._id).select('+verificationFailureCounts')).verificationFailureCounts.birthCertificate).toBe(3)
+ await run(user, 'validId1', instance)
+ expect((await Applicant.findById(user._id).select('+verificationFailureCounts')).verificationFailureCounts.validId1).toBe(3)
 })
-it('verifies a generated signed QR image locally and flags its reuse on another account', async () => {
+it('keeps ID type and QR reuse from changing matching name evidence', async () => {
  const keys = generateKeyPairSync('ed25519'), header = Buffer.from(JSON.stringify({ alg: 'EdDSA', kid: 'demo' })).toString('base64url')
  const payload = Buffer.from(JSON.stringify({ firstName: 'Juan', surname: 'Cruz', dob: '1990-01-01', cardNumber: 'DO-NOT-STORE' })).toString('base64url')
  const unsigned = header + '.' + payload, encoded = unsigned + '.' + sign(null, Buffer.from(unsigned), keys.privateKey).toString('base64url')
  vi.stubEnv('PHILSYS_PUBLIC_KEYS', JSON.stringify({ demo: { pem: keys.publicKey.export({ type: 'spki', format: 'pem' }) } }))
  const buffer = await QRCode.toBuffer(encoded, { width: 800, margin: 4 })
- const first = await account({ declaredDetails: { idType: 'PhilSys National ID', format: 'Card' }, imageComparisons: [] }, 'validId1')
- const second = await account({ declaredDetails: { idType: 'PhilSys National ID', format: 'Card' }, imageComparisons: [] }, 'validId1')
+ const first = await account({ declaredDetails: { idType: 'PhilSys National ID', format: 'Card' } }, 'validId1')
+ const second = await account({ declaredDetails: { idType: 'PhilSys National ID', format: 'Card' } }, 'validId1')
  for (const user of [first, second]) { await storeDocumentFile(user._id, 'validId1', 1, 'front', { mimetype: 'image/png', buffer, size: buffer.length }); await run(user, 'validId1') }
- expect(await saved(first, 'validId1'), JSON.stringify(await automation.decisions().findOne({ accountId: first._id }, { projection: { reason: 1, provider: 1, assurance: 1 } }))).toMatchObject({ status: 'approved', provider: 'PhilSysQrSignatureProvider', assurance: 'high' })
- expect((await saved(second, 'validId1')).findings.some(f => f.ruleId === 'duplicate_qr')).toBe(true)
+ expect(await saved(first, 'validId1'), JSON.stringify(await automation.decisions().findOne({ accountId: first._id }, { projection: { reason: 1, provider: 1, assurance: 1 } }))).toMatchObject({ status: 'approved', provider: 'LocalChecksProvider', assurance: 'low' })
+ expect((await saved(second, 'validId1')).status).toBe('approved')
+ expect((await saved(second, 'validId1')).findings.some(f => f.ruleId === 'duplicate_qr')).toBe(false)
  const stored = JSON.stringify(await automation.decisions().find({}).toArray()) + JSON.stringify(await mongoose.connection.db.collection('verification_qr_claims').find({}).toArray())
  expect(stored).not.toMatch(/DO-NOT-STORE|1990-01-01|signature|qrPayload/)
  expect(stored).not.toContain(encoded)

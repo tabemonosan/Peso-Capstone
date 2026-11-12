@@ -145,7 +145,7 @@ describe('one dashboard per role', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Review and update documents' }))
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByText('Registration reference')).toBeInTheDocument()
-    expect(within(dialog).getByText(/Registration reference for your birth certificate and ID checks/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/Registration reference for your ID checks/)).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: 'Update NSRP' })).toBeEnabled()
   })
 

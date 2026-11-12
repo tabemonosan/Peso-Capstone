@@ -71,7 +71,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated, guid
       payload.append("document", file)
       if (docKey.startsWith('validId')) payload.append('documentBack', pendingBackFile[docKey])
       payload.append('verificationDetails', JSON.stringify(declared[docKey] || {}))
-      const idType = pendingIdType[docKey] || documents.find(doc => doc.docKey === docKey)?.idType
+      const idType = pendingIdType[docKey] ?? documents.find(doc => doc.docKey === docKey)?.idType
       if (docKey.startsWith("validId") && idType) payload.append("idType", idType)
       const response = await fetch(`${API_URL}/api/profile/verification-documents/${docKey}`, {
         method: "POST",
@@ -116,6 +116,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated, guid
 
   const chip = (status) => {
     const styles = {
+      Received: "border-green-300 bg-green-100 text-green-800",
       approved: "border-green-300 bg-green-100 text-green-800",
       rejected: "border-rose-300 bg-rose-100 text-rose-800",
       pending: "border-amber-300 bg-amber-100 text-amber-800",
@@ -152,7 +153,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated, guid
         <div>
           <h2 id="my-documents-title" className="text-xl font-bold">Verification documents</h2>
           <p id="my-documents-description" className="mt-2 text-sm text-slate-600">
-            Uploaded files are scanned and compared with your NSRP automatically. Matching documents can be verified without PESO review; unresolved flags still need staff review.
+            The name on your ID is scanned and compared with your NSRP automatically. ID type is optional. Birth certificates are collected as supporting files only. Matching documents can be verified without PESO review; unresolved flags still need staff review.
           </p>
           {info.verificationStatus && (
             <p className="mt-1 text-sm text-slate-600">
@@ -176,16 +177,17 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated, guid
       {guideState && <div className="mt-4"><PageGuide role="Applicant" view="documents" state={guideState} token={token} onSaved={onGuidesSaved} /></div>}
       <ul className="mt-5 space-y-3">
         {documents.map((doc) => {
+          const collectionOnly = doc.docKey === 'birthCertificate'
           const relevant = (info.consistency?.issues || []).filter(issue => issue.chancesLeft !== null && (issue.document === doc.docKey || doc.docKey === 'nsrpForm'))
-          const flagged = info.consistency?.waitlisted && relevant.length > 0
+          const flagged = !collectionOnly && info.consistency?.waitlisted && relevant.length > 0
           const review = info.review?.documents?.find(item => item.docKey === doc.docKey)
-          const scanning = info.consistency?.checking && doc.status === 'pending'
-          const needsReview = !scanning && (flagged || review?.needsReview === true || ['rejected', 'needs_resubmission'].includes(doc.status))
+          const scanning = !collectionOnly && info.consistency?.checking && doc.status === 'pending'
+          const needsReview = !collectionOnly && !scanning && (flagged || review?.needsReview === true || ['rejected', 'needs_resubmission'].includes(doc.status))
           const hasChances = !flagged || relevant.every(issue => issue.chancesLeft > 0)
           const staffReviewOnly = (info.consistency?.issues || []).some(issue => issue.document === doc.docKey && issue.chancesLeft === null)
           const pendingEditable = ['under_review', 'waitlisted'].includes(info.verificationStatus) && !staffReviewOnly && (doc.status === 'pending' || doc.referenceOnly)
-          const locked = (doc.referenceOnly ? doc.locked : doc.status === "approved") && !flagged
-          const canReplace = !locked && !staffReviewOnly && (["rejected", "needs_resubmission", "missing"].includes(doc.status) || flagged || pendingEditable) && doc.uploadsRemaining !== 0 && hasChances
+          const locked = !collectionOnly && (doc.referenceOnly ? doc.locked : doc.status === "approved") && !flagged
+          const canReplace = collectionOnly ? doc.uploadsRemaining !== 0 : !locked && !staffReviewOnly && (["rejected", "needs_resubmission", "missing"].includes(doc.status) || flagged || pendingEditable) && doc.uploadsRemaining !== 0 && hasChances
           const idType = pendingIdType[doc.docKey] ?? doc.idType ?? ''
           return (
             <li key={doc.docKey} className="min-w-0 rounded-xl border border-slate-200 bg-white p-4 text-sm sm:p-5">
@@ -193,10 +195,10 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated, guid
                 <span className="font-semibold text-slate-900">
                   {doc.label}{doc.idType ? ` — ${doc.idType}` : ""}
                 </span>
-                {chip(doc.referenceOnly && doc.latest ? 'Registration reference' : doc.status === 'pending' && !needsReview ? 'checking' : doc.status)}
+                {chip(collectionOnly && doc.latest ? 'Received' : doc.referenceOnly && doc.latest ? 'Registration reference' : doc.status === 'pending' && !needsReview ? 'checking' : doc.status)}
                 {doc.required && <span className="text-xs text-slate-500">required</span>}
                 {!doc.required && <span className="text-xs text-slate-500">optional</span>}
-                {doc.docKey === 'nsrpForm' && <p className="w-full text-xs text-slate-600">Registration reference for your birth certificate and ID checks.</p>}
+                {doc.docKey === 'nsrpForm' && <p className="w-full text-xs text-slate-600">Registration reference for your ID checks.</p>}
                 {doc.docKey === "nsrpForm" && doc.sourceType && <span className="text-xs text-slate-500">{NSRP_SOURCE_LABELS[doc.sourceType]}</span>}
                 {doc.docKey.startsWith("validId") ? (
                   (doc.latest?.url || doc.latest?.back?.url) && (
@@ -231,12 +233,13 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated, guid
                 <p className="mt-1 text-xs text-slate-400">Not uploaded yet.</p>
               )}
 
-              {!doc.referenceOnly && ["rejected", "needs_resubmission"].includes(doc.status) && doc.latest?.reviewReason && (
+              {!collectionOnly && !doc.referenceOnly && ["rejected", "needs_resubmission"].includes(doc.status) && doc.latest?.reviewReason && (
                 <p className="mt-2 rounded-lg border border-rose-300 bg-rose-50 p-2 text-xs text-rose-700">
                   PESO feedback: {doc.latest.reviewReason}
                 </p>
               )}
-              {!doc.referenceOnly && (needsReview || review?.reason || doc.status === 'pending') && <p className={`mt-3 rounded-lg px-3 py-2 text-xs leading-relaxed ${needsReview ? 'bg-amber-50 text-amber-900' : 'bg-slate-50 text-slate-600'}`}>{scanning ? 'Scanning your upload and comparing it with your NSRP. Results update automatically.' : review?.reason || (needsReview ? 'PESO will review this document. You can upload a clearer copy or explain a difference.' : 'Your document is being checked.')}</p>}
+              {!collectionOnly && !doc.referenceOnly && (needsReview || review?.reason || doc.status === 'pending') && <p className={`mt-3 rounded-lg px-3 py-2 text-xs leading-relaxed ${needsReview ? 'bg-amber-50 text-amber-900' : 'bg-slate-50 text-slate-600'}`}>{scanning ? 'Scanning your upload and comparing it with your NSRP. Results update automatically.' : review?.reason || (needsReview ? 'PESO will review this document. You can upload a clearer copy or explain a difference.' : 'Your document is being checked.')}</p>}
+              {collectionOnly && <p className="mt-3 text-xs text-slate-600">Supporting file only. Birth certificates are not verified or compared with your NSRP.</p>}
               {needsReview && ['nsrpForm', 'birthCertificate', 'validId1', 'validId2'].includes(doc.docKey) && doc.latest && <button type="button" onClick={() => setExplanationDoc(doc.docKey)} className="mt-2 rounded border border-slate-300 bg-white px-3 py-1 text-xs text-cyan-800">Explain a difference</button>}
               {needsReview && <CorrectionGuidance docKey={doc.docKey} canReplace={canReplace} remaining={doc.uploadsRemaining} />}
               {locked && <p className="mt-2 text-xs text-green-700">{doc.referenceOnly ? 'Request a correction to update your NSRP. Your identity documents will be checked again.' : 'Request a correction if your information changes.'}</p>}
@@ -281,7 +284,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated, guid
                     <>
                   <div className="grid gap-3 sm:grid-cols-2">
                   {doc.docKey.startsWith("validId") && (
-                    <label className="block min-w-0 text-sm font-medium text-slate-700 sm:col-span-2">ID type
+                    <label className="block min-w-0 text-sm font-medium text-slate-700 sm:col-span-2">ID type (optional)
                     <select
                       value={idType}
                       disabled={uploading === doc.docKey}
@@ -295,7 +298,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated, guid
                     </select>
                     </label>
                   )}
-                  <DeclaredDocumentFields className="contents" docKey={doc.docKey} idType={idType} value={declared[doc.docKey]} disabled={uploading === doc.docKey} onChange={value => setDeclared(current => ({ ...current, [doc.docKey]: value }))} />
+                  {!doc.docKey.startsWith('validId') && <DeclaredDocumentFields className="contents" docKey={doc.docKey} idType={idType} value={declared[doc.docKey]} disabled={uploading === doc.docKey} onChange={value => setDeclared(current => ({ ...current, [doc.docKey]: value }))} />}
                   </div>
                   <div className="space-y-2">
                   {doc.docKey.startsWith('validId') ? (
@@ -314,7 +317,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated, guid
                   {!doc.docKey.startsWith('validId') && <DocumentFilePicker label={`Choose ${doc.label} file`} file={pendingFile[doc.docKey]} accept="image/jpeg,image/png,application/pdf" disabled={uploading === doc.docKey} onChange={file => pickFile(doc.docKey, file)} />}
                   <button
                     type="button"
-                    disabled={!pendingFile[doc.docKey] || uploading === doc.docKey || (doc.docKey.startsWith("validId") && (!idType || !pendingBackFile[doc.docKey]))}
+                    disabled={!pendingFile[doc.docKey] || uploading === doc.docKey || (doc.docKey.startsWith("validId") && !pendingBackFile[doc.docKey])}
                     onClick={() => replaceDoc(doc.docKey)}
                     className="h-11 shrink-0 rounded-lg bg-cyan-500 px-5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
                   >

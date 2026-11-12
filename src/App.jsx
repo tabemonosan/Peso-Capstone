@@ -6,6 +6,7 @@ import InternalPasswordChange from './components/InternalPasswordChange'
 import ForgotPasswordModal from './components/ForgotPasswordModal'
 import AdminEmailDelivery from './components/AdminEmailDelivery'
 import AdminReviewNotes from './components/AdminReviewNotes'
+import AccountPasswordChange from './components/AccountPasswordChange'
 import { partitionJobArchive } from '../shared/jobArchive.js'
 import PasswordInput from './components/PasswordInput'
 import SkillTagPicker from './components/SkillTagPicker'
@@ -2225,7 +2226,7 @@ const toggleSkill = (selected, skill) => {
           <main className="space-y-6">
           {!showProfileDocuments && <PageGuide key={`${currentUser?.id}:${activeRole}:${activeView}`} role={activeRole} view={activeView} state={currentUser?.pageGuides} token={getToken()} onSaved={saveGuideState} />}
           {activeRole === 'Admin' && activeView === 'activity-logs' && <AdminActivityLogs token={getToken()} />}
-          {activeRole === 'Admin' && activeView === 'verification-rules' && <AdminNsrpAutomation key={activeView} token={getToken()} />}
+          {activeRole === 'Admin' && activeView === 'verification-rules' && adminCan(currentUser, 'settings') && <AdminNsrpAutomation key={activeView} token={getToken()} />}
           {activeRole === 'Admin' && ['verification-flagged', 'verification-auto'].includes(activeView) && <AdminDocumentVerification key={activeView} token={getToken()} queue={activeView === 'verification-auto' ? 'auto' : 'flagged'} />}
           {approvalNotice && activeRole === 'Employer' && (
             <section className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-green-300 bg-green-50 p-5 text-green-950" role="status">
@@ -2592,6 +2593,8 @@ const toggleSkill = (selected, skill) => {
 
                   <ApplicantAccountSettings token={getToken()} onMessage={(text) => setAppMessage({ type: 'success', text })} />
           </section>}
+
+          {((activeRole === 'Applicant' && activeView === 'account-settings') || (activeRole === 'Employer' && activeView === 'profile')) && <AccountPasswordChange token={getToken()} onChanged={() => { handleLogout(); showNotice('Password changed. Sign in with your new password.') }} />}
 
           {activeView === "profile" && (<section className={`${activeRole === 'Employer' ? 'employer-profile-card portal-card' : activeRole === 'Applicant' ? 'applicant-profile-card portal-card' : ''} rounded-2xl border border-slate-800 bg-slate-900/70 p-6`}>
               {activeRole === 'Applicant' ? (

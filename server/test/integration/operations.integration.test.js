@@ -84,7 +84,7 @@ describe('durable email delivery', () => {
     expect((await EmailDelivery.findById(code.deliveryId)).retryable).toBe(false)
     expect((await EmailDelivery.findById(notification.deliveryId)).status).toBe('expired')
   })
-  it('restricts tracking to Admin accounts and never exposes the encrypted payload', async () => {
+  it('restricts tracking to Super Admin accounts and never exposes the encrypted payload', async () => {
     const service = createEmailDeliveryService({ Model: EmailDelivery, deliver: vi.fn().mockResolvedValue({ delivered: false }), secret: 'test-only-key' })
     await service.send('user@example.test', 'Application update', 'Private details')
     const app = express(); app.use(express.json())
@@ -92,7 +92,8 @@ describe('durable email delivery', () => {
     app.use('/delivery', createEmailDeliveryRouter({ Model: EmailDelivery, service }))
     expect((await request(app).get('/delivery')).status).toBe(403)
     expect((await request(app).get('/delivery').set('x-level', 'staff')).status).toBe(403)
-    const response = await request(app).get('/delivery').set('x-level', 'admin')
+    expect((await request(app).get('/delivery').set('x-level', 'admin')).status).toBe(403)
+    const response = await request(app).get('/delivery').set('x-level', 'super_admin')
     expect(response.status).toBe(200)
     expect(response.body.items).toHaveLength(1)
     expect(JSON.stringify(response.body)).not.toContain('payload')

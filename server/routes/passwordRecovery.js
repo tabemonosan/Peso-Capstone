@@ -80,11 +80,14 @@ export function createPasswordRecoveryRouter({ findUserByEmail, Admin, Applicant
     const filter = { email, resetTokenHash: digest(resetToken), resetExpiresAt: { $gt: new Date() }, usedAt: null }
     const record = await PasswordRecovery.findOne(filter).lean()
     if (!record || !models[record.role]) return invalid(res)
+    const existing = await models[record.role].findOne({ _id: record.accountId, email: record.accountEmail }).select('passwordHash').lean()
+    if (!existing) return invalid(res)
+    if (await bcrypt.compare(newPassword, existing.passwordHash)) return res.status(400).json({ error: 'Choose a new password different from your current password.' })
     const passwordHash = await bcrypt.hash(newPassword, 12)
     const claimed = await PasswordRecovery.findOneAndUpdate({ ...filter, nonce: record.nonce, resetExpiresAt: { $gt: new Date() } }, { $set: { usedAt: new Date() } }).lean()
     if (!claimed || claimed.nonce !== record.nonce) return invalid(res)
     const version = record.sessionVersion || 0
-    const account = await models[record.role].findOneAndUpdate({ _id: record.accountId, email: record.accountEmail, ...(record.role === 'Admin' ? { disabled: { $ne: true } } : {}), ...(record.role === 'Applicant' ? { deletedAt: { $exists: false } } : {}), $or: [{ sessionVersion: version }, ...(version === 0 ? [{ sessionVersion: { $exists: false } }] : [])] }, {
+    const account = await models[record.role].findOneAndUpdate({ _id: record.accountId, email: record.accountEmail, passwordHash: existing.passwordHash, ...(record.role === 'Admin' ? { disabled: { $ne: true } } : {}), ...(record.role === 'Applicant' ? { deletedAt: { $exists: false } } : {}), $or: [{ sessionVersion: version }, ...(version === 0 ? [{ sessionVersion: { $exists: false } }] : [])] }, {
       $set: { passwordHash, ...(record.role === 'Admin' ? { mustChangePassword: false } : {}) }, $inc: { sessionVersion: 1 },
     }).lean()
     if (!account) return invalid(res)

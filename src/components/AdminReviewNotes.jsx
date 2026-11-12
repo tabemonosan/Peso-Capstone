@@ -2,8 +2,10 @@ import { useCallback, useEffect, useState } from 'react'
 import { API_URL } from '../config'
 import ConfirmDialog from './ConfirmDialog'
 import Pagination from './Pagination'
+import { useAdminAccess } from './AdminAccessContext'
 
 export default function AdminReviewNotes({ token, entityType, entityId }) {
+  const { can } = useAdminAccess()
   const [items, setItems] = useState([]), [page, setPage] = useState(1), [total, setTotal] = useState(0)
   const [note, setNote] = useState(''), [recommendation, setRecommendation] = useState('note')
   const [confirm, setConfirm] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState('')
@@ -29,7 +31,7 @@ export default function AdminReviewNotes({ token, entityType, entityId }) {
     <h3 className="font-semibold">Review notes and recommendations</h3>
     <p className="mt-1 text-xs text-slate-600">Internal PESO notes. Recommendations do not change account, document, or hiring status.</p>
     {error && <p role="alert" className="mt-2 text-sm text-rose-700">{error}</p>}
-    {entityId && <form className="mt-3 space-y-3" onSubmit={event => { event.preventDefault(); setError(''); setConfirm(true) }}>
+    {entityId && can('writeNotes') && <form className="mt-3 space-y-3" onSubmit={event => { event.preventDefault(); setError(''); setConfirm(true) }}>
       <label className="block text-sm">Recommendation<select className="shared-form-control mt-1 block w-full rounded-lg px-3 py-2" value={recommendation} onChange={event => setRecommendation(event.target.value)}>{[['note', 'Review note'], ['approve', 'Recommend approval'], ['decline', 'Recommend decline'], ['correction', 'Recommend correction'], ['follow_up', 'Hiring / record follow-up']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
       <label className="block text-sm">Note<textarea className="shared-form-control mt-1 block w-full rounded-lg px-3 py-2" required maxLength={1000} value={note} onChange={event => setNote(event.target.value)} /></label>
       <button type="submit" disabled={busy || !note.trim()} className="rounded-full bg-cyan-700 px-4 py-2 text-sm font-semibold text-white">Add note</button>

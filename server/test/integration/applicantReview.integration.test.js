@@ -8,7 +8,7 @@ import { documentReviewMessage } from '../../services/applicantReview.js'
 import { loadDocumentFile } from '../../utils/documentFiles.js'
 vi.mock('../../mailer.js', async original => ({ ...await original(), sendEmail: vi.fn(async () => ({ delivered: true })), initMailer: vi.fn() }))
 const { app, nsrpAutomation } = await import('../../index.js')
-const { Applicant, Admin, DocumentFile } = await import('../../models/collections.js')
+const { Applicant, Admin, Employer, DocumentFile } = await import('../../models/collections.js')
 let account, token
 beforeAll(startTestDb, 180000)
 afterAll(stopTestDb)
@@ -30,7 +30,7 @@ describe('applicant review explanations and pending corrections', () => {
     const dashboard = await own(request(app).get('/api/dashboard')).expect(200)
     expect(dashboard.body.stats.documentsAwaitingReview).toBe(0)
   })
-  it('still requires NSRP submission and both identity approvals, and preserves restrictions', async () => {
+  it('still requires NSRP submission and ID approval, and preserves restrictions', async () => {
     await Applicant.updateOne({ _id: account._id }, { $set: { 'verificationDocuments.birthCertificate.versions.0.status': 'approved', 'verificationDocuments.validId1.versions.0.status': 'approved' }, $unset: { 'verificationDocuments.nsrpForm': '' } })
     expect((await own(request(app).get('/api/profile/review-status')).expect(200)).body).toMatchObject({ status: 'under_review', documents: [expect.objectContaining({ docKey: 'nsrpForm', status: 'missing' })] })
     await Applicant.updateOne({ _id: account._id }, { $set: { verificationStatus: 'restricted' } })
@@ -43,9 +43,7 @@ describe('applicant review explanations and pending corrections', () => {
     await drainVerificationJobs()
     const saved = await Applicant.findById(account._id)
     expect(saved.profile.nsrp.firstName).toBe('Corrected')
-    expect(saved.verificationDocuments.birthCertificate.versions[0]).toMatchObject({ status: 'pending', reviewRevision: 1 })
-    expect(saved.verificationDocuments.birthCertificate.versions[0].approvedBy).toBeUndefined()
-    expect(saved.verificationDocuments.birthCertificate.history.at(-1).action).toBe('revert')
+    expect(saved.verificationDocuments.birthCertificate.versions[0]).toMatchObject({ status: 'approved', approvedBy: 'previous-admin' })
     expect(saved.verificationStatus).toBe('under_review')
   })
   it.each([true, false])('locks verified references and lets PESO reopen them with identity rechecks when review tools are %s', async reviewToolsEnabled => {
@@ -60,7 +58,7 @@ describe('applicant review explanations and pending corrections', () => {
     await request(app).put(`/api/applicants/${account._id}/verification-documents/nsrpForm`).set('Authorization', `Bearer ${adminToken}`).send({ action: 'revert', reason: 'Allow registration correction and compare the identity records again' }).expect(200)
     const saved = await Applicant.findById(account._id)
     expect(saved.verificationStatus).toBe('under_review')
-    expect(saved.verificationDocuments.birthCertificate.versions[0].status).toBe('pending')
+    expect(saved.verificationDocuments.birthCertificate.versions[0].status).toBe('approved')
     expect(saved.verificationDocuments.validId1.versions[0].status).toBe('pending')
     expect(saved.verificationDocuments.nsrpForm.correctionRequest?.requestedAt).toBeUndefined()
     await own(request(app).put('/api/profile/nsrp')).send({ answers: validNsrpAnswers({ email: account.email }) }).expect(200)
@@ -70,7 +68,7 @@ describe('applicant review explanations and pending corrections', () => {
     const result = await own(request(app).get('/api/profile/review-status')).expect(200)
     expect(result.headers['cache-control']).toBe('private, no-store')
     expect(result.body.status).toBe('under_review')
-    expect(result.body.documents).toHaveLength(2)
+    expect(result.body.documents).toHaveLength(1)
     expect(result.body.documents.some(doc => doc.docKey === 'nsrpForm')).toBe(false)
     expect(result.body.documents.every(doc => doc.reason && doc.canUpdate)).toBe(true)
     const documents = await own(request(app).get(`/api/applicants/${account._id}/verification-documents`)).expect(200)
@@ -91,21 +89,21 @@ describe('applicant review explanations and pending corrections', () => {
     expect(saved.verificationDocuments.nsrpForm.versions).toHaveLength(2)
     expect(saved.verificationStatus).toBe('under_review')
   })
-  it('keeps approved documents locked and enforces the five-upload cap for pending documents', async () => {
+  it('allows supporting file updates and enforces the five-upload cap for pending IDs', async () => {
     await Applicant.updateOne({ _id: account._id }, { $set: { 'verificationDocuments.birthCertificate.versions.0.status': 'approved', 'verificationDocuments.validId1.uploads': 5 } })
-    await own(request(app).post('/api/profile/verification-documents/birthCertificate')).field('verificationDetails', JSON.stringify({ copyType: 'PSA copy on security paper' })).attach('document', pdfBuffer(), { filename: 'locked.pdf', contentType: 'application/pdf' }).expect(409)
+    await own(request(app).post('/api/profile/verification-documents/birthCertificate')).field('verificationDetails', JSON.stringify({ copyType: 'PSA copy on security paper' })).attach('document', pdfBuffer(), { filename: 'locked.pdf', contentType: 'application/pdf' }).expect(200)
     await own(request(app).post('/api/profile/verification-documents/validId1')).field('idType', 'SSS').field('verificationDetails', JSON.stringify({ number: '1234567890' })).attach('document', pdfBuffer(), { filename: 'capped.pdf', contentType: 'application/pdf' }).attach('documentBack', pdfBuffer(), { filename: 'capped-back.pdf', contentType: 'application/pdf' }).expect(429)
     const result = await own(request(app).get('/api/profile/review-status')).expect(200)
     expect(result.body.documents.some(doc => doc.docKey === 'birthCertificate')).toBe(false)
     expect(result.body.documents.find(doc => doc.docKey === 'validId1')).toMatchObject({ canUpdate: false, uploadsRemaining: 0 })
   })
-  it.each(['validId1', 'validId2'])('stores both sides of %s in one version and exposes front/back views', async docKey => {
+  it.each(['validId1', 'validId2'])('stores both sides of %s without requiring an ID type', async docKey => {
     await nsrpAutomation.updateSettings({ imageChecks: false }, 'test-admin')
     const before = await Applicant.findById(account._id)
     const previousUploads = before.verificationDocuments?.[docKey]?.uploads || 0
     const front = pdfBuffer(1100), back = pdfBuffer(1200)
     const response = await own(request(app).post(`/api/profile/verification-documents/${docKey}`))
-      .field('idType', 'SSS').field('verificationDetails', JSON.stringify({ number: '1234567890' }))
+      .field('verificationDetails', '{}')
       .attach('document', front, { filename: 'front.pdf', contentType: 'application/pdf' })
       .attach('documentBack', back, { filename: 'back.pdf', contentType: 'application/pdf' }).expect(200)
     await drainVerificationJobs()
@@ -136,16 +134,17 @@ describe('applicant review explanations and pending corrections', () => {
   })
   it('keeps review reasons owner-scoped and accessible to waitlisted applicants without enabling employment access', async () => {
     await request(app).get('/api/profile/review-status').expect(403)
+    await Employer.create({ email: 'employer@example.test', passwordHash: 'unused', emailVerified: true })
     const employer = jwt.sign({ role: 'Employer', email: 'employer@example.test' }, process.env.JWT_SECRET || 'dev-secret')
     await request(app).get('/api/profile/review-status').set('Authorization', `Bearer ${employer}`).expect(403)
-    await Applicant.updateOne({ _id: account._id }, { $set: { verificationStatus: 'waitlisted', consistencyState: { token: 'sample', status: 'finished', issues: [{ docKey: 'birthCertificate', reasonCode: 'cross_check_mismatch', fieldGroup: 'birth date' }] } } })
+    await Applicant.updateOne({ _id: account._id }, { $set: { verificationStatus: 'waitlisted', consistencyState: { token: 'sample', status: 'finished', issues: [{ docKey: 'validId1', reasonCode: 'cross_check_mismatch', fieldGroup: 'birth date' }] } } })
     expect((await own(request(app).get('/api/profile/review-status?email=another@example.test')).expect(200)).body.status).toBe('waitlisted')
     expect((await own(request(app).get('/api/jobs')).expect(403)).body.code).toBe('APPLICANT_WAITLISTED')
   })
   it('allows replacing an unrelated pending document while another document has exhausted correction chances', async () => {
-    await Applicant.updateOne({ _id: account._id }, { $set: { verificationStatus: 'waitlisted', consistencyState: { token: 'id-only-mismatch', status: 'finished', used: { validId1: 5 }, issues: [{ docKey: 'validId1', reasonCode: 'cross_check_mismatch', fieldGroup: 'ID number' }] } } })
+    await Applicant.updateOne({ _id: account._id }, { $set: { verificationStatus: 'waitlisted', consistencyState: { token: 'id-only-mismatch', status: 'finished', used: { validId1: 5 }, issues: [{ docKey: 'validId1', reasonCode: 'cross_check_mismatch', fieldGroup: 'birth date' }] } } })
     const documents = await own(request(app).get(`/api/applicants/${account._id}/verification-documents`)).expect(200)
-    expect(documents.body.review.documents.find(doc => doc.docKey === 'birthCertificate').canUpdate).toBe(true)
+    expect(documents.body.documents.find(doc => doc.docKey === 'birthCertificate')).toMatchObject({ collectionOnly: true, status: 'received', locked: false })
     expect(documents.body.review.documents.find(doc => doc.docKey === 'validId1').canUpdate).toBe(false)
     const uploads = account.verificationDocuments.birthCertificate.uploads
     await own(request(app).post('/api/profile/verification-documents/birthCertificate'))
@@ -164,4 +163,18 @@ describe('applicant review explanations and pending corrections', () => {
     expect(message).toMatch(/Check the ID type and number/)
     expect(message).not.toContain('cross_id_nsrp_idNumber')
   })
+})
+
+it.each(['pending', 'rejected', 'needs_resubmission', 'approved'])('collects a birth certificate with legacy %s status without requiring its approval', async status => {
+ await Applicant.updateOne({ _id: account._id }, { $set: {
+  'verificationDocuments.birthCertificate.versions.0.status': status,
+  'verificationDocuments.birthCertificate.versions.0.reviewReasons': ['Could not be read'],
+  'verificationDocuments.validId1.versions.0.status': 'approved',
+ } })
+ const review = await own(request(app).get('/api/profile/review-status')).expect(200)
+ expect(review.body).toMatchObject({ status: 'approved', documents: [] })
+ const docs = await own(request(app).get(`/api/applicants/${account._id}/verification-documents`)).expect(200)
+ expect(docs.body.documents.find(doc => doc.docKey === 'birthCertificate')).toMatchObject({ status: 'received', collectionOnly: true, locked: false })
+ const dashboard = await own(request(app).get('/api/dashboard')).expect(200)
+ expect(dashboard.body.stats.documentsAwaitingReview).toBe(0)
 })

@@ -21,14 +21,15 @@ export async function readDocumentOcr(file, compare, options = {}, reader = read
     const largestSide = Math.max(...pages.flatMap(page => [page.getWidth(), page.getHeight()]))
     if (!Number.isFinite(largestSide) || largestSide <= 0) return { result: 'could_not_read' }
     rendered = await pdf(Buffer.from(file.data), { scale: Math.min(2, 2200 / largestSide), docInitParams: { standardFontDataUrl: fontDirectory } })
-    const texts = [], confidences = []
+    const texts = [], confidences = [], lines = []
     for (let index = 1; index <= rendered.length; index++) {
-      const page = await reader(await rendered.getPage(index), (text, confidence) => ({ text, confidence }), options)
+      const page = await reader(await rendered.getPage(index), (text, confidence, metadata) => ({ text, confidence, lines: metadata?.lines || [] }), options)
       if (typeof page.text !== 'string' || !Number.isFinite(page.confidence)) return { result: 'could_not_read' }
+      lines.push(...page.lines)
       texts.push(page.text)
       confidences.push(page.confidence)
     }
-    return await compare(texts.join('\n'), Math.min(...confidences))
+    return await compare(texts.join('\n'), Math.min(...confidences), { lines })
   } catch { return { result: 'could_not_read' } }
   finally { await rendered?.destroy() }
 }

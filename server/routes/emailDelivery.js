@@ -5,7 +5,7 @@ import { parsePagination, paginateQuery, escapeRegex } from '../utils/paginate.j
 
 export function createEmailDeliveryRouter({ Model, service }) {
   const router = Router()
-  router.use((req, res, next) => req.internalAccount && adminCan(req.internalAccount, 'emailDelivery') ? next() : res.status(403).json({ error: 'Email delivery tracking requires an Admin account.' }))
+  router.use((req, res, next) => req.internalAccount && adminCan(req.internalAccount, 'emailDelivery') ? next() : res.status(403).json({ error: 'Email delivery tracking requires a Super Admin account.' }))
   router.get('/', async (req, res) => {
     const filter = {}
     if (req.query.status) {
