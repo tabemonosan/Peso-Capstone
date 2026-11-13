@@ -39,6 +39,6 @@ export default function JobPostingDetails({ job, onClose, onEdit }) {
     </dl>
     {['description', 'requirements'].map((key) => <section key={key} className="mt-4 rounded-xl bg-slate-50 p-3"><h3 className="text-sm font-semibold">{key === 'description' ? 'Full description' : 'Requirements'}</h3><p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">{job[key] || 'Not specified'}</p></section>)}
     {job.status === 'declined' && <p className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">Reason: {job.reviewReason || 'No reason provided.'}</p>}
-    {onEdit && <div className="mt-5"><button type="button" onClick={onEdit} className="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white">{job.status === 'pending' ? 'Edit pending request' : 'Edit job posting'}</button><p className="mt-2 text-xs text-slate-600">Every edit runs through safety screening. Flagged changes need PESO review before publication.</p></div>}
+    {onEdit && !archived && <div className="mt-5"><button type="button" onClick={onEdit} className="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white">{job.status === 'pending' ? 'Edit pending request' : 'Edit job posting'}</button><p className="mt-2 text-xs text-slate-600">Every edit runs through safety screening. Flagged changes need PESO review before publication.</p></div>}
   </>
 }

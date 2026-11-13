@@ -42,6 +42,17 @@ describe('employer job browser', () => {
     expect(edit).toHaveBeenLastCalledWith(approved)
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
+  it('shows ratings on archived rows and details while hiding editing controls', () => {
+    const job = { ...approved, deadline: '2000-01-01', employerBranding: { rating: { averageScore: 3.5, totalRatings: 2 } } }
+    render(<EmployerJobBrowser jobs={[job]} onEdit={vi.fn()} />)
+    const row = screen.getByRole('button', { name: 'View details for Delivery Driver' })
+    const details = screen.getByRole('article', { name: 'Delivery Driver job details' })
+    expect(within(row).getByLabelText('3.5 out of 5 stars, 2 reviews')).toBeInTheDocument()
+    expect(within(details).getByLabelText('3.5 out of 5 stars, 2 reviews')).toBeInTheDocument()
+    expect(within(row).getByText('Archived')).toBeInTheDocument()
+    expect(within(details).queryByRole('button', { name: /Edit/ })).not.toBeInTheDocument()
+    expect(within(details).queryByText(/Every edit runs/)).not.toBeInTheDocument()
+  })
   it('replaces a selected posting when filters or pagination remove it', () => {
     const { rerender } = render(<EmployerJobBrowser jobs={[pending, approved]} />)
     fireEvent.click(screen.getByRole('button', { name: 'View details for Delivery Driver' }))

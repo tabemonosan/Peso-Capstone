@@ -14,3 +14,11 @@ employer-to-applicant ratings are separate. Ratings do not affect reputation
 points. Only aggregate scores and counts are added to job responses; reviewer
 identities and written comments are not included. Reloading job listings
 retrieves the latest average.
+
+Employers have a separate Ratings section showing their average and anonymous
+employee scores and comments, ten reviews per page. The company ratings API
+derives the employer from the signed-in account and returns only score and
+comment for each review. It excludes reviewer IDs, hire report IDs, timestamps,
+and other review metadata. The older ratings endpoint also hides these fields
+when an employer retrieves their own received ratings. Applicants are reminded
+to avoid including identifying details in their written feedback.

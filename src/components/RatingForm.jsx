@@ -109,6 +109,7 @@ function RatingForm({ token, toUserId, toRole, hireReportId, onCreated }) {
         </div>
       </div>
 
+      {toRole === 'employer' && <p className="mt-3 text-sm text-slate-600">Your rating and comment are anonymous to the company. Avoid including your name or personal details in your comment.</p>}
       <div className="mt-3">
         <label className="block text-sm font-medium text-slate-600" htmlFor={`rating-comment-${hireReportId}`}>
           Comment
@@ -120,7 +121,7 @@ function RatingForm({ token, toUserId, toRole, hireReportId, onCreated }) {
           value={comment}
           onChange={(event) => setComment(event.target.value)}
           className="shared-form-control mt-2 w-full rounded-2xl px-3 py-2 text-sm"
-          placeholder="Share feedback about the applicant"
+          placeholder={toRole === 'employer' ? 'Share feedback about the company' : 'Share feedback about the applicant'}
           disabled={submitting}
         />
       </div>
