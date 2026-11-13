@@ -15,9 +15,9 @@ export function buildPageList(page, totalPages) {
   return pages
 }
 
-const btnBase = 'rounded-lg border px-2.5 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-40'
-const btnIdle = 'border-slate-600 bg-transparent text-slate-300 hover:border-cyan-400 hover:text-cyan-300'
-const btnActive = 'border-cyan-500 bg-cyan-500 text-slate-950'
+const btnBase = 'rounded-lg border px-2.5 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:border-slate-300 disabled:bg-slate-100 disabled:text-slate-600 disabled:opacity-100'
+const btnIdle = 'border-slate-500 bg-white text-slate-700 enabled:hover:border-blue-700 enabled:hover:text-blue-800'
+const btnActive = 'border-blue-600 bg-blue-600 text-white'
 
 export default function Pagination({
   page,
@@ -37,7 +37,7 @@ export default function Pagination({
   const pages = buildPageList(currentPage, totalPages)
 
   return (
-    <nav aria-label={ariaLabel} className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-slate-400">
+    <nav aria-label={ariaLabel} className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-slate-700">
       <span aria-live="polite">
         {loading && totalItems === 0 ? 'Loading…' : `Showing ${start}–${end} of ${totalItems} ${itemLabel}`}
       </span>

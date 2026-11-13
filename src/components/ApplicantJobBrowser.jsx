@@ -36,7 +36,12 @@ export default function ApplicantJobBrowser({ jobs, applicationByJobId, appliedP
     <article ref={detailsRef} tabIndex={0} className="job-browser-details" aria-label={`${selected.title} job details`}>
       {selected.employerBranding?.bannerImage && <img className="job-browser-banner" src={selected.employerBranding.bannerImage} alt="" />}
       <div className="job-browser-detail-content">
-        <div className="job-browser-company"><CompanyMark job={selected} /><span>{selected.company}<CompanyRating rating={selected.employerBranding?.rating} /></span></div>
+        <div className="job-browser-company">
+          <CompanyMark job={selected} /><span>{selected.company}<CompanyRating rating={selected.employerBranding?.rating} /></span>
+          <button type="button" aria-label="View company profile" title="View company profile" onClick={() => window.open(`${window.location.pathname}#company-profile/${encodeURIComponent(selected._id)}`, '_blank', 'noopener,noreferrer')} className="ml-auto flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-pink-300 text-pink-800 hover:bg-pink-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-700">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 21V5h10v16M14 10h6v11M2 21h20M8 9h2M8 13h2M8 17h2M17 14h1M17 18h1" /></svg>
+          </button>
+        </div>
         <h3 className="job-browser-title">{selected.title}</h3>
         <p className="job-browser-muted">{formatLocation(selected) || selected.location || 'Remote'}</p>
         <p className="job-browser-muted">Posted {dateLabel(selected.createdAt)}</p>

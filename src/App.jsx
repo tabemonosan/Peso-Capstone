@@ -1,3 +1,4 @@
+import EmployerRatingsPage from './components/EmployerRatingsPage'
 import AdminReportMaker from './components/AdminReportMaker'
 import { AdminAccessContext } from './components/AdminAccessContext'
 import { adminCan, adminLevel, ADMIN_LABELS, adminViewAllowed } from '../shared/adminAccess.js'
@@ -7,7 +8,7 @@ import ForgotPasswordModal from './components/ForgotPasswordModal'
 import AdminEmailDelivery from './components/AdminEmailDelivery'
 import AdminReviewNotes from './components/AdminReviewNotes'
 import AccountPasswordChange from './components/AccountPasswordChange'
-import { partitionJobArchive } from '../shared/jobArchive.js'
+import { isJobArchived, partitionJobArchive } from '../shared/jobArchive.js'
 import PasswordInput from './components/PasswordInput'
 import SkillTagPicker from './components/SkillTagPicker'
 import LandingPage from './components/LandingPage'
@@ -117,6 +118,7 @@ const navigationByRole = {
     { id: "dashboard", label: "Dashboard" },
     { id: "employer", label: "Job Postings" },
     { id: "referrals", label: "Reports" },
+    { id: "company-ratings", label: "Ratings" },
     { id: "reviews", label: "Reviews" },
     { id: "notify", label: "Notifications" },
   ],
@@ -915,6 +917,10 @@ const toggleSkill = (selected, skill) => {
   }
 
   const openEditJob = (job, canSave = true) => {
+    if (canSave && isJobArchived(job)) {
+      showNotice('Archived job postings cannot be edited.')
+      return
+    }
     setEditingJob(job)
     setEditingJobCanSave(canSave)
     const knownTitle = jobTitleGroups.some((group) => group.titles.some((item) => item.name === job.title))
@@ -2968,11 +2974,6 @@ const toggleSkill = (selected, skill) => {
                 )}
               </div>
 
-              {(employerPendingJobs.length > 0 || employerApprovedJobs.length > 0 || employerDeclinedJobs.length > 0) && (
-                <p className="mt-4 text-xs uppercase tracking-[0.2em] text-slate-600">
-                  Pending: {employerPendingJobs.length} {'\u2022'} Approved: {employerApprovedJobs.length} {'\u2022'} Declined: {employerDeclinedJobs.length}
-                </p>
-              )}
             </section>
           )}
 
@@ -3033,6 +3034,8 @@ const toggleSkill = (selected, skill) => {
           )}
 
           {activeView === "my-applications" && activeRole === "Applicant" && <MyApplicationsPage token={getToken()} onDeclined={() => { fetchJobs(); setActiveView('jobs') }} />}
+          {activeRole === 'Employer' && activeView === 'company-ratings' && <EmployerRatingsPage token={getToken()} />}
+
           {activeView === 'my-reputation' && activeRole === 'Applicant' && <ApplicantReputationPage token={getToken()} onOpenApplications={applicationId => { const url = new URL(window.location.href); if (applicationId) url.searchParams.set('applicationId', applicationId); else url.searchParams.delete('applicationId'); window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`); setActiveView('my-applications') }} />}
           {activeView === "referrals" && activeRole === "Employer" && (
             <ReferralList

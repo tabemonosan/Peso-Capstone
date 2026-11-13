@@ -2357,6 +2357,7 @@ app.put('/api/jobs/:id', requireVerifiedEmail, requireApprovedEmployer, async (r
     const job = await JobPosting.findById(req.params.id)
     if (!job) return res.status(404).json({ error: 'Job not found' })
     if (job.createdBy !== decoded.email) return res.status(403).json({ error: 'Forbidden' })
+    if (isJobArchived(job)) return res.status(409).json({ error: 'Archived job postings cannot be edited.', code: 'JOB_ARCHIVED' })
 
     const keepDeadline = job.deadline ? new Date(job.deadline).toISOString().slice(0, 10) : ''
     const { errors, fields } = await prepareJobPosting(body, { keepDeadline })
@@ -2373,6 +2374,36 @@ app.put('/api/jobs/:id', requireVerifiedEmail, requireApprovedEmployer, async (r
   } catch (err) {
     console.error(err)
     res.status(500).json({ error: 'Server error' })
+  }
+})
+
+app.get('/api/jobs/:id/company-profile', requireVerifiedEmail, async (req, res) => {
+  try {
+    const viewer = authenticateRequest(req)
+    if (!viewer) return res.status(401).json({ error: 'Please sign in.' })
+    if (viewer.role !== 'Applicant') return res.status(403).json({ error: 'Applicant access required.' })
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).json({ error: 'Company profile not found.' })
+    const job = await JobPosting.findOne({ _id: req.params.id, status: 'approved' }).select('createdBy title company status description requirements skills languageRequirements location barangay city province locationType employmentType salary salaryMin salaryMax payFrequency negotiable education experience slots deadline createdAt').lean()
+    const employer = job && await Employer.findOne({ email: { $regex: `^${escapeRegex(job.createdBy || '')}$`, $options: 'i' }, verificationStatus: 'approved' })
+      .select('companyName contactName phone profile establishmentAddress').lean()
+    if (!employer) return res.status(404).json({ error: 'Company profile not found.' })
+    const [rating] = await Rating.aggregate([
+      { $match: { toUserId: employer._id, toRole: 'employer', fromRole: 'applicant', score: { $in: [1, 2, 3, 4, 5] } } },
+      { $group: { _id: null, averageScore: { $avg: '$score' }, totalRatings: { $sum: 1 } } },
+    ])
+    const reviewPage = Math.max(1, Math.min(100000, Number.parseInt(req.query.reviewPage, 10) || 1))
+    const reviewPageSize = 10
+    const reviews = await Rating.find({ toUserId: employer._id, toRole: 'employer', fromRole: 'applicant', score: { $in: [1, 2, 3, 4, 5] } })
+      .sort({ createdAt: -1, _id: -1 }).skip((reviewPage - 1) * reviewPageSize).limit(reviewPageSize).select('score comment -_id').lean()
+    const profile = employer.profile || {}
+    const { createdBy, ...publicJob } = job
+    res.json({ reviews, reviewPage, reviewPageSize, job: normalizeJobPosting(publicJob), companyName: employer.companyName || '', contactName: employer.contactName || '', phone: employer.phone || '',
+      location: profile.location || [employer.establishmentAddress?.barangay, employer.establishmentAddress?.city, employer.establishmentAddress?.province].filter(Boolean).join(', '),
+      summary: profile.summary || '', website: profile.website || '', profileImage: profile.profileImage || '', bannerImage: profile.bannerImage || '',
+      rating: { averageScore: rating?.averageScore || 0, totalRatings: rating?.totalRatings || 0 } })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Unable to load company profile.' })
   }
 })
 
@@ -2553,7 +2584,7 @@ app.get('/api/jobs', requireVerifiedEmail, requireApprovedEmployer, async (req, 
       })
       if (['pending', 'declined'].includes(status) || (status === 'approved' && decoded?.role === 'Admin')) {
         result.items = await attachAdminReviewDetails(result.items)
-      } else if (status === 'approved') {
+      } else if (status === 'approved' || status === 'mine') {
         result.items = await attachEmployerBranding(result.items)
       }
       result.items = result.items.map(present)
@@ -2575,7 +2606,7 @@ app.get('/api/jobs', requireVerifiedEmail, requireApprovedEmployer, async (req, 
       const token = auth.split(' ')[1]
       const decoded = jwt.verify(token, jwtSecret)
       const jobs = await JobPosting.find({ createdBy: decoded.email }).sort({ createdAt: -1 })
-      return res.json(jobs.map(present))
+      return res.json(await attachEmployerBranding(jobs))
     }
     if (status === 'applied') {
       const auth = req.headers.authorization
@@ -3655,6 +3686,27 @@ app.post('/api/ratings', requireApprovedEmployer, async (req, res) => {
   }
 })
 
+app.get('/api/employer/ratings', requireApprovedEmployer, async (req, res) => {
+  try {
+    const decoded = authenticateRequest(req)
+    if (!decoded) return res.status(401).json({ error: 'Please sign in.' })
+    if (decoded.role !== 'Employer') return res.status(403).json({ error: 'Employer access required.' })
+    const employer = await Employer.findOne({ email: decoded.email }).select('_id').lean()
+    if (!employer) return res.status(404).json({ error: 'Employer not found.' })
+    const filter = { toUserId: employer._id, toRole: 'employer', fromRole: 'applicant', score: { $in: [1, 2, 3, 4, 5] } }
+    const page = Math.max(1, Math.min(100000, Number.parseInt(req.query.page, 10) || 1))
+    const pageSize = 10
+    const [summary, ratings] = await Promise.all([
+      Rating.aggregate([{ $match: filter }, { $group: { _id: null, averageScore: { $avg: '$score' }, totalRatings: { $sum: 1 } } }]),
+      Rating.find(filter).sort({ createdAt: -1, _id: -1 }).skip((page - 1) * pageSize).limit(pageSize).select('score comment -_id').lean(),
+    ])
+    res.json({ averageScore: summary[0]?.averageScore || 0, totalRatings: summary[0]?.totalRatings || 0, ratings, page, pageSize })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Unable to load company ratings.' })
+  }
+})
+
 app.get('/api/ratings/:userId', async (req, res) => {
   try {
     const decoded = authenticateRequest(req)
@@ -3667,12 +3719,17 @@ app.get('/api/ratings/:userId', async (req, res) => {
     }
     if (!decoded || !mongoose.isValidObjectId(req.params.userId)) return res.status(403).json({ error: 'Please sign in and choose a valid recipient.' })
     const filter = { toUserId: req.params.userId }
+    let anonymousEmployerView = false
     if (decoded.role !== 'Admin') {
       const account = await (decoded.role === 'Applicant' ? Applicant : Employer).findOne({ email: decoded.email }).select('_id').lean()
       if (!account) return res.status(403).json({ error: 'Account unavailable.' })
       if (String(account._id) !== req.params.userId) filter.fromUserId = account._id
+      else if (decoded.role === 'Employer') {
+        anonymousEmployerView = true
+        Object.assign(filter, { toRole: 'employer', fromRole: 'applicant', score: { $in: [1, 2, 3, 4, 5] } })
+      }
     }
-    const ratings = await Rating.find(filter).sort({ createdAt: -1 })
+    const ratings = await Rating.find(filter).sort({ createdAt: -1 }).select(anonymousEmployerView ? 'score comment -_id' : '')
     const total = ratings.reduce((sum, item) => sum + Number(item.score || 0), 0)
     const averageScore = ratings.length > 0 ? total / ratings.length : 0
 

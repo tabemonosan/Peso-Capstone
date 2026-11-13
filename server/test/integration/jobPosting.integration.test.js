@@ -33,8 +33,8 @@ describe('job request and review API', () => {
       { toUserId: employer._id, toRole: 'applicant', fromRole: 'employer', score: 1 },
       { toUserId: employer._id, toRole: 'employer', fromRole: 'applicant', score: 6 },
     ])
-    for (const query of ['?status=approved', '?status=approved&page=1']) {
-      const response = await request(app).get(`/api/jobs${query}`).set(auth('Applicant')).expect(200)
+    for (const query of ['?status=approved', '?status=approved&page=1', '?status=mine', '?status=mine&page=1']) {
+      const response = await request(app).get(`/api/jobs${query}`).set(auth(query.includes('mine') ? 'Employer' : 'Applicant')).expect(200)
       const jobs = response.body.items || response.body
       expect(jobs[0].employerBranding.rating).toEqual({ averageScore: 3.5, totalRatings: 2 })
       expect(JSON.stringify(response.body)).not.toContain('PRIVATE employee review')
@@ -43,6 +43,65 @@ describe('job request and review API', () => {
     const response = await request(app).get('/api/jobs?status=approved&page=1').set(auth('Applicant')).expect(200)
     expect(response.body.items[0].employerBranding.rating).toEqual({ averageScore: 0, totalRatings: 0 })
   })
+  it.each(['pending', 'approved', 'declined'])('blocks edits to archived %s postings, including deadline extensions', async (status) => {
+    const deadline = new Date(Date.now() - 86400000)
+    const job = await JobPosting.create({ title: 'Expired position', company: 'Example Works', createdBy: 'employer@example.com', status, deadline, applicants: [{ email: 'existing@example.test' }] })
+    const response = await request(app).put(`/api/jobs/${job._id}`).set(auth('Employer')).send(payload({ company: 'Example Works', deadline: deadlineBounds().min })).expect(409)
+    expect(response.body).toMatchObject({ code: 'JOB_ARCHIVED' })
+    const saved = await JobPosting.findById(job._id)
+    expect(saved.title).toBe('Expired position')
+    expect(saved.status).toBe(status)
+    expect(saved.deadline).toEqual(deadline)
+    expect(saved.applicants).toHaveLength(1)
+  })
+
+  it('shows employers only their own anonymous employee reviews with pagination', async () => {
+    await createViewer()
+    const employer = await Employer.findOne({ email: 'employer@example.com' })
+    const Rating = mongoose.model('Rating')
+    await Rating.collection.insertMany([
+      ...Array.from({ length: 12 }, (_, index) => ({ toUserId: employer._id, toRole: 'employer', fromRole: 'applicant', fromUserId: new mongoose.Types.ObjectId(), hireReportId: new mongoose.Types.ObjectId(), score: index % 2 ? 4 : 3, comment: 'Helpful workplace', createdAt: new Date(2026, 0, index + 1) })),
+      { toUserId: new mongoose.Types.ObjectId(), toRole: 'employer', fromRole: 'applicant', score: 1, comment: 'OTHER COMPANY PRIVATE' },
+    ])
+    const response = await request(app).get('/api/employer/ratings').set(auth('Employer')).expect(200)
+    expect(response.body).toMatchObject({ averageScore: 3.5, totalRatings: 12, page: 1, pageSize: 10 })
+    expect(response.body.ratings).toHaveLength(10)
+    for (const rating of response.body.ratings) expect(Object.keys(rating).sort()).toEqual(['comment', 'score'])
+    expect(JSON.stringify(response.body)).not.toContain('OTHER COMPANY PRIVATE')
+    const next = await request(app).get('/api/employer/ratings?page=2').set(auth('Employer')).expect(200)
+    expect(next.body.ratings).toHaveLength(2)
+    const job = await JobPosting.create({ title: 'Clerk', company: 'Example Works', createdBy: employer.email, status: 'approved' })
+    const publicReviews = await request(app).get(`/api/jobs/${job._id}/company-profile?reviewPage=2`).set(auth('Applicant')).expect(200)
+    expect(publicReviews.body.reviews).toHaveLength(2)
+    expect(publicReviews.body.rating).toEqual({ averageScore: 3.5, totalRatings: 12 })
+    for (const review of publicReviews.body.reviews) expect(Object.keys(review).sort()).toEqual(['comment', 'score'])
+    const legacy = await request(app).get(`/api/ratings/${employer._id}`).set(auth('Employer')).expect(200)
+    for (const rating of legacy.body.ratings) expect(Object.keys(rating).sort()).toEqual(['comment', 'score'])
+    await request(app).get('/api/employer/ratings').set(auth('Applicant')).expect(403)
+    await request(app).get('/api/employer/ratings').expect(401)
+  })
+
+  it('lets applicants view company profile information and rating without exposing private records', async () => {
+    await createViewer()
+    const employer = await Employer.findOneAndUpdate({ email: 'employer@example.com' }, { $set: { contactName: 'Company Contact', phone: '123', profile: { summary: 'We build software.', website: 'example.com', location: 'Manito, Albay' }, verificationReason: 'PRIVATE verification note' } }, { new: true })
+    const job = await JobPosting.create({ title: 'Clerk', company: 'Example Works', createdBy: employer.email, status: 'approved', description: 'Assist clients', notesToAdmin: 'PRIVATE admin note', applicants: [{ email: 'private@example.test' }] })
+    await mongoose.model('Rating').collection.insertOne({ toUserId: employer._id, toRole: 'employer', fromRole: 'applicant', fromUserId: new mongoose.Types.ObjectId(), hireReportId: new mongoose.Types.ObjectId(), score: 4, comment: 'Helpful workplace' })
+    const url = `/api/jobs/${job._id}/company-profile`
+    const response = await request(app).get(url).set(auth('Applicant')).expect(200)
+    expect(response.body).toMatchObject({ companyName: 'Example Works', summary: 'We build software.', website: 'example.com', contactName: 'Company Contact', location: 'Manito, Albay', rating: { averageScore: 4, totalRatings: 1 } })
+    for (const field of ['email', 'passwordHash', 'verificationReason', '_id', 'verificationDocuments', 'ratings']) expect(response.body).not.toHaveProperty(field)
+    expect(response.body.reviews).toEqual([{ score: 4, comment: 'Helpful workplace' }])
+    expect(response.body).toMatchObject({ reviewPage: 1, reviewPageSize: 10 })
+    expect(response.body.job).toMatchObject({ _id: String(job._id), title: 'Clerk', description: 'Assist clients' })
+    for (const field of ['createdBy', 'applicants', 'notesToAdmin', 'moderation', 'moderationHistory']) expect(response.body.job).not.toHaveProperty(field)
+    expect(JSON.stringify(response.body)).not.toContain('PRIVATE')
+    expect(JSON.stringify(response.body)).not.toContain('private@example.test')
+    await request(app).get(url).expect(401)
+    await request(app).get(url).set(auth('Employer')).expect(403)
+    await JobPosting.updateOne({ _id: job._id }, { status: 'pending' })
+    await request(app).get(url).set(auth('Applicant')).expect(404)
+  })
+
   it('presents automatic archives without changing approval or deleting applications', async () => {
     const deadline = new Date(Date.now() - 4 * 86400000)
     const old = await JobPosting.create({ title: 'Expired position', company: 'Example Works', createdBy: 'employer@example.com', status: 'approved', deadline, applicants: [{ email: 'existing@example.test' }] })
