@@ -4,7 +4,7 @@ import { WAITLIST_LIMITS } from './consistencyWaitlist.js'
 // OCR text and line confidence remain transient; persist comparison results only.
 export function checkIdName(text, confidence, nsrp, { lines = [] } = {}) {
   const values = extractDocumentFields(text)
-  const nameValues = values.fullName ? [values.fullName] : [values.firstName, values.surname].filter(Boolean)
+  const nameValues = values.fullName ? [values.fullName] : [values.firstName, values.surname, values.middleName, values.suffix].filter(Boolean)
   const nameLines = nameValues.map(value => lines.find(line => normalizeName(line.text).includes(normalizeName(value))))
   const nameConfidence = nameValues.length && nameLines.every(line => Number.isFinite(line?.confidence))
     ? Math.min(...nameLines.map(line => line.confidence)) : confidence

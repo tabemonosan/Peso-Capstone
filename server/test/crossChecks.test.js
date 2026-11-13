@@ -73,3 +73,17 @@ it('extracts comparison fields from common ID labels with varied separators', ()
 it('extracts comma-formatted Driver license name under a shared name header', () => { expect(extractDocumentFields('Last Name, First Name, Middle Name\nSAMONTE, ICY DMITRI NAGRAMPA')).toMatchObject({ fullName: 'SAMONTE, ICY DMITRI NAGRAMPA' }) })
 
 it('extracts the driver-license layout from the applicant OCR preview', () => { expect(extractDocumentFields('a Last Name, First Name. Middle Name\nlw SAMONTE, ICY DMITRI NAGRAMPA\nho by Sax oni Weight tke) Height(m)')).toMatchObject({ fullName: 'SAMONTE, ICY DMITRI NAGRAMPA' }) })
+
+it.each(['CRUZ, JUAN III SANTOS', 'CRUZ, JUAN ill SANTOS', 'JUAN III SANTOS CRUZ', 'JUAN SANTOS CRUZ III'])('matches the suffix layout %s', fullName => {
+ const report = crossChecks({ nsrp: { firstName: 'Juan', middleName: 'Santos', surname: 'Cruz', suffix: 'III' }, ids: [{ values: { fullName }, evidence: 'independent' }] })
+ expect(report.comparisons[0].result).toBe('match')
+ expect(report.findings).toEqual([])
+})
+
+it('does not equate different suffixes or rewrite name letters', () => {
+ const nsrp = { firstName: 'Juan', middleName: 'Santos', surname: 'Cruz', suffix: 'II' }
+ const compare = fullName => crossChecks({ nsrp, ids: [{ values: { fullName }, evidence: 'independent' }] }).comparisons[0].result
+ expect(compare('CRUZ, JUAN III SANTOS')).not.toBe('match')
+ expect(compare('CRUZ, JUAN ill SANTOS')).not.toBe('match')
+ expect(compare('CRUZ, JUAN II SANTOS')).toBe('match')
+})

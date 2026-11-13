@@ -49,7 +49,7 @@ function FileField({ label, hint, required, file, error, onSelect, onRemove, dis
   return (
     <div>
       <span className={labelCls}>
-        {label} {required ? <span className="text-rose-600">*</span> : <span className="text-xs font-normal text-[var(--peso-muted)]">(optional)</span>}
+        {label} {required && <span className="text-rose-600">*</span>}
       </span>
       {hint && <p className={helperCls}>{hint}</p>}
 

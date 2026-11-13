@@ -192,6 +192,7 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
   const saved = useMemo(() => isPublic ? { email: '', answers: {}, basicInfo: {} } : safeDraft(), [isPublic])
   const [email, setEmail] = useState(saved.email)
   const [password, setPassword] = useState("")
+  const [signupPasswordsVisible, setSignupPasswordsVisible] = useState(false)
   const [confirmPassword, setConfirmPassword] = useState("")
   const [step, setStep] = useState(isUpdate || isPublic ? 1 : saved.step)
   const [answers, setAnswers] = useState(() => isUpdate ? { ...initialAnswers, signatureDataUrl: "" } : saved.answers)
@@ -873,7 +874,7 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
                 />
               </label>
               {nsrpUpload && <p className="mt-1 text-xs text-slate-500">{nsrpUpload.name} • {Math.ceil(nsrpUpload.size / 1024)} KB</p>}
-              {nsrpUpload && <NsrpImportReview key={`${nsrpFileRevision}:${emailProof}`} file={nsrpUpload} emailProof={emailProof} onUse={result => {
+              {nsrpUpload && <NsrpImportReview key={`${nsrpFileRevision}:${emailProof}`} autoRead file={nsrpUpload} emailProof={emailProof} onUse={result => {
                 setBasicInfo({ ...nsrpImportBasic(result.answers), noMiddleName: false })
                 setNsrpImportToken(result.importToken)
                 setReuseBasicInfo(true)
@@ -1008,9 +1009,9 @@ export default function ApplicantSignupWizard({ onCancel, onComplete, mode = "si
               </div>
             </section>
           )}
-          <div><label htmlFor="field-password" className="block text-sm font-medium text-slate-800">Password</label><PasswordInput id="field-password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} aria-invalid={Boolean(fieldErrors.password) || undefined} aria-describedby={fieldErrors.password ? "error-password" : undefined} className={`${inputClass}${inputErrorClass(Boolean(fieldErrors.password))}`} /></div>
+          <div><label htmlFor="field-password" className="block text-sm font-medium text-slate-800">Password</label><PasswordInput id="field-password" visible={signupPasswordsVisible} onVisibilityChange={setSignupPasswordsVisible} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} aria-invalid={Boolean(fieldErrors.password) || undefined} aria-describedby={fieldErrors.password ? "error-password" : undefined} className={`${inputClass}${inputErrorClass(Boolean(fieldErrors.password))}`} /></div>
+          <div><label htmlFor="field-confirmPassword" className="block text-sm font-medium text-slate-800">Confirm password</label><PasswordInput id="field-confirmPassword" visible={signupPasswordsVisible} onVisibilityChange={setSignupPasswordsVisible} visibilityLabel="confirm password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} aria-invalid={Boolean(fieldErrors.confirmPassword) || undefined} aria-describedby={fieldErrors.confirmPassword ? "error-confirmPassword" : undefined} className={`${inputClass}${inputErrorClass(Boolean(fieldErrors.confirmPassword))}`} /></div>
           <PasswordChecklist password={password} confirmPassword={confirmPassword} />
-          <div><label htmlFor="field-confirmPassword" className="block text-sm font-medium text-slate-800">Confirm password</label><PasswordInput id="field-confirmPassword" visibilityLabel="confirm password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} aria-invalid={Boolean(fieldErrors.confirmPassword) || undefined} aria-describedby={fieldErrors.confirmPassword ? "error-confirmPassword" : undefined} className={`${inputClass}${inputErrorClass(Boolean(fieldErrors.confirmPassword))}`} /></div>
           {fieldErrors.password && <p id="error-password" role="alert" className="text-xs text-rose-600">{fieldErrors.password}</p>}
           {fieldErrors.confirmPassword && <p id="error-confirmPassword" role="alert" className="text-xs text-rose-600">{fieldErrors.confirmPassword}</p>}
           <label className="flex items-start gap-2 text-sm text-slate-700">

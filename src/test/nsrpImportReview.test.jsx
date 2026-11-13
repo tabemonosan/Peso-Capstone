@@ -3,6 +3,47 @@ import { afterEach, it, expect, vi } from 'vitest'
 import NsrpImportReview from '../components/NsrpImportReview'
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 const result = { answers: { firstName: 'Maria', surname: 'Cruz', skills: ['Gardening'] }, warnings: [], importToken: 'source-bound-proof' }
+it('automatically retrieves a selected signup PDF while still requiring confirmation', async () => {
+  const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => result }), onUse = vi.fn()
+  vi.stubGlobal('fetch', fetch)
+  const file = new File(['pdf'], 'nsrp.pdf', { type: 'application/pdf' })
+  render(<NsrpImportReview autoRead file={file} emailProof="verified" onUse={onUse} />)
+  expect(screen.getByRole('status')).toHaveTextContent('Reading your NSRP')
+  expect(screen.queryByText('Retrieve from NSRP')).not.toBeInTheDocument()
+  await screen.findByText('Maria')
+  expect(fetch).toHaveBeenCalledTimes(1)
+  expect(fetch.mock.calls[0][1].body.get('nsrpFile')).toBe(file)
+  expect(screen.getByText('Use these details')).toBeDisabled()
+  expect(onUse).not.toHaveBeenCalled()
+})
+
+it('offers a retry when automatic retrieval fails', async () => {
+  const fetch = vi.fn()
+    .mockResolvedValueOnce({ ok: false, json: async () => ({ error: 'Could not read this NSRP.' }) })
+    .mockResolvedValueOnce({ ok: true, json: async () => result })
+  vi.stubGlobal('fetch', fetch)
+  render(<NsrpImportReview autoRead file={new File(['pdf'], 'nsrp.pdf')} emailProof="verified" onUse={vi.fn()} />)
+  expect(await screen.findByRole('alert')).toHaveTextContent('Could not read')
+  fireEvent.click(screen.getByText('Try again'))
+  await screen.findByText('Maria')
+  expect(fetch).toHaveBeenCalledTimes(2)
+})
+
+it('ignores a previous PDF response after the selected file changes', async () => {
+  let resolvePrevious
+  const previous = new Promise(resolve => { resolvePrevious = resolve })
+  const fetch = vi.fn().mockReturnValueOnce(previous)
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ ...result, answers: { firstName: 'Juan' } }) })
+  vi.stubGlobal('fetch', fetch)
+  const { rerender } = render(<NsrpImportReview autoRead file={new File(['old'], 'old.pdf')} emailProof="verified" />)
+  rerender(<NsrpImportReview autoRead file={new File(['new'], 'new.pdf')} emailProof="verified" />)
+  await screen.findByText('Juan')
+  resolvePrevious({ ok: true, json: async () => result })
+  await waitFor(() => expect(fetch.mock.calls[0][1].signal.aborted).toBe(true))
+  expect(screen.queryByText('Maria')).not.toBeInTheDocument()
+  expect(screen.getByText('Juan')).toBeInTheDocument()
+})
+
 it('shows extracted values and requires review before applying signup details', async () => {
   const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => result }), onUse = vi.fn()
   vi.stubGlobal('fetch', fetch)

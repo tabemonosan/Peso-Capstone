@@ -27,11 +27,12 @@ describe('landing page navigation', () => {
     expect(screen.getByRole('button', { name: 'Menu' })).toHaveFocus()
   })
 
-  it('closes the menu and focuses the email field when opening sign in', () => {
-    render(<LandingPage><label htmlFor="email">Email</label><input id="email" type="email" /></LandingPage>)
+  it('closes the menu and opens sign in', () => {
+    const onSignIn = vi.fn()
+    render(<LandingPage onSignIn={onSignIn} />)
     fireEvent.click(screen.getByRole('button', { name: 'Menu' }))
     fireEvent.click(screen.getByRole('link', { name: 'Sign in' }))
     expect(screen.getByRole('button', { name: 'Menu' })).toHaveAttribute('aria-expanded', 'false')
-    expect(screen.getByRole('textbox', { name: 'Email' })).toHaveFocus()
+    expect(onSignIn).toHaveBeenCalledOnce()
   })
 })

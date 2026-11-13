@@ -99,7 +99,9 @@ export function createVerificationEngine({ Applicant, Employer, EmployerRequest,
           sampled = (await decisions().findOne({ _id: decisionKey })).sampleDraw * 100 < settings.auditPercent
           if (sampled) reason = 'Audit sample'
         }
-        if (!reason && !await automation.reserveRate(decisionKey, ip, account.phone || nsrp.cellphone || record.phone, settings.rateLimit)) reason = 'Rate guard'
+        // Applicant ID attempts are bounded by document upload limits, rather
+        // than a shared daily IP/mobile approval quota.
+        if (!reason && role !== 'Applicant' && !await automation.reserveRate(decisionKey, ip, account.phone || nsrp.cellphone || record.phone, settings.rateLimit)) reason = 'Rate guard'
         if (!reason) {
           if (beforeApproval) await beforeApproval()
           const freshSettings = await automation.getSettings(), freshAccount = await accountModel.findById(accountId).select('+holdAutoApproval').lean()

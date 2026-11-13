@@ -1,4 +1,19 @@
 import { normalizeSkillLabel } from './nsrpSkills.js'
+import { canonicalJobSkill } from './jobSkills.js'
+
+// "Others" is a checkbox category; the specified skills belong on the profile.
+export function nsrpProfileSkills(answers = {}) {
+  const skills = Array.isArray(answers.skills) ? answers.skills : []
+  const specified = typeof answers.othersText === 'string'
+    ? answers.othersText.split(/[,;\n]+/).map(value => value.trim()).filter(Boolean) : []
+  return [...new Map(skills.flatMap(skill => {
+    if (typeof skill !== 'string' || !skill.trim()) return []
+    return normalizeSkillLabel(skill) === 'others' ? specified : [skill.trim()]
+  }).map(skill => {
+    const label = canonicalJobSkill(skill) || skill
+    return [normalizeSkillLabel(label), label]
+  })).values()]
+}
 
 // Earlier online registrations copied occupation + NSRP skills into the bio.
 // Only recognize that exact generated value; never rewrite a personal biography.
@@ -8,6 +23,6 @@ export function applicantProfileContent(profile = {}) {
   const summary = typeof profile.summary === 'string' ? profile.summary : ''
   const generated = [profile.nsrp?.occupation1, ...nsrpSkills].filter(Boolean).join(' · ')
   const legacy = profile.summarySource !== 'personal' && nsrpSkills.length > 0 && summary.trim() === generated.trim()
-  const skills = [...new Map((legacy ? [...selected, ...nsrpSkills] : selected).map((skill) => [normalizeSkillLabel(skill), skill])).values()]
+  const skills = nsrpProfileSkills({ skills: legacy ? [...selected, ...nsrpSkills] : selected, othersText: profile.nsrp?.othersText })
   return { skills, summary: legacy ? '' : summary }
 }

@@ -54,6 +54,8 @@ it('preserves existing detailed confirmations without opening another dialog', a
 
 it.each([
   ['/api/jobs', 'GET'], ['/api/nsrp/validate-signup', 'POST'], ['/api/nsrp/preview-signup', 'POST'],
+  ['/api/notifications/features/account-deletions/read', 'PATCH'],
+  ['/api/notifications/features/jobs/read', 'PATCH'],
   ['/api/applications/validate-email', 'POST'], ['/api/notifications/n1/read', 'PATCH'], ['/api/profile/page-guides', 'PATCH'],
 ])('leaves passive reads, checks and UI state uninterrupted %s', async (path, method) => {
   render(<ActionConfirmations />)

@@ -14,6 +14,19 @@ function mock(items = [], account = {}, total = items.length) {
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('My applications', () => {
+  it('lets an employee submit a company star rating from a hired application', async () => {
+    const fetcher = vi.fn(async (url, options) => ({ ok: true, json: async () => url.includes('/api/ratings')
+      ? options?.method === 'POST' ? { _id: 'rating1' } : { ratings: [] }
+      : { items: [{ ...base, status: 'hired', actions: ['view_outcome'], companyRating: { employerId: 'employer1', hireReportId: 'hire1' } }], account: {}, total: 1 } }))
+    vi.stubGlobal('fetch', fetcher)
+    render(<MyApplicationsPage token="applicant" />)
+    fireEvent.click(await screen.findByRole('button', { name: '4 stars' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Submit Rating' }))
+    await waitFor(() => expect(fetcher.mock.calls.some(([, options]) => options?.method === 'POST')).toBe(true))
+    const sent = fetcher.mock.calls.find(([, options]) => options?.method === 'POST')[1]
+    expect(JSON.parse(sent.body)).toMatchObject({ toRole: 'employer', toUserId: 'employer1', hireReportId: 'hire1', score: 4 })
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Submit Rating' })).not.toBeInTheDocument())
+  })
   it('keeps past applications and timelines together regardless of job board filters', async () => {
     window.history.replaceState({}, '', '/?locations=Tiwi&skills=Cooking')
     const fetcher = mock([{ ...base, status: 'withdrawn', actions: [] }])

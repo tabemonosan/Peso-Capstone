@@ -122,7 +122,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated, guid
       pending: "border-amber-300 bg-amber-100 text-amber-800",
       missing: "border-slate-300 bg-slate-100 text-slate-600",
     }
-    const label = { approved: 'Verified', rejected: 'Needs correction', needs_resubmission: 'Please resubmit', pending: 'Flagged for review', checking: 'Checking', missing: 'Missing' }[status] || status || 'Missing'
+    const label = { approved: 'Verified', rejected: 'Needs correction', needs_resubmission: 'Please resubmit', pending: 'Flagged for review', delayed: 'Awaiting verification', checking: 'Checking', missing: 'Missing' }[status] || status || 'Missing'
     return <span className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${styles[status] || styles.missing}`}>{label}</span>
   }
 
@@ -182,6 +182,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated, guid
           const flagged = !collectionOnly && info.consistency?.waitlisted && relevant.length > 0
           const review = info.review?.documents?.find(item => item.docKey === doc.docKey)
           const scanning = !collectionOnly && info.consistency?.checking && doc.status === 'pending'
+          const verificationDelayed = !flagged && !scanning && doc.status === 'pending' && review?.verificationDelayed === true
           const needsReview = !collectionOnly && !scanning && (flagged || review?.needsReview === true || ['rejected', 'needs_resubmission'].includes(doc.status))
           const hasChances = !flagged || relevant.every(issue => issue.chancesLeft > 0)
           const staffReviewOnly = (info.consistency?.issues || []).some(issue => issue.document === doc.docKey && issue.chancesLeft === null)
@@ -195,7 +196,7 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated, guid
                 <span className="font-semibold text-slate-900">
                   {doc.label}{doc.idType ? ` — ${doc.idType}` : ""}
                 </span>
-                {chip(collectionOnly && doc.latest ? 'Received' : doc.referenceOnly && doc.latest ? 'Registration reference' : doc.status === 'pending' && !needsReview ? 'checking' : doc.status)}
+                {chip(collectionOnly && doc.latest ? 'Received' : doc.referenceOnly && doc.latest ? 'Registration reference' : verificationDelayed ? 'delayed' : doc.status === 'pending' && !needsReview ? 'checking' : doc.status)}
                 {doc.required && <span className="text-xs text-slate-500">required</span>}
                 {!doc.required && <span className="text-xs text-slate-500">optional</span>}
                 {doc.docKey === 'nsrpForm' && <p className="w-full text-xs text-slate-600">Registration reference for your ID checks.</p>}
@@ -240,8 +241,8 @@ export default function MyDocumentsModal({ info, token, onClose, onUpdated, guid
               )}
               {!collectionOnly && !doc.referenceOnly && (needsReview || review?.reason || doc.status === 'pending') && <p className={`mt-3 rounded-lg px-3 py-2 text-xs leading-relaxed ${needsReview ? 'bg-amber-50 text-amber-900' : 'bg-slate-50 text-slate-600'}`}>{scanning ? 'Scanning your upload and comparing it with your NSRP. Results update automatically.' : review?.reason || (needsReview ? 'PESO will review this document. You can upload a clearer copy or explain a difference.' : 'Your document is being checked.')}</p>}
               {collectionOnly && <p className="mt-3 text-xs text-slate-600">Supporting file only. Birth certificates are not verified or compared with your NSRP.</p>}
-              {needsReview && ['nsrpForm', 'birthCertificate', 'validId1', 'validId2'].includes(doc.docKey) && doc.latest && <button type="button" onClick={() => setExplanationDoc(doc.docKey)} className="mt-2 rounded border border-slate-300 bg-white px-3 py-1 text-xs text-cyan-800">Explain a difference</button>}
-              {needsReview && <CorrectionGuidance docKey={doc.docKey} canReplace={canReplace} remaining={doc.uploadsRemaining} />}
+              {needsReview && !verificationDelayed && ['nsrpForm', 'birthCertificate', 'validId1', 'validId2'].includes(doc.docKey) && doc.latest && <button type="button" onClick={() => setExplanationDoc(doc.docKey)} className="mt-2 rounded border border-slate-300 bg-white px-3 py-1 text-xs text-cyan-800">Explain a difference</button>}
+              {needsReview && !verificationDelayed && <CorrectionGuidance docKey={doc.docKey} canReplace={canReplace} remaining={doc.uploadsRemaining} />}
               {locked && <p className="mt-2 text-xs text-green-700">{doc.referenceOnly ? 'Request a correction to update your NSRP. Your identity documents will be checked again.' : 'Request a correction if your information changes.'}</p>}
               {doc.correctionRequest && <p className="mt-2 rounded-lg border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">Correction requested: {doc.correctionRequest.reason}. Waiting for PESO review.</p>}
               {locked && !doc.correctionRequest && <button type="button" onClick={() => { setCorrectionDoc(doc.docKey); setCorrectionReason(''); setError(''); setSuccess('') }} className="mt-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold">Request correction</button>}

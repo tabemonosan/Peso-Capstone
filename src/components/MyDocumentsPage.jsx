@@ -39,15 +39,7 @@ export default function MyDocumentsPage({ applicantId, token, onUpdated, open, o
 
   if (!info) return <p role={error ? 'alert' : 'status'} className="text-sm text-slate-600">{error || 'Loading your documents…'}</p>
 
-  const documents = info.documents || []
-  const requiredDocuments = documents.filter((doc) => doc.required)
-  const approvedCount = requiredDocuments.filter((doc) => doc.status === "approved").length
-  const statusStyles = {
-    approved: "border-green-300 bg-green-100 text-green-800",
-    declined: "border-rose-300 bg-rose-100 text-rose-800",
-    restricted: "border-rose-300 bg-rose-100 text-rose-800",
-    under_review: "border-amber-300 bg-amber-100 text-amber-800",
-  }
+  const approved = info.verificationStatus === 'approved'
 
   return (
     <div className="rounded-2xl border border-slate-300 bg-white p-6">
@@ -60,13 +52,8 @@ export default function MyDocumentsPage({ applicantId, token, onUpdated, open, o
       <ConsistencyWaitlistCard state={info.consistency} />
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        {info.verificationStatus && (
-          <span className={`rounded-full border px-3 py-1 text-xs font-semibold capitalize ${statusStyles[info.verificationStatus] || "border-slate-300 bg-slate-100 text-slate-600"}`}>
-            {String(info.verificationStatus).replaceAll("_", " ")}
-          </span>
-        )}
-        <span className="rounded-full border border-slate-300 bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
-          {approvedCount} of {requiredDocuments.length} required documents approved
+        <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${approved ? 'border-green-300 bg-green-100 text-green-800' : 'border-amber-300 bg-amber-100 text-amber-800'}`}>
+          {approved ? 'Approved' : 'Pending'}
         </span>
         {info.attentionCount > 0 && (
           <span className="rounded-full border border-amber-300 bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800" role="alert">

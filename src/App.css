@@ -2232,3 +2232,24 @@ input[type="file"]::file-selector-button {
 .portal-shell-employer .employer-form-panel [role="alert"] {
   color: #be123c !important;
 }
+
+.portal-shell-admin .portal-nav-item { position: relative; }
+.portal-nav-notification-badge {
+  position: absolute;
+  top: -5px;
+  right: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  background: #dc0050;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  pointer-events: none;
+}

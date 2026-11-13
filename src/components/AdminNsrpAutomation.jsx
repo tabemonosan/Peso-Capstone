@@ -125,7 +125,7 @@ export default function AdminNsrpAutomation({ token, bannerOnly = false }) {
         <label><input type="checkbox" checked={settings.philsysQrVerification} onChange={event => setSettings({ ...settings, philsysQrVerification: event.target.checked })} /> Local PhilSys signature checks (requires configured keys)</label>
         <p className="text-sm text-slate-600 sm:col-span-2">Checks assess consistency and evidence, not authenticity. Independent document evidence is required by default. The PhilSys signature provider is unavailable without configured issuer keys; unsupported QR formats stay inconclusive.</p>
         <label>Audit sample percentage<input type="number" min="0" max="100" required className={`${control} block`} value={settings.auditPercent} onChange={(event) => setSettings({ ...settings, auditPercent: event.target.value })} /></label>
-        <label>Rate guard per IP and mobile / 24 hours<input type="number" min="1" max="5" required className={`${control} block`} value={settings.rateLimit} onChange={(event) => setSettings({ ...settings, rateLimit: event.target.value })} /></label>
+        <label>Employer approval limit per IP and mobile / 24 hours<input type="number" min="1" max="5" required className={`${control} block`} value={settings.rateLimit} onChange={(event) => setSettings({ ...settings, rateLimit: event.target.value })} /></label>
         <button disabled={busy} type="submit" className="rounded-lg border border-cyan-500 bg-cyan-50 px-4 py-2">Save verification rules</button>
       </fieldset></form>}
       {notice && <p role="status">{notice}</p>}

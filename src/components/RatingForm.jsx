@@ -73,7 +73,7 @@ function RatingForm({ token, toUserId, toRole, hireReportId, onCreated }) {
     }
   }
 
-  if (ratedKey === key) return null
+  if (ratedKey === key) return toRole === 'employer' ? <p role="status" className="mt-3 text-sm text-slate-600">You have already rated this company.</p> : null
   if (checking) return <p role="status" className="mt-3 text-xs text-slate-600">Checking whether you already submitted a rating...</p>
   if (checkFailed) return <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 p-3"><p role="alert" className="text-sm text-rose-800">{error}</p><button type="button" onClick={check} className="mt-2 text-sm text-blue-800 underline">Retry rating check</button></div>
   return (
@@ -82,7 +82,7 @@ function RatingForm({ token, toUserId, toRole, hireReportId, onCreated }) {
       className="mt-4 rounded-2xl border border-slate-200 bg-white p-4"
     >
       <h4 className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-800">
-        {toRole === 'applicant' ? 'Rate Applicant' : 'Rate Employer'}
+        {toRole === 'applicant' ? 'Rate Applicant' : 'Rate company'}
       </h4>
       <p className="mt-2 text-xs text-slate-600">You can submit this rating only once. Ratings do not change reputation points.</p>
 
@@ -101,8 +101,9 @@ function RatingForm({ token, toUserId, toRole, hireReportId, onCreated }) {
               }`}
               disabled={submitting}
               aria-pressed={score === value}
+              aria-label={`${value} ${value === 1 ? 'star' : 'stars'}`}
             >
-              {value}
+              <span aria-hidden="true">{score >= value ? '★' : '☆'}</span>
             </button>
           ))}
         </div>

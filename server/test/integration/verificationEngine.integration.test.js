@@ -63,12 +63,20 @@ it('ignores old birth-certificate flags while retaining duplicate guards on IDs'
  await run(user, 'validId2')
  expect(await saved(user, 'validId2')).toMatchObject({ status: 'pending', reviewReasons: ['Flagged'] })
 })
-it('enforces the shared rolling IP/mobile quota', async () => {
+it('approves applicant IDs beyond the old shared daily quota without reserving rate slots', async () => {
+ const reserve = vi.spyOn(automation, 'reserveRate').mockResolvedValue(false)
  const users = await Promise.all(Array.from({ length: 6 }, () => account()))
  await Promise.all(users.map(user => run(user)))
  const rows = await automation.decisions().find({}).toArray()
- expect(rows.filter(row => row.result === 'Auto-approved')).toHaveLength(5)
- expect(rows.filter(row => row.reason === 'Rate guard')).toHaveLength(1)
+ expect(rows.filter(row => row.result === 'Auto-approved')).toHaveLength(6)
+ expect(rows.filter(row => row.reason === 'Rate guard')).toHaveLength(0)
+ expect(reserve).not.toHaveBeenCalled()
+})
+it('rechecks and approves an existing ID blocked only by the old daily quota', async () => {
+ const user = await account({ reviewReasons: ['Rate guard'] })
+ await automation.decisions().insertOne({ _id: `Applicant:${user._id}:validId1:1`, accountId: user._id, docKey: 'validId1', result: 'Manual', reason: 'Rate guard' })
+ await run(user)
+ expect(await saved(user)).toMatchObject({ status: 'approved', reviewReasons: [], autoApproved: true })
 })
 it('requires independent evidence by default and supports the explicit typed-only option', async () => {
  const first = await account({ imageComparisons: [] }); await run(first)

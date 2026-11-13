@@ -78,6 +78,8 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
 .portal-shell[class] .portal-logout:hover { background: var(--peso-primary-soft); border-color: var(--peso-line); }
 .portal-shell[class] .portal-profile-icon { width: 28px !important; height: 28px !important; background: var(--peso-primary-soft) !important; color: var(--peso-primary) !important; border-radius: 50%; font-size: 12px !important; }
 .portal-shell[class] .portal-layout {
+  display: flex;
+  flex-direction: column;
   width: min(100% - 64px, 1440px);
   max-width: 1440px;
   grid-template-columns: minmax(0, 1fr);
@@ -94,6 +96,16 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
   background: var(--peso-surface);
   box-shadow: none;
 }
+.portal-shell[class] .portal-sidebar.portal-scroll-nav {
+  position: sticky;
+  top: 12px;
+  z-index: 40;
+  align-self: stretch;
+  flex-shrink: 0;
+  transition: transform .22s ease;
+}
+.portal-shell[class] .portal-sidebar.portal-scroll-nav.is-hidden { transform: translateY(calc(-100% - 12px)); }
+.portal-shell[class] .portal-sidebar.portal-scroll-nav:focus-within { transform: translateY(0); }
 .portal-shell[class] .portal-session {
   padding: 18px 16px;
   gap: 3px;

@@ -37,3 +37,33 @@ it('keeps a readable different name flagged despite header and edge noise', () =
  const report = checkIdName(`Lest Name, First Name. Middle Name\n${nameRow}`, 51, nsrp, { lines: [{ text: nameRow, confidence: 73 }] })
  expect(report.findings[0]).toMatchObject({ severity: 'critical', fieldGroup: 'name' })
 })
+
+it.each(['III', 'ill'])('matches a license suffix %s before the middle name', suffix => {
+ const nameRow = `DELA CRUZ, JUAN MIGUEL ${suffix} SANTOS`
+ const report = checkIdName(`Last Name, First Name, Middle Name\n${nameRow}`, 51,
+   { ...nsrp, suffix: 'III' }, { lines: [{ text: nameRow, confidence: 81 }] })
+ expect(report.comparisons[0]).toMatchObject({ result: 'match', reliable: true })
+ expect(report.findings).toEqual([])
+})
+
+it('keeps a changed family name flagged when a suffix is relocated', () => {
+ const report = checkIdName('Last Name, First Name, Middle Name\nRIVERA, JUAN MIGUEL ill SANTOS', 81, { ...nsrp, suffix: 'III' })
+ expect(report.findings[0]).toMatchObject({ severity: 'critical', fieldGroup: 'name' })
+})
+
+it.each(['III', 'ill'])('reads PhilSys bilingual fields with suffix %s in Given Names', suffix => {
+ const name = `JUAN MIGUEL ${suffix}`
+ const text = `Apelyido/Last Name\nDELA CRUZ\nMga Pangalan/Given Names\n${name}\nGitnang Apelyido/Middle Name\nSANTOS`
+ const metadata = { lines: [{ text: 'DELA CRUZ', confidence: 91 }, { text: name, confidence: 72 }, { text: 'SANTOS', confidence: 89 }] }
+ const report = checkIdName(text, 52, { ...nsrp, suffix: 'III' }, metadata)
+ expect(report.comparisons[0]).toMatchObject({ result: 'match', reliable: true })
+ expect(report.findings).toEqual([])
+ expect(JSON.stringify(report)).not.toMatch(/Juan|Miguel|Cruz|Santos/i)
+})
+it('keeps different PhilSys names flagged and low-confidence middle names unreadable', () => {
+ const reference = { ...nsrp, suffix: 'III' }
+ const text = 'Surname: RIVERA\nFirst name: JUAN MIGUEL III\nMiddle name: SANTOS'
+ expect(checkIdName(text, 90, reference).findings[0]).toMatchObject({ severity: 'critical' })
+ const metadata = { lines: [{ text: 'RIVERA', confidence: 91 }, { text: 'JUAN MIGUEL III', confidence: 72 }, { text: 'SANTOS', confidence: 30 }] }
+ expect(checkIdName(text, 90, reference, metadata).comparisons[0]).toMatchObject({ result: 'could_not_read', reliable: false })
+})

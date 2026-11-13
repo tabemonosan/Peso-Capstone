@@ -34,6 +34,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 async function openForm() {
   render(<App />)
+  fireEvent.click(screen.getByRole('link', { name: 'Sign in', exact: true }))
   fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: user.email } })
   fireEvent.change(screen.getByLabelText(/^Password$/i, { selector: 'input' }), { target: { value: 'Password123!' } })
   fireEvent.submit(screen.getByRole('button', { name: /Sign in/i }).closest('form'))
@@ -42,9 +43,10 @@ async function openForm() {
   return within(await screen.findByRole('dialog', { name: 'Request a Job Posting' }))
 }
 describe('create job posting address and errors', () => {
-  it('moves jobs expired for three days into the Archive tab while keeping recent expirations in All', async () => {
+  it('opens expired postings from Archive beside Create Job Posting and keeps active postings in All', async () => {
     const day = 86400000
     myJobs = [
+      { _id: 'active', title: 'Open role', status: 'approved', company: 'Example Works', deadline: new Date(Date.now() + day).toISOString() },
       { _id: 'recent', title: 'Recently expired role', status: 'approved', company: 'Example Works', deadline: new Date(Date.now() - 2 * day).toISOString() },
       { _id: 'archived', title: 'Archived role', status: 'approved', company: 'Example Works', deadline: new Date(Date.now() - 4 * day).toISOString() },
     ]
@@ -54,14 +56,18 @@ describe('create job posting address and errors', () => {
     render(<App />)
     expect(await screen.findByRole('button', { name: 'All (1)' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Approved (1)' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'View details for Recently expired role' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'View details for Archived role' })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Archive (1)' }))
-    expect(await screen.findByRole('button', { name: 'View details for Archived role' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'View details for Open role' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'View details for Recently expired role' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'View details for Archived role' })).not.toBeInTheDocument()
+    const toolbar = screen.getByRole('button', { name: 'Create Job Posting', exact: true }).parentElement
+    fireEvent.click(within(toolbar).getByRole('button', { name: 'Archive (2)' }))
+    expect(screen.getByRole('heading', { name: 'Archived Job Postings' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'View details for Archived role' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'View details for Recently expired role' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'View details for Open role' })).not.toBeInTheDocument()
     expect(screen.getByText(/Applications and hiring records are retained/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'All (1)' }))
-    expect(await screen.findByRole('button', { name: 'View details for Recently expired role' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'View details for Open role' })).toBeInTheDocument()
   })
 
   it('hides address controls while retaining the registered barangay in the posting preview', async () => {

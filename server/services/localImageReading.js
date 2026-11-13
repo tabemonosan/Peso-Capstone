@@ -3,6 +3,7 @@ import { createRequire } from 'node:module'
 import path from 'node:path'
 import sharp from 'sharp'
 import { isCombinedNameHeader, compareName } from '../../shared/crossChecks.js'
+import { philSysNameRegions } from '../../shared/idNameRegions.js'
 import { createWorker } from 'tesseract.js'
 import { IMAGE_LIMITS, qrSummary } from '../../shared/documentImage.js'
 const require = createRequire(import.meta.url)
@@ -41,6 +42,25 @@ async function runOcr(buffer, compare, { reserve = async () => true, nameOnly = 
       const rawLines = (data.blocks || []).flatMap(block => block.paragraphs || []).flatMap(paragraph => paragraph.lines || [])
       let text = data.text || ''
       const lines = rawLines.map(line => ({ text: line.text, confidence: line.confidence }))
+      if (nameOnly) {
+        const regions = philSysNameRegions(rawLines)
+        if (regions.length) try {
+          const size = await sharp(buffer).metadata()
+          await worker.setParameters({ tessedit_pageseg_mode: '7' })
+          const readings = []
+          for (const region of regions) {
+            const box = region.bbox, left = Math.max(0, box.x0 - 20), top = Math.max(0, box.y0 - 20)
+            const width = Math.min(size.width - left, box.x1 - left + 20), height = Math.min(size.height - top, box.y1 - top + 20)
+            const crop = await sharp(buffer).extract({ left, top, width, height }).resize({ height: 120 }).greyscale().normalize().png().toBuffer()
+            const retry = (await worker.recognize(crop)).data
+            const value = retry.text?.trim()
+            if (!value || value.length > 120 || !/^[\p{L}\s.'’-]+$/u.test(value)) continue
+            readings.push(`${region.label}: ${value}`)
+            lines.unshift({ text: value, confidence: retry.confidence })
+          }
+          text = [...readings, text].join('\n')
+        } catch { /* Keep the original reading when a name region cannot be read. */ }
+      }
       // A license's security pattern and unrelated columns can lower page confidence.
       // Re-read the name row itself at a larger size, without guessing its contents.
       const header = nameOnly ? rawLines.findIndex(line => isCombinedNameHeader(line.text)) : -1
