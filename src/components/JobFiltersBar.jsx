@@ -38,7 +38,7 @@ function Checklist({ options, selected, onToggle, namePrefix }) {
                 className="h-4 w-4 accent-cyan-500"
               />
               <span className="flex-1 truncate">{value}</span>
-              {count !== undefined && <span className="text-xs text-black">({count})</span>}
+              {count > 0 && <span className="text-xs text-black">({count})</span>}
             </label>
           </li>
         )

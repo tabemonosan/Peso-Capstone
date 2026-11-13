@@ -33,6 +33,7 @@ describe('CSM response API', () => {
     expect(records.map((record) => record.submitterRole).sort()).toEqual(['Applicant', 'Employer'])
     expect(records.every((record) => record.questionnaireVersion === CSM_VERSION && record.answers.cc2 === '5' && record.answers.cc3 === '4')).toBe(true)
     expect(await Notification.countDocuments({ type: 'csm_response_submitted' })).toBe(2)
+    expect(await Notification.countDocuments({ type: 'csm_response_submitted', link: '/client-feedback' })).toBe(2)
   })
   it('validates required answers server-side without saving incomplete responses', async () => {
     expect((await submit('Applicant', payload({ age: 0, ratings: {} }))).status).toBe(422)

@@ -16,6 +16,7 @@ const destinations = {
   Admin: {
     '/dashboard': ['dashboard', 'Open dashboard'],
     '/report-maker': ['report-maker', 'Open report maker'],
+    '/client-feedback': ['client-feedback', 'View client feedback'],
     '/activity-logs': ['activity-logs', 'Open activity logs'],
     '/internal-accounts': ['internal-accounts', 'Open internal accounts'],
     '/review-notes': ['review-notes', 'Open review notes'],
@@ -40,7 +41,8 @@ export function notificationDestination(notification, role) {
   if (raw && (!raw.startsWith('/') || raw.startsWith('//'))) return null
   const path = raw?.split(/[?#]/)[0].replace(/\/+$/, '')
   const legacy = role === 'Employer' && ['referral_received', 'application_withdrawn', 'employer_application_access'].includes(notification?.type || notification?.kind) ? '/referrals' : null
-  const target = destinations[role]?.[path || legacy]
+  const targetPath = role === 'Admin' && (notification?.type || notification?.kind) === 'csm_response_submitted' ? '/client-feedback' : path || legacy
+  const target = destinations[role]?.[targetPath]
   return target ? { view: target[0], label: target[1], href: `?notificationView=${encodeURIComponent(target[0])}` } : null
 }
 export function notificationViewFromQuery(role, search) {

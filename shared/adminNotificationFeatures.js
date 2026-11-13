@@ -1,8 +1,9 @@
 import { adminViewAllowed } from './adminAccess.js'
 
-export const ADMIN_NOTIFICATION_FEATURES = ['dashboard', 'report-maker', 'employers', 'applicants', 'requests', 'account-deletions', 'activity-logs', 'internal-accounts', 'review-notes', 'email-delivery', 'verification-flagged', 'verification-auto', 'verification-rules', 'jobs', 'job-titles', 'employment-updates', 'peso-referrals']
+export const ADMIN_NOTIFICATION_FEATURES = ['dashboard', 'report-maker', 'client-feedback', 'employers', 'applicants', 'requests', 'account-deletions', 'activity-logs', 'internal-accounts', 'review-notes', 'email-delivery', 'verification-flagged', 'verification-auto', 'verification-rules', 'jobs', 'job-titles', 'employment-updates', 'peso-referrals']
 const typeTargets = {
   new_application: 'peso-referrals', hire_report_submitted: 'employment-updates',
+  csm_response_submitted: 'client-feedback',
   account_deletion_requested: 'account-deletions', applicant_registration_pending: 'applicants',
   employer_request: 'requests', review_note_added: 'review-notes',
 }

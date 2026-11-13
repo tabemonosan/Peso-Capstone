@@ -20,6 +20,6 @@ const paths = {
 }
 
 export default function PortalNavIcon({ name, className = '' }) {
-  const icon = name === 'employer' ? 'jobs' : ['reputation', 'my-reputation'].includes(name) ? 'reviews' : name === 'employment-reports' ? 'employment-updates' : name
+  const icon = name === 'employer' ? 'jobs' : ['reputation', 'my-reputation', 'client-feedback'].includes(name) ? 'reviews' : name === 'employment-reports' ? 'employment-updates' : name
   return <svg className={`portal-icon ${className}`} width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><path d={paths[icon] || paths.requests} /></svg>
 }

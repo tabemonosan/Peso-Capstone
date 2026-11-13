@@ -4,7 +4,7 @@ import { CSM_TEXT, CSM_QUESTION_KEYS, CSM_RATING_VALUES } from '../../shared/csm
 import Modal from './Modal'
 import Pagination from './Pagination'
 
-export default function AdminCsmFeedbackModal({ token, onClose }) {
+export function AdminCsmFeedbackPage({ token, onClose }) {
   const [role, setRole] = useState('all')
   const [language, setLanguage] = useState('all')
   const [page, setPage] = useState(1)
@@ -29,10 +29,10 @@ export default function AdminCsmFeedbackModal({ token, onClose }) {
     return () => { cancelled = true }
   }, [token, role, language, page, limit, refresh])
 
-  return <Modal onClose={onClose} labelledBy="csm-feedback-title" maxWidth="max-w-5xl">
+  return <section className="portal-card rounded-2xl border border-slate-200 bg-white p-6" aria-labelledby="csm-feedback-title">
     <div className="flex items-start justify-between gap-4">
       <div><h2 id="csm-feedback-title" className="text-xl font-bold">Client feedback</h2><p className="mt-2 text-sm text-slate-600">Submitted CSM questionnaires from applicants and employers. The supplied English and Tagalog versions have different SQD6 and SQD7 wording; each response retains its chosen version.</p></div>
-      <button type="button" onClick={onClose} className="rounded-full border border-slate-300 bg-white px-3 py-2 text-sm font-semibold">Close</button>
+      {onClose && <button type="button" onClick={onClose} className="rounded-full border border-slate-300 bg-white px-3 py-2 text-sm font-semibold">Close</button>}
     </div>
     <div className="mt-4 flex flex-wrap items-end gap-3">
       <label className="text-sm font-medium">Respondent<select className="shared-form-control" value={role} onChange={(event) => { setRole(event.target.value); setPage(1) }}><option value="all">All respondents</option><option value="Applicant">Applicant / employee</option><option value="Employer">Employer</option></select></label>
@@ -62,5 +62,9 @@ export default function AdminCsmFeedbackModal({ token, onClose }) {
       </article>
     })}
     {!loading && !error && data.total > 0 && <Pagination page={page} pageSize={limit} totalItems={data.total} onPageChange={setPage} onPageSizeChange={(value) => { setLimit(value); setPage(1) }} itemLabel="questionnaires" ariaLabel="Client feedback pagination" />}
-  </Modal>
+  </section>
+}
+
+export default function AdminCsmFeedbackModal({ token, onClose }) {
+  return <Modal onClose={onClose} labelledBy="csm-feedback-title" maxWidth="max-w-5xl"><AdminCsmFeedbackPage token={token} onClose={onClose} /></Modal>
 }
