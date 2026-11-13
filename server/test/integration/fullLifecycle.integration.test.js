@@ -79,16 +79,20 @@ describe('connected portal lifecycle', () => {
     expect(created.status, JSON.stringify(created.body)).toBe(200)
     const jobId = created.body._id
     expect((await request(app).put(`/api/jobs/${jobId}/status`).set(auth(adminToken)).send({ status: 'approved' })).status).toBe(200)
-    // A complete registration still awaits PESO approval until its documents are reviewed.
+    // NSRP is the reference and the birth certificate is collected; ID approval gates applications.
     expect((await request(app).post(`/api/jobs/${jobId}/apply`).set(auth(applicantToken)).send({ sharingConsent: true })).status).toBe(403)
-    const correction = await request(app).put(`/api/applicants/${applicant._id}/verification-documents/birthCertificate`).set(auth(adminToken)).send({ status: 'rejected', reason: 'Upload a complete birth certificate with readable details.' })
+    const correction = await request(app).put(`/api/applicants/${applicant._id}/verification-documents/validId1`).set(auth(adminToken)).send({ status: 'rejected', reason: 'Upload clear front and back images of the same ID.' })
     expect(correction.status, JSON.stringify(correction.body)).toBe(200)
     const ownDocuments = await request(app).get('/api/profile').set(auth(applicantToken))
-    expect(ownDocuments.body.verificationDocuments.find(doc => doc.docKey === 'birthCertificate').status).toBe('rejected')
-    const replacement = await request(app).post('/api/profile/verification-documents/birthCertificate').set(auth(applicantToken)).field('verificationDetails', JSON.stringify({ copyType: 'PSA copy on security paper' })).attach('document', pdfBuffer(), { filename: 'corrected-birth.pdf', contentType: 'application/pdf' })
+    expect(ownDocuments.body.verificationDocuments.find(doc => doc.docKey === 'validId1').status).toBe('rejected')
+    expect(ownDocuments.body.verificationDocuments.find(doc => doc.docKey === 'birthCertificate')).toMatchObject({ status: 'received', collectionOnly: true })
+    expect(ownDocuments.body.verificationDocuments.find(doc => doc.docKey === 'nsrpForm').referenceOnly).toBe(true)
+    const replacement = await request(app).post('/api/profile/verification-documents/validId1').set(auth(applicantToken))
+      .attach('document', pdfBuffer(), { filename: 'corrected-id-front.pdf', contentType: 'application/pdf' })
+      .attach('documentBack', pdfBuffer(), { filename: 'corrected-id-back.pdf', contentType: 'application/pdf' })
     expect(replacement.status, JSON.stringify(replacement.body)).toBe(200)
     await drainVerificationJobs()
-    for (const key of ['nsrpForm', 'birthCertificate', 'validId1']) {
+    for (const key of ['validId1']) {
       const current = await request(app).get(`/api/applicants/${applicant._id}/verification-documents`).set(auth(adminToken))
       const unresolved = current.body.documents.find(doc => doc.docKey === key).unresolved
       const review = await request(app).put(`/api/applicants/${applicant._id}/verification-documents/${key}`).set(auth(adminToken)).send({ status: 'approved', reason: 'Document reviewed', unresolved, checklist: { nameMatches: true, photoClear: true, notExpired: true, typeMatches: true, bothSides: true } })

@@ -17,6 +17,13 @@ const add = (level, values = {}) => Notification.create({ recipient: { id: users
 beforeAll(startTestDb, 180000)
 beforeEach(clearDb)
 afterAll(stopTestDb)
+it('routes legacy CSM notifications to the new Client Feedback feature badge', async () => {
+ await add('admin', { type: 'csm_response_submitted', link: '/peso-referrals' })
+ const summary = (await api('admin', '/features').expect(200)).body
+ expect(summary.counts).toEqual({ 'client-feedback': 1 })
+ await api('admin', '/features/client-feedback/read', 'patch').send({ before: summary.asOf }).expect(200)
+ expect((await api('admin', '/features').expect(200)).body.counts).toEqual({})
+})
 it.each(['super_admin', 'admin'])('counts deletion notifications independently of bell pagination for %s', async level => {
  await Promise.all(Array.from({ length: 55 }, () => add(level)))
  await add('staff')

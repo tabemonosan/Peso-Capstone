@@ -5,6 +5,7 @@ import { readQr, readOcr } from './localImageReading.js'
 import { IMAGE_LIMITS } from '../../shared/documentImage.js'
 import { checkIdName } from '../../shared/idNameChecks.js'
 import { readDocumentOcr } from './documentReading.js'
+import { applicantNsrpReference } from './nsrpReference.js'
 export async function reserveOcr() {
   const collection = mongoose.connection.db.collection('verification_ocr_usage')
   const id = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' })
@@ -22,7 +23,7 @@ export async function processApplicantImages({ accountId, docKey, version, setti
     if (!file) return
     let qr = { found: false, domain: null, allowlisted: false }, comparisons = [{ fieldGroup: 'document', result: 'could_not_read', evidence: 'independent' }]
     let pdfRead = false
-    const nsrpValues = account.profile?.nsrp || { firstName: account.profile?.firstName, surname: account.profile?.lastName, middleName: account.profile?.middleName, dob: account.profile?.dob }
+    const nsrpValues = applicantNsrpReference(account.profile)
     {
       const buffer = Buffer.from(file.data)
       if (file.mimetype !== 'application/pdf') qr = await readers.readQr(buffer, async raw => {

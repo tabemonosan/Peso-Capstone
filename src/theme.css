@@ -102,7 +102,12 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
   z-index: 40;
   align-self: stretch;
   flex-shrink: 0;
-  transition: transform .22s ease;
+  transition: transform .22s ease, background-color .18s ease, border-color .18s ease;
+}
+.portal-shell[class] .portal-sidebar.portal-scroll-nav.is-scrolled {
+  background: transparent;
+  border-color: transparent;
+  backdrop-filter: blur(10px);
 }
 .portal-shell[class] .portal-sidebar.portal-scroll-nav.is-hidden { transform: translateY(calc(-100% - 12px)); }
 .portal-shell[class] .portal-sidebar.portal-scroll-nav:focus-within { transform: translateY(0); }

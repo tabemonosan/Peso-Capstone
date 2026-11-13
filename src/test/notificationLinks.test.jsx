@@ -2,6 +2,13 @@ import { render, screen, fireEvent, within, waitFor } from '@testing-library/rea
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import App from '../App'
 import { notificationDestination, notificationViewFromQuery } from '../utils/notificationLinks'
+it('opens the admin feedback page from both old and new CSM notification links', () => {
+  for (const link of ['/peso-referrals', '/client-feedback']) {
+    expect(notificationDestination({ type: 'csm_response_submitted', link }, 'Admin')).toMatchObject({ view: 'client-feedback', label: 'View client feedback' })
+  }
+  expect(notificationViewFromQuery('Admin', '?notificationView=client-feedback')).toBe('client-feedback')
+  expect(notificationViewFromQuery('Applicant', '?notificationView=client-feedback')).toBeNull()
+})
 
 const user = { id: 'employer1', role: 'Employer', email: 'employer@example.com', emailVerified: true, verificationStatus: 'approved', registration: { complete: true }, companyName: 'Example Works', profile: {} }
 const notification = { _id: 'notification1', type: 'referral_received', title: 'New application received', message: 'A new applicant is available for Delivery Driver.', link: '/referrals', createdAt: '2026-11-02T12:00:00Z', read: false }

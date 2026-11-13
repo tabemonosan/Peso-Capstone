@@ -30,7 +30,7 @@ export function AutomaticReferralBanner({ token, onOpen }) {
   return <div role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">{state.off ? 'Automatic referral is OFF. New applications wait for PESO referral. ' : 'Automatic referral is ON. '}{state.lowTrust ? 'Low-trust review routing is ON. Flagged applications wait for admin review. ' : 'Low-trust review routing is OFF. '}<button type="button" onClick={onOpen} className="ml-2 font-semibold underline">Open referrals and applications</button></div>
 }
 
-export default function AdminReferralsPage({ token, onOpenReviewQueue, ...legacyProps }) {
+export default function AdminReferralsPage({ token, onOpenReviewQueue, onViewClientFeedback, ...legacyProps }) {
   const { can } = useAdminAccess()
   const [settings, setSettings] = useState(null)
   const [options, setOptions] = useState({ employers: [], jobs: [], applicants: [] })
@@ -80,6 +80,7 @@ export default function AdminReferralsPage({ token, onOpenReviewQueue, ...legacy
     <section className="rounded-2xl border border-slate-200 bg-white p-6 text-slate-900">
       <h2 className="text-xl font-bold">Referrals and applications</h2>
       {onOpenReviewQueue && <button type="button" onClick={onOpenReviewQueue} className="mt-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">Open Flagged for review</button>}
+      {onViewClientFeedback && <button type="button" onClick={onViewClientFeedback} className="ml-2 mt-3 rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-800">View client feedback</button>}
       <p className="mt-2 text-sm text-slate-600">Live oversight of applications and referrals. Automatic delivery needs no PESO approval. Refreshes every 10 seconds.</p>
       {settings && <label className="my-4 flex items-center gap-2 rounded-xl border border-cyan-200 bg-cyan-50 p-3 text-sm font-semibold"><input type="checkbox" checked={settings.automaticReferral} disabled={busy || !can('settings')} onChange={(event) => settingsChange(event.target.checked)} />Automatic referral {settings.automaticReferral ? 'ON' : 'OFF'}</label>}
       {settings && <label className="my-3 flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm"><input type="checkbox" checked={settings.lowTrustRouting === true} disabled={busy || !can('settings')} onChange={(event) => settingsChange(event.target.checked, 'lowTrustRouting')} />Send low-trust applications to admin review first</label>}

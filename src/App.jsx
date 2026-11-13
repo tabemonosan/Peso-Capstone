@@ -32,7 +32,7 @@ import JobsView from "./components/JobsView"
 import VerificationDocumentsForm, { emptyVerificationDocs, validateVerificationDocs } from "./components/VerificationDocumentsForm"
 import VerificationDocsReviewModal from "./components/VerificationDocsReviewModal"
 import MyDocumentsPage from "./components/MyDocumentsPage"
-import { useScrollHidden } from './hooks/useScrollHidden'
+import { useScrollNavigation } from './hooks/useScrollHidden'
 import VerifyEmailPage from "./components/VerifyEmailPage"
 import EmailVerificationBanner from "./components/EmailVerificationBanner"
 import CompleteRegistrationPage from "./components/CompleteRegistrationPage"
@@ -57,7 +57,7 @@ import AdminActivityLogs from './components/AdminActivityLogs'
 import AdminEmploymentUpdatesPage from "./components/AdminEmploymentUpdatesPage"
 import PortalNavIcon from "./components/PortalNavIcon"
 import ReviewQuestionnaires from "./components/ReviewQuestionnaires"
-import AdminCsmFeedbackModal from "./components/AdminCsmFeedbackModal"
+import { AdminCsmFeedbackPage } from "./components/AdminCsmFeedbackModal"
 import pesoLogo from './assets/peso-logo.png'
 import Modal from './components/Modal'
 import Pagination from "./components/Pagination"
@@ -94,6 +94,7 @@ const navigationByRole = {
   Admin: [
     { id: "dashboard", label: "Dashboard" },
     { id: "report-maker", label: "Report maker" },
+    { id: 'client-feedback', label: 'Client Feedback' },
     { id: "employers", label: "Employers" },
     { id: "applicants", label: "Applicants" },
     { id: "requests", label: "Employer Requests" },
@@ -199,7 +200,7 @@ function App() {
   const [showProfileDocuments, setShowProfileDocuments] = useState(() => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('editNsrp') === '1')
   const documentLinkHandled = useRef(false)
   const [isLoggedIn, setIsLoggedIn] = useState(false)
-  const portalNavHidden = useScrollHidden(isLoggedIn)
+  const { hidden: portalNavHidden, atTop: portalNavAtTop } = useScrollNavigation(isLoggedIn)
   useEffect(() => {
     if (currentUser?.role === 'Admin' && !adminViewAllowed(currentUser, activeView)) setActiveView('dashboard')
   }, [currentUser, activeView])
@@ -430,7 +431,6 @@ const toggleSkill = (selected, skill) => {
   const [showVerificationModal, setShowVerificationModal] = useState(false)
   const [reviewDocsApplicant, setReviewDocsApplicant] = useState(null)
   const [hiringUpdates, setHiringUpdates] = useState({})
-  const [clientFeedbackOpen, setClientFeedbackOpen] = useState(false)
   const [jobSubmittedOpen, setJobSubmittedOpen] = useState(false)
   const [verificationEmail, setVerificationEmail] = useState('')
   const [verificationCode, setVerificationCode] = useState('')
@@ -1398,7 +1398,8 @@ const toggleSkill = (selected, skill) => {
     }
     if (activeRole === 'Admin' && notification?.type === 'csm_response_submitted') {
       setSelectedNotification(null)
-      setClientFeedbackOpen(true)
+      setActiveView('client-feedback')
+      readFeatureNotifications('client-feedback')
       return
     }
     if (activeRole === 'Admin' && notification?.type === 'hire_report_submitted') {
@@ -2225,7 +2226,7 @@ const toggleSkill = (selected, skill) => {
       </header>
 
       <div className="portal-layout">
-        <div className={`portal-sidebar portal-scroll-nav${portalNavHidden ? ' is-hidden' : ''}`}>
+        <div className={`portal-sidebar portal-scroll-nav${portalNavHidden ? ' is-hidden' : ''}${!portalNavAtTop ? ' is-scrolled' : ''}`}>
           <nav className="portal-nav" aria-label={`${activeRole} navigation`}>
             {portalNavItems.map((item, index) => (
               <button
@@ -2608,7 +2609,7 @@ const toggleSkill = (selected, skill) => {
           {activeRole === 'Admin' && activeView === 'employment-updates' && (
             <AdminEmploymentUpdatesPage key={`${hiringUpdates.applicantId || ''}:${hiringUpdates.jobId || ''}`} token={getToken()} applicantId={hiringUpdates.applicantId} jobId={hiringUpdates.jobId} />
           )}
-          {activeRole === 'Admin' && clientFeedbackOpen && <AdminCsmFeedbackModal token={getToken()} onClose={() => setClientFeedbackOpen(false)} />}
+          {activeRole === 'Admin' && activeView === 'client-feedback' && <AdminCsmFeedbackPage token={getToken()} />}
           {jobSubmittedOpen && <Modal onClose={() => setJobSubmittedOpen(false)} labelledBy="job-submitted-title" maxWidth="max-w-md"><h2 id="job-submitted-title" className="text-xl font-bold text-slate-900">{jobSubmittedOpen.status === 'approved' ? 'Job posting published' : 'Job request submitted for review'}</h2><p className="mt-3 text-sm text-slate-600">{jobSubmittedOpen.status === 'approved' ? 'Your job posting passed automatic safety screening and is now visible to applicants.' : 'PESO will review your job posting. You can track its status in Job Postings.'}</p><JobScreeningSummary moderation={jobSubmittedOpen.moderation} /><button type="button" onClick={() => setJobSubmittedOpen(false)} className="mt-5 rounded-full bg-blue-600 px-5 py-2 text-sm font-semibold text-white">Done</button></Modal>}
 
           {activeRole === 'Applicant' && activeView === 'account-settings' && <section data-applicant-window tabIndex={-1} className="scroll-mt-28 space-y-6" aria-label="Account settings window">
@@ -3414,7 +3415,7 @@ const toggleSkill = (selected, skill) => {
               initialJobId={referralPrefill.jobId}
               initialApplicantIds={referralPrefill.applicantIds}
               onViewUpdates={() => { setHiringUpdates({}); setActiveView('employment-updates') }}
-              onViewClientFeedback={() => setClientFeedbackOpen(true)}
+              onViewClientFeedback={() => setActiveView('client-feedback')}
             />
           )}
             </>

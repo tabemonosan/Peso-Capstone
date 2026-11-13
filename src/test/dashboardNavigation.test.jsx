@@ -24,6 +24,7 @@ function mockRole(role, overrides = {}) {
     else if (url.includes('/verification-documents')) data = overrides.documentInfo || { verificationStatus: user.verificationStatus, documents: [] }
     else if (url.endsWith('/api/dashboard')) data = { ...dashboard(role), stats: { ...dashboard(role).stats, verificationStatus: user.verificationStatus } }
     else if (url.includes('/api/workflow/mine')) data = { items: [], total: 0, account: {} }
+    else if (url.includes('/api/csm/responses')) data = { items: [], total: 0 }
     else if (url.includes('/api/admin/employment-updates')) data = { items: [], total: 0 }
     else if (url.endsWith('/api/notifications/features')) data = features
     else if (url.includes('/api/notifications/features/') && options?.method === 'PATCH') {
@@ -38,6 +39,22 @@ function mockRole(role, overrides = {}) {
   }))
 }
 describe('one dashboard per role', () => {
+  it('opens Client Feedback directly from admin navigation and restores it on reload', async () => {
+    mockRole('Admin')
+    localStorage.setItem('peso-token', 'token')
+    localStorage.setItem('peso-active-role', 'Admin')
+    const app = render(<App />)
+    const navigation = await screen.findByRole('navigation', { name: 'Admin navigation' })
+    fireEvent.click(within(navigation).getByRole('button', { name: 'Client Feedback', exact: true }))
+    expect(await screen.findByRole('heading', { name: 'Client feedback' })).toBeInTheDocument()
+    expect(await screen.findByText('No questionnaires submitted in this view.')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Respondent' })).toBeInTheDocument()
+    expect(localStorage.getItem('peso-active-view')).toBe('client-feedback')
+    app.unmount()
+    render(<App />)
+    expect(await screen.findByRole('heading', { name: 'Client feedback' })).toBeInTheDocument()
+  })
   it('hides portal navigation on downward scrolling and reveals it on upward scrolling', async () => {
     mockRole('Applicant')
     localStorage.setItem('peso-token', 'token')
@@ -50,18 +67,25 @@ describe('one dashboard per role', () => {
       const bar = nav.parentElement
       expect(bar).toHaveClass('portal-scroll-nav')
       expect(bar).not.toHaveClass('is-hidden')
+      expect(bar).not.toHaveClass('is-scrolled')
       window.scrollY = 400
       fireEvent.scroll(window)
       expect(bar).toHaveClass('is-hidden')
+      expect(bar).toHaveClass('is-scrolled')
       window.scrollY = 380
       fireEvent.scroll(window)
       expect(bar).not.toHaveClass('is-hidden')
+      expect(bar).toHaveClass('is-scrolled')
       window.scrollY = 500
       fireEvent.scroll(window)
       expect(bar).toHaveClass('is-hidden')
       window.scrollY = 90
       fireEvent.scroll(window)
       expect(bar).not.toHaveClass('is-hidden')
+      expect(bar).toHaveClass('is-scrolled')
+      window.scrollY = 0
+      fireEvent.scroll(window)
+      expect(bar).not.toHaveClass('is-scrolled')
       app.unmount()
     } finally {
       Object.defineProperty(window, 'scrollY', originalScroll)

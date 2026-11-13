@@ -32,7 +32,7 @@ export function createCsmRouter({ CsmResponse, Applicant, Employer, authenticate
         const prior = await existingReceipt()
         return prior ? res.json(prior) : res.status(409).json({ error: 'This questionnaire was already submitted. Open a new questionnaire for another response.' })
       }
-      await notifyAdmins({ type: 'csm_response_submitted', title: 'Client feedback received', message: `${user.role === 'Applicant' ? 'An applicant' : 'An employer'} submitted a ${values.language === 'tl' ? 'Tagalog' : 'English'} CSM questionnaire.`, link: '/peso-referrals', metadata: { responseId: String(record._id), language: values.language } })
+      await notifyAdmins({ type: 'csm_response_submitted', title: 'Client feedback received', message: `${user.role === 'Applicant' ? 'An applicant' : 'An employer'} submitted a ${values.language === 'tl' ? 'Tagalog' : 'English'} CSM questionnaire.`, link: '/client-feedback', metadata: { responseId: String(record._id), language: values.language } })
       res.status(201).json(receipt(record))
     } catch { res.status(500).json({ error: 'Unable to submit feedback. Your answers are still on this page; please try again.' }) }
   })
