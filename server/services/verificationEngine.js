@@ -10,6 +10,7 @@ import { loadDocumentFile } from '../utils/documentFiles.js'
 import { clearAuthorization } from './documentUpload.js'
 import { isSharedPhoneFinding } from '../../shared/verificationFindings.js'
 import { hasActiveOtherOwner } from './identityClaims.js'
+import { applicantNsrpReference } from './nsrpReference.js'
 const advisory = new Set(['education_age', 'work_start_age', 'experience_age', 'married_under_18', 'location_pair', 'employer_location_pair'])
 const safeFinding = f => ({ ruleId: String(f.ruleId || f.code || 'provider_inconclusive').slice(0, 100), severity: ['info', 'warning', 'critical'].includes(f.severity) ? f.severity : 'info', fieldGroup: String(f.fieldGroup || 'document').slice(0, 60), evidence: f.evidence === 'independent' ? 'independent' : 'self-declared', status: f.status === 'dismissed' ? 'dismissed' : 'open', approvalBlocking: advisory.has(f.ruleId || f.code) ? false : f.approvalBlocking !== false })
 function findingsForDocument(account, docKey, document) {
@@ -47,7 +48,7 @@ export function createVerificationEngine({ Applicant, Employer, EmployerRequest,
       if (!lock.modifiedCount) return
       locked = true
       const settings = await automation.getSettings(), nsrpDocument = ['nsrpForm', 'employerNsrpForm'].includes(docKey)
-      const nsrp = account.profile?.nsrp || { firstName: account.profile?.firstName, surname: account.profile?.lastName, dob: account.profile?.dob }
+      const nsrp = applicantNsrpReference(account.profile)
       const oldDecision = await decisions().findOne({ _id: decisionKey })
       const report = nsrpDocument ? oldDecision.report || (role === 'Applicant' ? checkNsrp(nsrp) : checkNsrp2(record)) : null
       const currentDocument = { ...document, ...(role === 'Applicant' ? { findings: findingsForDocument(account, docKey, document) } : {}), quality: nsrpDocument && document.sourceType === 'generated' ? { passed: true, warnings: [] } : document.quality }

@@ -1,5 +1,14 @@
 import { IDENTITY_DOC_KEYS } from '../../shared/verificationDocs.js'
 
+// Upload-path signups may have basic details without imported NSRP answers.
+// Keep every name component, including suffixes printed with PhilSys given names.
+export function applicantNsrpReference(profile = {}) {
+  return profile.nsrp || {
+    firstName: profile.firstName, surname: profile.lastName,
+    middleName: profile.middleName, suffix: profile.suffix, dob: profile.dob,
+  }
+}
+
 // An approval made against an earlier registration reference cannot be reused
 // after that reference changes. Include version guards for atomic admin actions.
 export function identityRecheckUpdate(account, by, at = new Date()) {

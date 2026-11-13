@@ -5,6 +5,7 @@ import { checkNsrp2 } from '../../shared/nsrp2Checks.js'
 import { VERIFICATION_DEFAULTS, REVIEWER_LABELS, openFlags } from '../../shared/verification.js'
 import { isSharedPhoneFinding } from '../../shared/verificationFindings.js'
 import { hasActiveOtherOwner } from './identityClaims.js'
+import { applicantNsrpReference } from './nsrpReference.js'
 
 export const SYSTEM_REVIEWER = REVIEWER_LABELS.system
 const DEFAULTS = VERIFICATION_DEFAULTS
@@ -217,7 +218,7 @@ export function createNsrpAutomation({ Applicant, Employer, EmployerRequest, not
   async function refreshDuplicateFindings(accountId) {
     const account = await Applicant.findById(accountId).select('+consistencyState').lean()
     if (!account || account.deletedAt || account.consistencyState?.status === 'checking') return
-    const data = account.profile?.nsrp || { firstName: account.profile?.firstName, surname: account.profile?.lastName, middleName: account.profile?.middleName, dob: account.profile?.dob }
+    const data = applicantNsrpReference(account.profile)
     const current = (await duplicateFindings('Applicant', account._id, data)).map(f => ({ ruleId: f.code, severity: f.severity, fieldGroup: f.fieldGroup || 'registration', evidence: f.evidence || 'self-declared', status: 'open', approvalBlocking: true }))
     const registrationDuplicates = new Set(['duplicate_tin', 'duplicate_sss', 'duplicate_pagibig', 'duplicate_philhealth', 'duplicate_passport', 'duplicate_name_birth'])
     const match = { _id: account._id, deletedAt: null, verificationStatus: account.verificationStatus,

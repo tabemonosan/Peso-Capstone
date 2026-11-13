@@ -97,6 +97,8 @@ describe('consistency waitlist', () => {
       ['no ID details', {}, false, false, 'approved', 'pending', 'approved'],
       ['no ID type', {}, false, false, 'approved', 'pending', 'approved'],
       ['noisy name header', {}, false, false, 'approved', 'pending', 'approved'],
+      ['PhilSys suffix', {}, false, false, 'approved', 'pending', 'approved'],
+      ['PhilSys different surname', {}, true, false, 'waitlisted', 'pending', 'pending'],
       ['other identity details differ', {}, false, false, 'approved', 'pending', 'approved'],
       ['significant mismatch', {}, true, false, 'waitlisted', 'pending', 'pending'],
       ['reader unavailable', {}, false, true, 'under_review', 'pending', 'pending'],
@@ -113,17 +115,19 @@ describe('consistency waitlist', () => {
         reading.confidence = 51
         reading.lines = [{ text: nameRow, confidence: 73 }]
       }
+      const philSys = _label.startsWith('PhilSys')
+      if (philSys) reading.text = `Apelyido/Last Name\n${mismatch ? 'DIFFERENT' : 'EXAMPLE'}\nMga Pangalan/Given Names\nSAMPLE III\nGitnang Apelyido/Middle Name\nSANTOS`
       reading.fail = readerFailure
       const upload = _label === 'glare warning' ? image : await sharp(image).linear(0.85).png().toBuffer()
       await nsrpAutomation.updateSettings({ automaticApproval: true, ...settings }, admin.email)
       const email = `signup-${mode}@example.test`
       let submission = request(app).post('/api/signup')
         .field('email', email).field('password', 'SamplePassword123!').field('consent', 'true')
-        .field('emailProof', emailProofFor(email)).field('nsrpMode', mode).field('id1Type', _label === 'no ID type' ? '' : 'SSS')
+        .field('emailProof', emailProofFor(email)).field('nsrpMode', mode).field('id1Type', philSys ? 'PhilSys National ID' : _label === 'no ID type' ? '' : 'SSS')
         .field('verificationDetails', JSON.stringify({ birthCertificate: { copyType: 'PSA copy on security paper' }, validId1: _label === 'no ID details' ? {} : { number: '4982761053' } }))
-      if (mode === 'online') submission = submission.field('nsrpAnswers', JSON.stringify(validNsrpAnswers({ firstName: 'Sample', surname: 'Example', gsisSss: _label === 'other identity details differ' ? '9876543210' : '4982761053', placeOfBirth: 'NAGOTGOT, MANITO, ALBAY' })))
+      if (mode === 'online') submission = submission.field('nsrpAnswers', JSON.stringify(validNsrpAnswers({ firstName: 'Sample', surname: 'Example', suffix: philSys ? 'III' : '', gsisSss: _label === 'other identity details differ' ? '9876543210' : '4982761053', placeOfBirth: 'NAGOTGOT, MANITO, ALBAY' })))
       else {
-        for (const [key, value] of Object.entries(validBasicInfo({ firstName: 'Sample', lastName: 'Example' }))) submission = submission.field(key, value)
+        for (const [key, value] of Object.entries(validBasicInfo({ firstName: 'Sample', lastName: 'Example', suffix: philSys ? 'III' : '' }))) submission = submission.field(key, value)
         submission = submission.attach('nsrpFile', pdfBuffer(), { filename: 'SAMPLE.pdf', contentType: 'application/pdf' })
       }
       const response = await submission
@@ -132,6 +136,10 @@ describe('consistency waitlist', () => {
       expect(response.status, JSON.stringify(response.body)).toBe(200)
       await drainVerificationJobs()
       const created = await Applicant.findOne({ email }).lean()
+      if (philSys && mode === 'upload') {
+        expect(created.profile.nsrp).toBeUndefined()
+        expect(created.profile.suffix).toBe('III')
+      }
       expect(created.verificationDocuments.birthCertificate.versions.at(-1).status, JSON.stringify(created.verificationDocuments.birthCertificate)).toBe(birthStatus)
       expect(created.verificationDocuments.validId1.versions.at(-1).status, JSON.stringify(created.verificationDocuments.validId1)).toBe(idStatus)
       expect(created.verificationStatus).toBe(status)
@@ -431,6 +439,25 @@ it('rechecks a legacy birth-certificate waitlist without charging attempts or re
  expect(saved.verificationDocuments.birthCertificate.versions[0].reviewReasons).toEqual(['Could not be read'])
  const queue = await request(app).get('/api/admin/document-verification/queue').set(auth('Admin', admin)).expect(200)
  expect(queue.body.items.some(item => item.docKey === 'birthCertificate')).toBe(false)
+})
+
+it('rechecks an old PhilSys signup suffix flag without another upload or correction charge', async () => {
+ reading.text = 'Apelyido/Last Name\nEXAMPLE\nMga Pangalan/Given Names\nSAMPLE III\nGitnang Apelyido/Middle Name\nSANTOS'
+ await nsrpAutomation.updateSettings({ automaticApproval: true }, admin.email)
+ await Applicant.updateOne({ _id: applicant._id }, { $set: {
+  'profile.firstName': 'Sample', 'profile.lastName': 'Example', 'profile.middleName': 'Santos', 'profile.suffix': 'III',
+  verificationStatus: 'waitlisted',
+  consistencyState: { token: 'old-suffix-reader', status: 'finished', rulesVersion: '2026-11-13.8', used: {}, issues: [{ docKey: 'validId1', reasonCode: 'cross_check_mismatch', fieldGroup: 'name' }] },
+  'verificationDocuments.validId1.versions.0.reviewReasons': ['Flagged'],
+  'verificationDocuments.validId1.versions.0.findings': [{ ruleId: 'cross_id_nsrp_name', fieldGroup: 'name', severity: 'critical', status: 'open', approvalBlocking: true }],
+ }, $unset: { 'profile.nsrp': '' } })
+ expect((await consistencyWaitlist.publicState(applicant._id, '192.0.2.8')).checking).toBe(true)
+ await drainVerificationJobs()
+ expect(await consistencyWaitlist.publicState(applicant._id)).toMatchObject({ status: 'approved', checking: false })
+ const saved = await Applicant.findById(applicant._id).select('+consistencyState').lean()
+ expect(saved.verificationDocuments.validId1.versions.at(-1)).toMatchObject({ version: 1, status: 'approved', findings: [], reviewReasons: [] })
+ expect(saved.verificationDocuments.validId1.uploads).toBe(1)
+ expect(saved.consistencyState.used).toEqual({})
 })
 
 it.each([['Not independent', '2026-11-13.1'], ['Rate guard', '2026-11-13.7']])('rechecks an ID blocked by %s without another upload or correction charge', async (reason, rulesVersion) => {
