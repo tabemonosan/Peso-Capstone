@@ -13,6 +13,7 @@ it('opens Forgot password from sign-in without submitting a login request', asyn
   const fetcher = vi.fn(async () => response({}))
   vi.stubGlobal('fetch', fetcher)
   render(<App />)
+  fireEvent.click(screen.getByRole('link', { name: 'Sign in', exact: true }))
   fireEvent.click(screen.getByRole('button', { name: 'Forgot password?' }))
   expect(screen.getByRole('dialog')).toHaveTextContent('Forgot password')
   expect(screen.getByLabelText('Registered email')).toBeInTheDocument()
