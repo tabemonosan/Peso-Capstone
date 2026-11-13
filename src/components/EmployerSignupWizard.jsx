@@ -64,6 +64,7 @@ export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCance
   const saved = useMemo(() => formOnly ? {} : readDraft(), [formOnly])
   const [email, setEmail] = useState(saved.email || "")
   const [password, setPassword] = useState("")
+  const [signupPasswordsVisible, setSignupPasswordsVisible] = useState(false)
   const [confirmPassword, setConfirmPassword] = useState("")
   const [consent, setConsent] = useState(Boolean(saved.consent))
   const [mode, setMode] = useState(formOnly ? "online" : saved.mode || "")
@@ -628,12 +629,12 @@ export default function EmployerSignupWizard({ locations = PH_LOCATIONS, onCance
               </div>
             )}
             <Field label="Password" id="employer-password" required error={errors.password}>
-              {() => <PasswordInput id="employer-password" autoComplete="new-password" value={password} onChange={(event) => { setPassword(event.target.value); setErrors((current) => ({ ...current, password: undefined })) }} aria-invalid={Boolean(errors.password) || undefined} className={controlClass} />}
+              {() => <PasswordInput id="employer-password" visible={signupPasswordsVisible} onVisibilityChange={setSignupPasswordsVisible} autoComplete="new-password" value={password} onChange={(event) => { setPassword(event.target.value); setErrors((current) => ({ ...current, password: undefined })) }} aria-invalid={Boolean(errors.password) || undefined} className={controlClass} />}
+            </Field>
+            <Field label="Confirm password" id="employer-confirmPassword" required error={errors.confirmPassword}>
+              {() => <PasswordInput id="employer-confirmPassword" visible={signupPasswordsVisible} onVisibilityChange={setSignupPasswordsVisible} visibilityLabel="confirm password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} aria-invalid={Boolean(errors.confirmPassword) || undefined} className={controlClass} />}
             </Field>
             <PasswordChecklist password={password} confirmPassword={confirmPassword} />
-            <Field label="Confirm password" id="employer-confirmPassword" required error={errors.confirmPassword}>
-              {() => <PasswordInput id="employer-confirmPassword" visibilityLabel="confirm password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} aria-invalid={Boolean(errors.confirmPassword) || undefined} className={controlClass} />}
-            </Field>
             <label className="flex items-start gap-2 text-sm text-slate-700">
               <input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} aria-invalid={Boolean(errors.consent) || undefined} />
               <span>{CONSENT_TEXT} Verification includes automatic consistency and document checks. These assess evidence, not authenticity.<span className="text-rose-600"> *</span></span>

@@ -1,6 +1,7 @@
 import { NSRP_TEXT_LIMITS, NSRP_ALLOWED_VALUES, NSRP_FIELD_VALIDATORS, normalizePhMobile, isValidCalendarDate } from './nsrpValidation.js'
 import { NSRP_ROW_LIMITS } from './nsrpTableLimits.js'
 import { NSRP_SKILL_LABELS } from './nsrpSkills.js'
+import { nsrpProfileSkills } from './applicantProfile.js'
 import { PH_LOCATIONS } from './phLocations.js'
 import { capitalizeName, SUFFIX_OPTIONS } from './nameFields.js'
 
@@ -64,7 +65,7 @@ export function mergeNsrpIntoProfile(profile = {}, answers = {}) {
     const existing = new Set(old.map(identity))
     return [...old, ...imported.filter(row => { const id = identity(row); if (existing.has(id)) return false; existing.add(id); return true })]
   }
-  next.skills = union(profile.skills || [], answers.skills || [], key)
+  next.skills = union(nsrpProfileSkills({ skills: profile.skills, othersText: profile.nsrp?.othersText || answers.othersText }), nsrpProfileSkills(answers), key)
   next.education = union(profile.education || [], (answers.education || []).map(row => ({ level: row.level || '', school: row.school || '', course: row.course || '', year: row.year || '' })), row => key(`${row.level} ${row.school}`))
   next.technicalTraining = union(profile.technicalTraining || [], (answers.technicalTraining || []).map(row => ({ name: row.course || '', provider: row.institution || '', course: row.course || '', year: /^\d{4}-/.test(row.toDate || '') ? row.toDate.slice(0, 4) : '' })), row => key(`${row.course || row.name} ${row.provider}`))
   next.workExperience = union(profile.workExperience || [], (answers.workExperience || []).map(row => ({ company: row.company || '', position: row.position || '', startDate: row.fromDate || '', endDate: row.toDate || '' })), row => key(`${row.company} ${row.position} ${row.startDate}`))

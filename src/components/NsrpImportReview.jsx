@@ -1,25 +1,31 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { API_URL } from '../config'
 import { getNsrpFieldLabel } from '../../shared/nsrpFieldLabels.js'
 
-export default function NsrpImportReview({ file, emailProof, token, disabled = false, onUse }) {
+export default function NsrpImportReview({ file, emailProof, token, disabled = false, autoRead = false, onUse }) {
   const [result, setResult] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [confirmed, setConfirmed] = useState(false)
   const [saved, setSaved] = useState(false)
-  async function read() {
+  const read = useCallback(async (signal) => {
     setBusy(true); setError(''); setResult(null); setConfirmed(false); setSaved(false)
     try {
       const body = file ? new FormData() : undefined
       if (file) body.append('nsrpFile', file)
-      const response = await fetch(`${API_URL}/api/${file ? 'signup/nsrp-import' : 'profile/nsrp-import/preview'}`, { method: 'POST', headers: file ? { 'X-Email-Proof': emailProof } : { Authorization: `Bearer ${token}` }, body })
+      const response = await fetch(`${API_URL}/api/${file ? 'signup/nsrp-import' : 'profile/nsrp-import/preview'}`, { method: 'POST', headers: file ? { 'X-Email-Proof': emailProof } : { Authorization: `Bearer ${token}` }, body, signal })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || 'Could not read this NSRP.')
-      setResult(data)
-    } catch (err) { setError(err.message) }
-    finally { setBusy(false) }
-  }
+      if (!signal?.aborted) setResult(data)
+    } catch (err) { if (!signal?.aborted) setError(err.message) }
+    finally { if (!signal?.aborted) setBusy(false) }
+  }, [file, emailProof, token])
+  useEffect(() => {
+    if (!autoRead || !file || disabled) return
+    const controller = new AbortController()
+    read(controller.signal)
+    return () => controller.abort()
+  }, [autoRead, file, disabled, read])
   async function useDetails() {
     setBusy(true); setError('')
     try {
@@ -36,8 +42,9 @@ export default function NsrpImportReview({ file, emailProof, token, disabled = f
   }
   return <section aria-label="Retrieve NSRP details" className="my-4 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-slate-800">
     <h3 className="font-semibold">Use your completed NSRP</h3>
-    <p className="mt-1">Retrieve your details, education, work history, and checked skills from the PDF. Review the results before using them. Existing profile information is kept.</p>
-    <button type="button" disabled={disabled || busy} onClick={read} className="mt-3 rounded-lg border border-blue-300 bg-white px-4 py-2 font-medium disabled:opacity-50">{busy ? 'Reading…' : 'Retrieve from NSRP'}</button>
+    <p className="mt-1">{autoRead ? 'Your details, education, work history, and checked skills are retrieved automatically from the PDF. Review the results before using them.' : 'Retrieve your details, education, work history, and checked skills from the PDF. Review the results before using them. Existing profile information is kept.'}</p>
+    {autoRead && busy && <p role="status" className="mt-3">Reading your NSRP…</p>}
+    {(!autoRead || error) && <button type="button" disabled={disabled || busy} onClick={() => read()} className="mt-3 rounded-lg border border-blue-300 bg-white px-4 py-2 font-medium disabled:opacity-50">{busy ? 'Reading…' : autoRead ? 'Try again' : 'Retrieve from NSRP'}</button>}
     {disabled && <p className="mt-2 text-xs">Save or cancel your profile edits first.</p>}
     {error && <p role="alert" className="mt-2 text-red-700">{error}</p>}
     {saved && <p role="status" className="mt-2 text-green-800">NSRP details added. You can review and edit your profile.</p>}

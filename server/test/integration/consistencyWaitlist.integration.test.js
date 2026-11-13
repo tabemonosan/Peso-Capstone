@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { beforeAll, afterAll, beforeEach, describe, it, expect, vi } from 'vitest'
 import request from 'supertest'
+import mongoose from 'mongoose'
 import jwt from 'jsonwebtoken'
 import bcrypt from 'bcryptjs'
 import sharp from 'sharp'
@@ -432,16 +433,19 @@ it('rechecks a legacy birth-certificate waitlist without charging attempts or re
  expect(queue.body.items.some(item => item.docKey === 'birthCertificate')).toBe(false)
 })
 
-it('rechecks an older unreadable ID under the name-only policy without a replacement or correction charge', async () => {
+it.each([['Not independent', '2026-11-13.1'], ['Rate guard', '2026-11-13.7']])('rechecks an ID blocked by %s without another upload or correction charge', async (reason, rulesVersion) => {
  reading.text = sampleText('1990-01-01')
  await nsrpAutomation.updateSettings({ automaticApproval: true }, admin.email)
  await Applicant.updateOne({ _id: applicant._id }, { $set: {
   verificationStatus: 'under_review',
-  consistencyState: { token: 'older-name-reader', status: 'finished', rulesVersion: '2026-11-13.1', used: {} },
-  'verificationDocuments.validId1.versions.0.reviewReasons': ['Not independent'],
+  consistencyState: { token: 'older-name-reader', status: 'finished', rulesVersion, used: {} },
+  'verificationDocuments.validId1.versions.0.reviewReasons': [reason],
  } })
+ const day = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' })
+ await mongoose.connection.db.collection('verification_ocr_usage').insertOne({ _id: day, count: 200 })
  expect((await consistencyWaitlist.publicState(applicant._id, '192.0.2.8')).checking).toBe(true)
  await drainVerificationJobs()
  expect(await consistencyWaitlist.publicState(applicant._id)).toMatchObject({ status: 'approved', checking: false })
  expect((await Applicant.findById(applicant._id).select('+consistencyState')).consistencyState.used).toEqual({})
+ expect((await Applicant.findById(applicant._id)).verificationDocuments.validId1.uploads).toBe(1)
 })

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useScrollHidden } from '../hooks/useScrollHidden'
 import './LandingPage.css'
 
 const seekerSteps = [
@@ -16,29 +17,14 @@ function Arrow({ diagonal = false }) {
   return <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d={diagonal ? 'M6 18 18 6M6 6h12v12' : 'M4 12h15m-6-6 6 6-6 6'} /></svg>
 }
 
-export default function LandingPage({ children, onApplicantSignup, onEmployerSignup, onApplicantForm, onEmployerForm }) {
+export default function LandingPage({ onSignIn, onApplicantSignup, onEmployerSignup, onApplicantForm, onEmployerForm }) {
   const root = useRef(null)
   const menuToggle = useRef(null)
   const [menuOpen, setMenuOpen] = useState(false)
-  const [headerHidden, setHeaderHidden] = useState(false)
+  const headerHidden = useScrollHidden()
   const [audience, setAudience] = useState('seeker')
   const [activeStep, setActiveStep] = useState(0)
   const steps = audience === 'seeker' ? seekerSteps : employerSteps
-  useEffect(() => {
-    let lastScroll = Math.max(0, window.scrollY)
-    const updateHeader = () => {
-      const currentScroll = Math.max(0, window.scrollY)
-      if (currentScroll <= 100) {
-        setHeaderHidden(false)
-        lastScroll = currentScroll
-      } else if (Math.abs(currentScroll - lastScroll) >= 8) {
-        setHeaderHidden(currentScroll > lastScroll)
-        lastScroll = currentScroll
-      }
-    }
-    window.addEventListener('scroll', updateHeader, { passive: true })
-    return () => window.removeEventListener('scroll', updateHeader)
-  }, [])
   useEffect(() => {
     if (!menuOpen) return
     const dismissMenu = event => {
@@ -61,11 +47,10 @@ export default function LandingPage({ children, onApplicantSignup, onEmployerSig
     return () => { observer.disconnect(); page.classList.remove('landing-has-motion') }
   }, [])
   const closeMenu = () => setMenuOpen(false)
-  const focusSignIn = event => {
-    event.preventDefault()
+  const openSignIn = event => {
+    event?.preventDefault()
     closeMenu()
-    root.current?.querySelector('#sign-in')?.scrollIntoView?.({ block: 'start' })
-    root.current?.querySelector('#email')?.focus({ preventScroll: true })
+    onSignIn?.()
   }
   return <div className="peso-landing" ref={root}>
     <a href="#landing-content" className="landing-skip">Skip to content</a>
@@ -74,7 +59,7 @@ export default function LandingPage({ children, onApplicantSignup, onEmployerSig
       <button ref={menuToggle} className="landing-menu-toggle" type="button" aria-expanded={menuOpen} aria-controls="landing-navigation" onClick={() => setMenuOpen(value => !value)}>{menuOpen ? 'Close menu' : 'Menu'}<span aria-hidden="true">{menuOpen ? '−' : '+'}</span></button>
       <nav id="landing-navigation" aria-label="Main navigation" className={menuOpen ? 'is-open' : ''}>
         <a href="#how-it-works" onClick={closeMenu}>How it works</a><a href="#for-employers" onClick={closeMenu}>For employers</a><a href="#resources" onClick={closeMenu}>NSRP forms</a>
-        <a href="#sign-in" className="landing-nav-signin" onClick={focusSignIn}>Sign in <Arrow /></a>
+        <a href="#sign-in" className="landing-nav-signin" onClick={openSignIn}>Sign in <Arrow /></a>
         <button type="button" className="landing-button landing-button-primary" onClick={() => { closeMenu(); onApplicantSignup() }}>Get started <Arrow /></button>
       </nav>
     </header>
@@ -122,9 +107,8 @@ export default function LandingPage({ children, onApplicantSignup, onEmployerSig
         <details><summary>What happens after I apply?<span aria-hidden="true">+</span></summary><p>Follow the application in your account. When an employer sends an interview invitation, you can review the details and respond. Your application timeline keeps the next steps together.</p></details>
         <details><summary>When can employers start posting jobs?<span aria-hidden="true">+</span></summary><p>Register your business and submit your NSRP Form 2 for PESO review. Once your employer account is approved, you can post vacancies and manage referred applicants.</p></details>
       </div></section>
-      <section id="sign-in" className="landing-signin landing-container" aria-label="Sign in to PESO"><div className="landing-signin-copy"><p className="landing-eyebrow">ALREADY PART OF THE COMMUNITY?</p><h2>Pick up where<br /><em>you left off.</em></h2><p>Your profile, applications, and next steps are waiting in your account.</p><a href="#landing-title" className="landing-back-top">Back to the beginning <span aria-hidden="true">↑</span></a></div>{children}</section>
       <section className="landing-final-cta landing-container" aria-labelledby="landing-final-title" data-reveal><div><p className="landing-eyebrow">YOUR NEXT CHAPTER</p><h2 id="landing-final-title">There’s a next step<br />with your name on it.</h2></div><button type="button" className="landing-button" onClick={onApplicantSignup}>Start your profile <Arrow /></button></section>
     </main>
-    <footer className="landing-footer"><div className="landing-container"><div className="landing-footer-top"><a href="#" className="landing-brand"><img src="/peso-logo.png" width="44" height="44" alt="" /><span>PESO<span className="landing-brand-caption">PUBLIC EMPLOYMENT SERVICE OFFICE</span></span></a><p>Local talent.<br />Shared opportunity.</p><nav aria-label="Footer navigation"><a href="#how-it-works">How it works</a><a href="#resources">NSRP forms</a><a href="#questions">Questions</a><a href="#sign-in" onClick={focusSignIn}>Access your account</a></nav></div><div className="landing-footer-bottom"><span>PESO Employment Portal · Albay, Philippines</span><span>Built around people. Connected by possibility.</span></div></div></footer>
+    <footer className="landing-footer"><div className="landing-container"><div className="landing-footer-top"><a href="#" className="landing-brand"><img src="/peso-logo.png" width="44" height="44" alt="" /><span>PESO<span className="landing-brand-caption">PUBLIC EMPLOYMENT SERVICE OFFICE</span></span></a><p>Local talent.<br />Shared opportunity.</p><nav aria-label="Footer navigation"><a href="#how-it-works">How it works</a><a href="#resources">NSRP forms</a><a href="#questions">Questions</a><a href="#sign-in" onClick={openSignIn}>Access your account</a></nav></div><div className="landing-footer-bottom"><span>PESO Employment Portal · Albay, Philippines</span><span>Built around people. Connected by possibility.</span></div></div></footer>
   </div>
 }

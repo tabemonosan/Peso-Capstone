@@ -27,6 +27,8 @@ export function publicApplication(record, suspended, now = new Date()) {
     history: publicApplicationHistory(mergeApplicationHistory(record.history, referral.history, meeting?.history)),
   }
   result.actions = applicationActions({ status, interview, report: publicReport, referralId: result.referralId, suspended, now })
+  result.companyRating = ['hired', 'deployed'].includes(status) && outcome?._id && record.employerId
+    ? { employerId: String(record.employerId), hireReportId: String(outcome._id) } : null
   return result
 }
 
@@ -38,5 +40,5 @@ export const applicationProgressLookups = [
   { $lookup: { from: 'hire_reports', let: { id: '$referralId' }, pipeline: [{ $match: { $expr: { $and: [{ $ne: ['$$id', null] }, { $eq: ['$referralId', '$$id'] }] }, reportedByRole: { $ne: 'Applicant' } } }, { $sort: { reportedAt: -1 } }, { $limit: 1 }], as: 'outcome' } },
   { $unwind: { path: '$outcome', preserveNullAndEmptyArrays: true } },
   { $addFields: { lastUpdate: { $max: ['$submittedAt', '$lastActivityAt', '$referral.updatedAt', '$interview.updatedAt', { $max: '$reports.at' }, { $max: '$reports.respondedAt' }, { $max: '$reports.reviewedAt' }, '$outcome.reportedAt'] } } },
-  { $project: { source: 1, jobId: 1, referralId: 1, deliveryStatus: 1, jobTitle: 1, employerName: 1, submittedAt: 1, lastUpdate: 1, history: 1, 'job.title': 1, 'job.location': 1, 'job.company': 1, 'employer.companyName': 1, 'employer.profile.profileImage': 1, 'referral.source': 1, 'referral.status': 1, 'referral.history': 1, interview: 1, reports: 1, 'outcome.status': 1, 'outcome.reportedAt': 1 } },
+  { $project: { source: 1, jobId: 1, employerId: 1, referralId: 1, deliveryStatus: 1, jobTitle: 1, employerName: 1, submittedAt: 1, lastUpdate: 1, history: 1, 'job.title': 1, 'job.location': 1, 'job.company': 1, 'employer.companyName': 1, 'employer.profile.profileImage': 1, 'referral.source': 1, 'referral.status': 1, 'referral.history': 1, interview: 1, reports: 1, 'outcome._id': 1, 'outcome.status': 1, 'outcome.reportedAt': 1 } },
 ]

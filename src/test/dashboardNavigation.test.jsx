@@ -10,6 +10,7 @@ afterEach(() => vi.unstubAllGlobals())
 const dashboard = (role) => ({ role, stats: { applicants: 4, employers: 2, jobs: { pending: 3, approved: 2, declined: 1 }, documentsAwaitingReview: 1, hires: 2, referrals: { total: 3 }, applications: 5, verificationStatus: 'approved' }, charts: { applications: [], registrations: [] }, activity: [] })
 function mockRole(role, overrides = {}) {
   const user = { id: 'user-1', role, email: 'user@example.com', emailVerified: true, verificationStatus: 'approved', registration: { complete: true }, companyName: 'Example Works', profile: {}, ...overrides }
+  let features = overrides.notificationFeatures || { counts: {}, asOf: new Date().toISOString() }
   vi.stubGlobal('fetch', vi.fn(async (url, options) => {
     let data = []
     if (url.endsWith('/api/profile/page-guides')) {
@@ -22,7 +23,14 @@ function mockRole(role, overrides = {}) {
     else if (url.endsWith('/api/profile/review-status')) data = overrides.reviewDetails || { status: user.verificationStatus, checking: false, message: 'Your registration is awaiting PESO review.', documents: [] }
     else if (url.includes('/verification-documents')) data = overrides.documentInfo || { verificationStatus: user.verificationStatus, documents: [] }
     else if (url.endsWith('/api/dashboard')) data = { ...dashboard(role), stats: { ...dashboard(role).stats, verificationStatus: user.verificationStatus } }
+    else if (url.includes('/api/workflow/mine')) data = { items: [], total: 0, account: {} }
     else if (url.includes('/api/admin/employment-updates')) data = { items: [], total: 0 }
+    else if (url.endsWith('/api/notifications/features')) data = features
+    else if (url.includes('/api/notifications/features/') && options?.method === 'PATCH') {
+      const feature = url.split('/features/')[1].split('/')[0]
+      const counts = { ...features.counts }; delete counts[feature]
+      features = { ...features, counts }; data = { updated: 1 }
+    }
     else if (url.includes('/api/notifications')) data = { items: [], unreadCount: 0 }
     else if (url.includes('/api/workflow/reputation')) data = { points: 100, policy: [], items: [], total: 0 }
     else if (url.endsWith('/api/employer/verification')) data = { verificationStatus: 'approved' }
@@ -30,6 +38,35 @@ function mockRole(role, overrides = {}) {
   }))
 }
 describe('one dashboard per role', () => {
+  it('hides portal navigation on downward scrolling and reveals it on upward scrolling', async () => {
+    mockRole('Applicant')
+    localStorage.setItem('peso-token', 'token')
+    localStorage.setItem('peso-active-role', 'Applicant')
+    const originalScroll = Object.getOwnPropertyDescriptor(window, 'scrollY')
+    Object.defineProperty(window, 'scrollY', { configurable: true, writable: true, value: 0 })
+    try {
+      const app = render(<App />)
+      const nav = await screen.findByRole('navigation', { name: 'Applicant navigation' })
+      const bar = nav.parentElement
+      expect(bar).toHaveClass('portal-scroll-nav')
+      expect(bar).not.toHaveClass('is-hidden')
+      window.scrollY = 400
+      fireEvent.scroll(window)
+      expect(bar).toHaveClass('is-hidden')
+      window.scrollY = 380
+      fireEvent.scroll(window)
+      expect(bar).not.toHaveClass('is-hidden')
+      window.scrollY = 500
+      fireEvent.scroll(window)
+      expect(bar).toHaveClass('is-hidden')
+      window.scrollY = 90
+      fireEvent.scroll(window)
+      expect(bar).not.toHaveClass('is-hidden')
+      app.unmount()
+    } finally {
+      Object.defineProperty(window, 'scrollY', originalScroll)
+    }
+  })
   it('opens Activity Logs from admin navigation', async () => {
     mockRole('Admin')
     localStorage.setItem('peso-token', 'token')
@@ -87,6 +124,8 @@ describe('one dashboard per role', () => {
     fireEvent.keyDown(document.activeElement, { key: 'ArrowDown' })
     expect(screen.getByRole('menuitem', { name: 'Resume' })).toHaveFocus()
     fireEvent.keyDown(document.activeElement, { key: 'ArrowDown' })
+    expect(screen.getByRole('menuitem', { name: 'My reputation' })).toHaveFocus()
+    fireEvent.keyDown(document.activeElement, { key: 'ArrowDown' })
     expect(screen.getByRole('menuitem', { name: 'Account Settings' })).toHaveFocus()
     fireEvent.keyDown(document.activeElement, { key: 'Escape' })
     expect(profile).toHaveFocus()
@@ -106,16 +145,16 @@ describe('one dashboard per role', () => {
     localStorage.setItem('peso-token', 'token')
     localStorage.setItem('peso-active-view', 'profile')
     render(<App />)
-    await screen.findByRole('heading', { name: 'Applicant Profile' })
+    await screen.findByRole('group', { name: 'Profile pictures' })
     expect(screen.queryByRole('heading', { name: 'Use your completed NSRP' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Account settings' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Profile', exact: true }))
-    expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['View Profile', 'Portfolio Links', 'Resume', 'Account Settings'])
+    expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['View Profile', 'Portfolio Links', 'Resume', 'My reputation', 'Account Settings'])
     fireEvent.click(screen.getByRole('menuitem', { name: 'Account Settings' }))
     expect(await screen.findByRole('heading', { name: 'Account settings' })).toBeInTheDocument()
     expect(await screen.findByRole('heading', { name: 'Documents submitted to PESO' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Use your completed NSRP' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Retrieve from NSRP' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Use your completed NSRP' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Retrieve from NSRP' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Applicant Profile' })).not.toBeInTheDocument()
   })
 
@@ -128,7 +167,10 @@ describe('one dashboard per role', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Got it' }))
     await waitFor(() => expect(screen.queryByText('Quick guide')).not.toBeInTheDocument())
     const nav = screen.getByRole('navigation', { name: 'Applicant navigation' })
-    fireEvent.click(within(nav).getByRole('button', { name: 'My reputation', exact: true }))
+    expect(within(nav).queryByRole('button', { name: 'My reputation', exact: true })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Profile', exact: true }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'My reputation', exact: true }))
+    expect(screen.queryByRole('menu', { name: 'Profile options' })).not.toBeInTheDocument()
     expect(await screen.findByRole('complementary', { name: 'Understand your reputation' })).toBeInTheDocument()
     app.unmount()
     render(<App />)
@@ -149,13 +191,16 @@ describe('one dashboard per role', () => {
     expect(within(dialog).getByRole('button', { name: 'Update NSRP' })).toBeEnabled()
   })
 
-  it('opens the applicant reputation window without replacing the existing Reviews page', async () => {
+  it('opens applicant reputation from the profile dropdown', async () => {
     mockRole('Applicant')
     localStorage.setItem('peso-token', 'token')
     localStorage.setItem('peso-active-role', 'Applicant')
     render(<App />)
     const nav = await screen.findByRole('navigation', { name: 'Applicant navigation' })
-    fireEvent.click(within(nav).getByRole('button', { name: 'My reputation', exact: true }))
+    expect(within(nav).queryByRole('button', { name: 'My reputation', exact: true })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Profile', exact: true }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'My reputation', exact: true }))
+    expect(screen.queryByRole('menu', { name: 'Profile options' })).not.toBeInTheDocument()
     expect(await screen.findByRole('heading', { name: 'My reputation' })).toBeInTheDocument()
     expect(await screen.findByLabelText('100 out of 100 reputation points')).toBeInTheDocument()
     expect(within(nav).getByRole('button', { name: 'Reviews', exact: true })).toBeInTheDocument()
@@ -213,7 +258,7 @@ describe('one dashboard per role', () => {
     expect(screen.queryByRole('button', { name: 'Browse Jobs' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Profile', exact: true }))
     fireEvent.click(screen.getByRole('menuitem', { name: 'View Profile' }))
-    expect(await screen.findByRole('heading', { name: 'Applicant Profile' })).toBeInTheDocument()
+    expect(await screen.findByRole('group', { name: 'Profile pictures' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Documents submitted to PESO' })).not.toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Profile', exact: true }))
@@ -237,6 +282,7 @@ describe('one dashboard per role', () => {
   it.each(['Admin', 'Employer', 'Applicant'])('gives %s one overview with role-relevant information', async (role) => {
     mockRole(role)
     render(<App />)
+    fireEvent.click(screen.getByRole('link', { name: /^Sign in/ }))
     fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: 'user@example.com' } })
     fireEvent.change(screen.getByLabelText(/^Password$/i, { selector: 'input' }), { target: { value: 'Password123!' } })
     fireEvent.submit(screen.getByRole('button', { name: /Sign in/i }).closest('form'))
@@ -307,4 +353,21 @@ describe('one dashboard per role', () => {
     expect(localStorage.getItem('peso-active-view')).toBe('dashboard')
     expect(screen.queryByText('All Dashboard', { exact: true })).not.toBeInTheDocument()
   })
+})
+
+it.each(['super_admin', 'admin', 'staff'])('shows feature notification badges and acknowledges an opened feature for %s', async adminLevel => {
+ mockRole('Admin', { adminLevel, notificationFeatures: { counts: { jobs: 2, applicants: 1, 'account-deletions': 1 }, asOf: '2026-11-13T00:00:00.000Z' } })
+ localStorage.setItem('peso-token', 'token')
+ localStorage.setItem('peso-active-role', 'Admin')
+ render(<App />)
+ const nav = await screen.findByRole('navigation', { name: 'Admin navigation' })
+ const jobs = await within(nav).findByRole('button', { name: 'Job Postings, 2 new notifications' })
+ expect(within(jobs).getByText('2')).toBeInTheDocument()
+ expect(within(nav).getByRole('button', { name: 'Applicants, 1 new notifications' })).toBeInTheDocument()
+ if (adminLevel === 'staff') expect(within(nav).queryByRole('button', { name: /Account Deletions/ })).not.toBeInTheDocument()
+ else expect(within(nav).getByRole('button', { name: 'Account Deletions, 1 new notifications' })).toBeInTheDocument()
+ fireEvent.click(jobs)
+ await waitFor(() => expect(fetch.mock.calls.some(([url, options]) => url.endsWith('/api/notifications/features/jobs/read') && JSON.parse(options.body).before === '2026-11-13T00:00:00.000Z')).toBe(true))
+ await within(nav).findByRole('button', { name: 'Job Postings', exact: true })
+ expect(within(nav).getByRole('button', { name: 'Applicants, 1 new notifications' })).toBeInTheDocument()
 })

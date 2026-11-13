@@ -16,6 +16,20 @@ beforeEach(() => {
 })
 
 describe("employer sign-up wizard", () => {
+  it('toggles both signup passwords from either visibility button', () => {
+    render(<EmployerSignupWizard />)
+    const password = screen.getByLabelText(/^Password/i, { selector: 'input' })
+    const confirmation = screen.getByLabelText(/^Confirm password/i, { selector: 'input' })
+    expect(password).toHaveAttribute('type', 'password')
+    expect(confirmation).toHaveAttribute('type', 'password')
+    fireEvent.click(screen.getByRole('button', { name: 'Show password', exact: true }))
+    expect(password).toHaveAttribute('type', 'text')
+    expect(confirmation).toHaveAttribute('type', 'text')
+    fireEvent.click(screen.getByRole('button', { name: 'Hide confirm password' }))
+    expect(password).toHaveAttribute('type', 'password')
+    expect(confirmation).toHaveAttribute('type', 'password')
+  })
+
   it("supports next-tab navigation and saves a draft without account secrets", async () => {
     render(<EmployerSignupWizard locations={{ "Legazpi City": ["Barangay 1"] }} />)
     fireEvent.change(screen.getByLabelText(/^Email/i), { target: { value: "employer@example.com" } })

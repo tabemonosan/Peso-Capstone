@@ -374,6 +374,13 @@ describe('POST /api/signup (real database)', () => {
 })
 
 describe('PUT /api/profile/nsrp (Update NSRP)', () => {
+  it('repairs Others profile tags using the specified NSRP skill on reload', async () => {
+    const email = 'other-skill@example.com'
+    await Applicant.create({ email, passwordHash: 'unused', emailVerified: true, profile: { firstName: 'Juan', lastName: 'Cruz', skills: ['Others'], nsrp: { skills: ['Others'], othersText: 'pharmacist' } } })
+    const loaded = await request(app).get('/api/profile').set({ Authorization: `Bearer ${applicantToken(email)}` }).expect(200)
+    expect(loaded.body.profile.skills).toEqual(['Pharmacist'])
+    expect((await Applicant.findOne({ email }).lean()).profile.skills).toEqual(['Pharmacist'])
+  })
   it('validates, persists and clears applicant portfolio links without changing qualifications', async () => {
     const email = 'portfolio@example.com'
     await Applicant.create({ email, passwordHash: 'unused', emailVerified: true, verificationStatus: 'approved', profile: { firstName: 'Juan', lastName: 'Cruz', skills: ['Plumbing'] } })

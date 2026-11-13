@@ -13,7 +13,7 @@ import { Interview, ApplicationReport, ApplicationAppeal } from './models/applic
 import { createApplicationWorkflow } from './services/applicationWorkflow.js'
 import { createApplicationWorkflowRouter } from './routes/applicationWorkflow.js'
 import { coveringJobSkill } from '../shared/jobSkills.js'
-import { applicantProfileContent } from '../shared/applicantProfile.js'
+import { applicantProfileContent, nsrpProfileSkills } from '../shared/applicantProfile.js'
 import { validatePortfolioLinks } from '../shared/portfolioLinks.js'
 import { resumeError } from '../shared/resume.js'
 import { applicantDegree, recoverApplicantQualifications } from './services/applicantDegree.js'
@@ -1214,7 +1214,7 @@ app.post('/api/signup', applicantSignupUpload.fields([
             phone: answers.cellphone,
             addressCity: answers.addressCity,
             addressProvince: answers.addressProvince,
-            skills: (answers.skills || []).filter(skill => skill !== 'Others'),
+            skills: nsrpProfileSkills(answers),
             education: answers.education || [],
             technicalTraining: answers.technicalTraining || [],
             workExperience: answers.workExperience || [],
@@ -1837,7 +1837,7 @@ app.put('/api/profile/nsrp', async (req, res) => {
     applicant.set('phone', answers.cellphone)
     applicant.set('profile.summary', personalSummary)
     applicant.set('profile.summarySource', 'personal')
-    applicant.set('profile.skills', (answers.skills || []).filter(skill => skill !== 'Others'))
+    applicant.set('profile.skills', nsrpProfileSkills(answers))
     applicant.set('profile.education', answers.education || [])
     applicant.set('profile.technicalTraining', answers.technicalTraining || [])
     applicant.set('profile.workExperience', answers.workExperience || [])
@@ -2408,10 +2408,16 @@ app.get('/api/jobs', requireVerifiedEmail, requireApprovedEmployer, async (req, 
         })
       }
       const employers = await Employer.find({ email: { $in: emails.map((email) => new RegExp(`^${String(email).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i')) } }).select('email profile.profileImage profile.bannerImage receivingApplicantsSuspendedAt').lean()
+      const ratings = await Rating.aggregate([
+        { $match: { toUserId: { $in: employers.map(employer => employer._id) }, toRole: 'employer', fromRole: 'applicant', score: { $in: [1, 2, 3, 4, 5] } } },
+        { $group: { _id: '$toUserId', averageScore: { $avg: '$score' }, totalRatings: { $sum: 1 } } },
+      ])
+      const ratingByEmployer = new Map(ratings.map(({ _id, ...summary }) => [String(_id), summary]))
       const brandingByEmail = new Map(employers.map((employer) => [employer.email.toLowerCase(), {
         profileImage: employer.profile?.profileImage || '',
         bannerImage: employer.profile?.bannerImage || '',
         receivingApplicationsSuspended: Boolean(employer.receivingApplicantsSuspendedAt),
+        rating: ratingByEmployer.get(String(employer._id)) || { averageScore: 0, totalRatings: 0 },
       }]))
       return jobDocs.map((job) => {
         const plain = present(job)
@@ -3604,6 +3610,7 @@ app.post('/api/ratings', requireApprovedEmployer, async (req, res) => {
     const hireReport = await HireReport.findById(hireReportId)
     if (!hireReport) return res.status(404).json({ error: 'Hire report not found' })
     if (hireReport.status === 'not_hired') return res.status(400).json({ error: 'Ratings require a hired or deployed outcome' })
+    if (decoded.role === 'Applicant' && (!['hired', 'deployed'].includes(hireReport.status) || hireReport.reportedByRole === 'Applicant')) return res.status(400).json({ error: 'Company ratings require an employer-recorded hire or deployment.' })
 
     let fromUser = null
     let fromRole = null
@@ -3734,7 +3741,7 @@ app.use('/api/notifications', createNotificationsRouter({
   resolveUser: async (decoded) => {
     const found = await findUserByEmail(decoded?.email)
     if (!found || found.type !== decoded.role) return null
-    return { id: String(found.user._id), role: found.type, email: String(found.user.email || decoded.email).toLowerCase() }
+    return { id: String(found.user._id), role: found.type, adminLevel: found.user.adminLevel, email: String(found.user.email || decoded.email).toLowerCase() }
   },
 }))
 

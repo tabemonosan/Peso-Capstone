@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { formatLocation, formatSalary, mapEmploymentType } from '../../shared/jobPosting.js'
 import JobLanguageRequirements from './JobLanguageRequirements'
+import CompanyRating from './CompanyRating'
 
 const dateLabel = (value) => value ? new Date(value).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'Asia/Manila' }) : 'Not specified'
 function CompanyMark({ job }) {
@@ -26,7 +27,7 @@ export default function ApplicantJobBrowser({ jobs, applicationByJobId, appliedP
     <section className="job-browser-list" aria-label="Job postings" tabIndex={0}>
       {jobs.map((job) => <button type="button" key={job._id} aria-label={`View ${job.title} details`} aria-pressed={String(job._id) === String(selected._id)} className={`job-browser-row ${String(job._id) === String(selected._id) ? 'is-selected' : ''}`} onClick={() => setSelectedId(String(job._id))}>
         <CompanyMark job={job} />
-        <span className="job-browser-row-copy"><strong>{job.title}</strong><span>{job.company}</span><span className="job-browser-muted">{formatLocation(job) || job.location || 'Remote'}</span><span className="job-browser-tags job-browser-row-tags">{mapEmploymentType(job.employmentType) && <span aria-label={`Employment type: ${mapEmploymentType(job.employmentType)}`}>{mapEmploymentType(job.employmentType)}</span>}{job.locationType && <span>{job.locationType}</span>}</span>
+        <span className="job-browser-row-copy"><strong>{job.title}</strong><span>{job.company}<CompanyRating rating={job.employerBranding?.rating} /></span><span className="job-browser-muted">{formatLocation(job) || job.location || 'Remote'}</span><span className="job-browser-tags job-browser-row-tags">{mapEmploymentType(job.employmentType) && <span aria-label={`Employment type: ${mapEmploymentType(job.employmentType)}`}>{mapEmploymentType(job.employmentType)}</span>}{job.locationType && <span>{job.locationType}</span>}</span>
           {typeof job.skillMatch === 'number' && job.skillTotal > 0 && <span className="job-browser-match">{job.skillMatch} of {job.skillTotal} skills match</span>}
           {applicationFor(job).applied && <span className="job-browser-applied">Applied</span>}
         </span>
@@ -35,7 +36,7 @@ export default function ApplicantJobBrowser({ jobs, applicationByJobId, appliedP
     <article ref={detailsRef} tabIndex={0} className="job-browser-details" aria-label={`${selected.title} job details`}>
       {selected.employerBranding?.bannerImage && <img className="job-browser-banner" src={selected.employerBranding.bannerImage} alt="" />}
       <div className="job-browser-detail-content">
-        <div className="job-browser-company"><CompanyMark job={selected} /><span>{selected.company}</span></div>
+        <div className="job-browser-company"><CompanyMark job={selected} /><span>{selected.company}<CompanyRating rating={selected.employerBranding?.rating} /></span></div>
         <h3 className="job-browser-title">{selected.title}</h3>
         <p className="job-browser-muted">{formatLocation(selected) || selected.location || 'Remote'}</p>
         <p className="job-browser-muted">Posted {dateLabel(selected.createdAt)}</p>

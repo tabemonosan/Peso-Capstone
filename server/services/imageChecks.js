@@ -29,7 +29,7 @@ export async function processApplicantImages({ accountId, docKey, version, setti
         await consumeQr(raw)
       })
       if (settings.ocrTextReading) {
-        const report = await readDocumentOcr(file, (text, confidence, metadata) => checkIdName(text, confidence, nsrpValues, metadata), { reserve: reserveOcr, nameOnly: true }, readers.readOcr)
+        const report = await readDocumentOcr(file, (text, confidence, metadata) => checkIdName(text, confidence, nsrpValues, metadata), { nameOnly: true }, readers.readOcr)
         if (report.comparisons) comparisons = report.comparisons
         pdfRead = file.mimetype === 'application/pdf' && comparisons.some(row => row.reliable === true)
         if (report.findings) document.findings = [...(document.findings || []).filter(f => !f.ruleId.startsWith('cross_')), ...report.findings]

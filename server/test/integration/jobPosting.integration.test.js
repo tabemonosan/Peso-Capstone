@@ -22,12 +22,33 @@ beforeEach(async () => {
   await Admin.create({ adminLevel: 'super_admin', email: 'admin@example.com', passwordHash: 'unused' })
 })
 describe('job request and review API', () => {
+  it('shares company rating averages with job viewers without exposing individual reviews', async () => {
+    await createViewer()
+    const employer = await Employer.findOne({ email: 'employer@example.com' })
+    await JobPosting.create({ title: 'Welder', company: 'Example Works', createdBy: employer.email, status: 'approved', skills: ['Excel'] })
+    const Rating = mongoose.model('Rating')
+    await Rating.collection.insertMany([
+      ...[3, 4].map(score => ({ toUserId: employer._id, toRole: 'employer', fromRole: 'applicant', fromUserId: new mongoose.Types.ObjectId(), hireReportId: new mongoose.Types.ObjectId(), score, comment: 'PRIVATE employee review' })),
+      { toUserId: new mongoose.Types.ObjectId(), toRole: 'employer', fromRole: 'applicant', score: 5 },
+      { toUserId: employer._id, toRole: 'applicant', fromRole: 'employer', score: 1 },
+      { toUserId: employer._id, toRole: 'employer', fromRole: 'applicant', score: 6 },
+    ])
+    for (const query of ['?status=approved', '?status=approved&page=1']) {
+      const response = await request(app).get(`/api/jobs${query}`).set(auth('Applicant')).expect(200)
+      const jobs = response.body.items || response.body
+      expect(jobs[0].employerBranding.rating).toEqual({ averageScore: 3.5, totalRatings: 2 })
+      expect(JSON.stringify(response.body)).not.toContain('PRIVATE employee review')
+    }
+    await Rating.deleteMany({})
+    const response = await request(app).get('/api/jobs?status=approved&page=1').set(auth('Applicant')).expect(200)
+    expect(response.body.items[0].employerBranding.rating).toEqual({ averageScore: 0, totalRatings: 0 })
+  })
   it('presents automatic archives without changing approval or deleting applications', async () => {
     const deadline = new Date(Date.now() - 4 * 86400000)
     const old = await JobPosting.create({ title: 'Expired position', company: 'Example Works', createdBy: 'employer@example.com', status: 'approved', deadline, applicants: [{ email: 'existing@example.test' }] })
     const mine = await request(app).get('/api/jobs?status=mine').set(auth('Employer')).expect(200)
     const archived = mine.body.find(job => job._id === String(old._id))
-    expect(archived).toMatchObject({ isArchived: true, status: 'approved', archivedAt: new Date(+deadline + 3 * 86400000).toISOString() })
+    expect(archived).toMatchObject({ isArchived: true, status: 'approved', archivedAt: new Date(+deadline + 1).toISOString() })
     expect(archived.applicants).toEqual([]) // Existing referral privacy rules still apply.
     const stored = await JobPosting.findById(old._id).lean()
     expect(stored.status).toBe('approved')

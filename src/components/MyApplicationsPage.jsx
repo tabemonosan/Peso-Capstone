@@ -1,4 +1,5 @@
 import ApplicationStages from './ApplicationStages'
+import RatingForm from './RatingForm'
 import { publicApplicationHistory } from '../../shared/employmentReporting.js'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { API_URL } from '../config'
@@ -70,6 +71,7 @@ export default function MyApplicationsPage({ token, onDeclined }) {
       {application.interview && <PostInterviewTask token={token} interviewId={application.interview.id} task={application.postInterviewTask} readOnly={['withdrawn', 'withdrawn_by_admin', 'declined', 'declined_by_admin', 'hired', 'deployed', 'not_hired'].includes(application.status)} onChanged={load} />}
       <div className="mt-4 flex flex-wrap items-center gap-2">{application.actions.filter((type) => type !== 'withdraw' && labels[type]).map((type) => <button type="button" key={type} onClick={() => { setError(''); setAction({ type, application }) }} className="rounded-full border border-blue-200 bg-blue-50 px-4 py-2 text-xs font-semibold text-blue-800">{labels[type]}</button>)}{application.actions.includes('view_outcome') && <button type="button" onClick={() => setOutcome(application)} className="rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-800">View outcome</button>}</div>
       <ApplicationWithdrawal application={application} onWithdraw={() => { setError(''); setAction({ type: 'withdraw', application }) }} />
+      {application.companyRating && <RatingForm key={application.companyRating.hireReportId} token={token} toUserId={application.companyRating.employerId} toRole="employer" hireReportId={application.companyRating.hireReportId} />}
       {application.actions.includes('report_problem') && <ApplicationReportButton token={token} referralId={application.referralId} onSubmitted={load} />}
     </article>)}
       </section>

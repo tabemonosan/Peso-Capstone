@@ -1,4 +1,4 @@
-export const CROSS_RULES_VERSION = '2026-11-13.4'
+export const CROSS_RULES_VERSION = '2026-11-13.7'
 export const NO_MIDDLE = new Set(['', 'nomiddlename', 'n/a', 'na', 'nmn'])
 export function normalizeName(value) {
   return String(value || '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/\bma\.?(?=\s|$)/g, 'maria').replace(/\bsto\.?(?=\s|$)/g, 'santo').replace(/[^\p{L}\p{N}]/gu, '')
@@ -70,11 +70,34 @@ export function crossChecks({ nsrp = {}, ids = [] } = {}) {
       const requiredSurnameFirst = [baseline.surname, baseline.firstName, baseline.suffix].filter(Boolean).join(' ')
       if (baseline.firstName && (baseline.surname || baseline.mononym)) {
         const candidates = [expected, surnameFirst, required, requiredSurnameFirst]
+        // Licenses can print the suffix with the given name, before the middle
+        // name. Limit OCR's III -> ill ambiguity to this known suffix slot;
+        // never rewrite letters in the given, middle, or family name.
+        if (baseline.suffix) {
+          const suffixes = normalizeName(baseline.suffix) === 'iii' ? [baseline.suffix, 'ill'] : [baseline.suffix]
+          for (const suffix of suffixes) {
+            candidates.push(
+              [baseline.firstName, suffix, baseline.middleName, baseline.surname].filter(Boolean).join(' '),
+              [baseline.surname, baseline.firstName, suffix, baseline.middleName].filter(Boolean).join(' '),
+              [baseline.firstName, baseline.middleName, baseline.surname, suffix].filter(Boolean).join(' '),
+              [baseline.surname, baseline.firstName, baseline.middleName, suffix].filter(Boolean).join(' '),
+            )
+          }
+        }
         const results = candidates.map(name => compareName(values.fullName, name))
         result = results.includes('match') ? 'match' : results.includes('minor') ? 'minor' : 'significant'
       }
     } else if (values.firstName && values.surname && baseline.firstName && baseline.surname) {
-      const results = ['surname', 'firstName', ...(values.middleName && baseline.middleName ? ['middleName'] : []), ...(values.suffix && baseline.suffix ? ['suffix'] : [])].map(field => compareName(values[field], baseline[field], { middle: field === 'middleName' }))
+      const results = ['surname', 'firstName', ...(values.middleName && baseline.middleName ? ['middleName'] : []), ...(values.suffix && baseline.suffix ? ['suffix'] : [])].map(field => {
+        const candidates = [baseline[field]]
+        // PhilSys includes the suffix in its Given Names field.
+        if (field === 'firstName' && baseline.suffix) {
+          candidates.push(`${baseline.firstName} ${baseline.suffix}`)
+          if (normalizeName(baseline.suffix) === 'iii') candidates.push(`${baseline.firstName} ill`)
+        }
+        const matches = candidates.map(candidate => compareName(values[field], candidate, { middle: field === 'middleName' }))
+        return matches.includes('match') ? 'match' : matches.includes('minor') ? 'minor' : matches[0]
+      })
       result = results.includes('significant') ? 'significant' : results.includes('minor') ? 'minor' : 'match'
     }
     const evidence = document.evidence === 'independent' ? 'independent' : 'self-declared'
@@ -94,9 +117,9 @@ export function isCombinedNameHeader(line) {
 export function extractDocumentFields(text = '') {
   const aliases = {
     fullName: '(?:full\\s*name|name)',
-    surname: '(?:surname|last\\s*name|family\\s*name)',
-    firstName: '(?:first\\s*name|given\\s*names?)',
-    middleName: 'middle\\s*name',
+    surname: '(?:apelyido\\s*/\\s*)?(?:surname|last\\s*name|family\\s*name)',
+    firstName: '(?:mga\\s*pangalan\\s*/\\s*)?(?:first\\s*name|given\\s*names?)',
+    middleName: '(?:gitnang\\s*apelyido\\s*/\\s*)?middle\\s*name',
     suffix: 'suffix',
     dob: '(?:date\\s*of\\s*birth|birth\\s*date|dob)',
     sex: '(?:sex|gender)',

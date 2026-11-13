@@ -507,6 +507,13 @@ describe('applications, interviews and admin-confirmed events', () => {
   it('preserves reciprocal ratings and recipient visibility without allowing ratings to change trust', async () => {
     const { referral, meeting } = await meetingFor()
     const hire = await HireReport.create({ referralId: referral._id, jobId: job._id, employerId: employer._id, applicantId: applicant._id, status: 'hired' })
+    await HireReport.updateOne({ _id: hire._id }, { $set: { reportedByRole: 'Applicant' } })
+    await request(app).post('/api/ratings').set(auth('Applicant', applicant)).send({ toUserId: String(employer._id), toRole: 'employer', hireReportId: String(hire._id), score: 5 }).expect(400)
+    const selfReported = await request(app).get('/api/workflow/mine').set(auth('Applicant', applicant)).expect(200)
+    expect(selfReported.body.items[0].companyRating).toBeNull()
+    await HireReport.updateOne({ _id: hire._id }, { $set: { reportedByRole: 'Employer' } })
+    const history = await request(app).get('/api/workflow/mine').set(auth('Applicant', applicant)).expect(200)
+    expect(history.body.items[0].companyRating).toEqual({ employerId: String(employer._id), hireReportId: String(hire._id) })
     for (const rating of [{ role: 'Employer', account: employer, to: applicant, toRole: 'applicant', score: 1 }, { role: 'Applicant', account: applicant, to: employer, toRole: 'employer', score: 5 }]) {
       await request(app).post('/api/ratings').set(auth(rating.role, rating.account)).send({ toUserId: String(rating.to._id), toRole: rating.toRole, hireReportId: String(hire._id), score: rating.score, comment: 'Demo review' }).expect(200)
       expect((await score()).trustValue).toBe(100)

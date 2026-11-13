@@ -352,7 +352,7 @@ describe('PESO Portal prototype', () => {
     expect(screen.queryByRole('button', { name: /^Jobs$/i })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Fill in' })[0])
-    expect(await screen.findByText('Applicant Profile')).toBeInTheDocument()
+    expect(await screen.findByRole('group', { name: 'Profile pictures' })).toBeInTheDocument()
   })
 
   it('allows employer login and shows employer module navigation', async () => {

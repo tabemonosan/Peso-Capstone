@@ -14,6 +14,13 @@ const destinations = {
     '/profile': ['profile', 'View my profile'],
   },
   Admin: {
+    '/dashboard': ['dashboard', 'Open dashboard'],
+    '/report-maker': ['report-maker', 'Open report maker'],
+    '/activity-logs': ['activity-logs', 'Open activity logs'],
+    '/internal-accounts': ['internal-accounts', 'Open internal accounts'],
+    '/review-notes': ['review-notes', 'Open review notes'],
+    '/email-delivery': ['email-delivery', 'Open email delivery'],
+    '/job-titles': ['job-titles', 'Open job titles'],
     '/peso-referrals': ['peso-referrals', 'Open referrals and applications'],
     '/jobs': ['jobs', 'Open job postings'],
     '/requests': ['requests', 'Open employer requests'],

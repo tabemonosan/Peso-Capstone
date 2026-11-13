@@ -14,6 +14,7 @@ const passive = [
   /^\/api\/nsrp\/(?:validate-signup|preview-signup|preview)\/?$/,
   /^\/api\/employer-registration\/preview\/?$/, /^\/api\/signup\/(?:check-documents|nsrp-import)\/?$/,
   /^\/api\/profile\/nsrp-import\/preview\/?$/, /^\/api\/applications\/validate-email\/?$/,
+  /^\/api\/notifications\/features\/[^/]+\/read\/?$/,
   /^\/api\/profile\/page-guides\/?$/, /^\/api\/notifications\/(?:read-all|[^/]+\/read)\/?$/,
   /^\/api\/employer\/verification\/approval-notice\/seen\/?$/,
 ]

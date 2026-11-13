@@ -1,6 +1,13 @@
 import { REQUIRED_DOC_KEYS, VERIFICATION_DOC_LABELS } from '../../shared/verificationDocs.js'
 import { isSharedPhoneFinding } from '../../shared/verificationFindings.js'
 
+const isRateLimitedReview = (document, reason = '') => {
+  const reasons = [...(document?.reviewReasons || []), reason].filter(Boolean)
+  return document?.status === 'pending' && reasons.includes('Rate guard') && reasons.every(value => value === 'Rate guard')
+    && !document.findings?.some(f => !isSharedPhoneFinding(f) && f.status !== 'dismissed' && f.approvalBlocking !== false && ['warning', 'critical'].includes(f.severity))
+    && !['requested', 'submitted'].includes(document.explanation?.status)
+}
+
 // Owner-facing explanations are templates, never raw findings, sampling details,
 // extracted values, provider errors, private notes or comparison rule identifiers.
 export function documentReviewMessage(docKey, document, reason = '') {
@@ -16,6 +23,7 @@ export function documentReviewMessage(docKey, document, reason = '') {
   if (reasons.includes('Auto-approval off')) return 'Automatic verification is unavailable for this document. PESO staff will review it; you only need to update it if something is incorrect.'
   if (docKey.startsWith('validId') && document.findings?.some(f => f.status !== 'dismissed' && f.severity === 'critical' && /^cross_id_.*_idNumber$/.test(f.ruleId || f.code || ''))) return 'The ID number read from your document does not match the number entered or recorded in your NSRP. Check the ID type and number, then upload both sides again, or explain the difference.'
   if (reasons.some(r => ['Flagged', 'Needs attention'].includes(r))) return 'PESO staff need to compare this document with your registration details. You can correct your information or explain a difference.'
+  if (isRateLimitedReview(document, reason)) return 'Automatic verification has reached its daily limit. PESO staff can review this document. You do not need to upload it again.'
   return 'This document has not been verified automatically and is waiting for PESO staff review. You can update it if something needs correction.'
 }
 
@@ -33,7 +41,7 @@ export async function applicantReviewSummary(account, automation, consistency) {
     const canUpdate = remaining > 0 && (status === 'under_review' && latest?.status !== 'approved' || status === 'waitlisted' && (correction.length > 0 ? correction.every(i => i.chancesLeft !== null && i.chancesLeft > 0) : latest?.status !== 'approved'))
     const scanning = consistency?.checking && latest?.status === 'pending'
     const needsReview = !scanning && Boolean(latest && docKey !== 'nsrpForm' && (['rejected', 'needs_resubmission'].includes(latest.status) || latest.status === 'pending' && ((latest.reviewReasons || []).length || decision?.reason || latest.findings?.some(f => !isSharedPhoneFinding(f) && f.status !== 'dismissed' && f.approvalBlocking !== false && ['warning', 'critical'].includes(f.severity)) || ['requested', 'submitted'].includes(latest.explanation?.status))))
-    return { docKey, label: VERIFICATION_DOC_LABELS[docKey], status: latest?.status || 'missing', needsReview, reason: latest?.status === 'pending' && !needsReview ? 'Automatic verification is in progress.' : documentReviewMessage(docKey, latest, decision?.reason), canUpdate, uploadsRemaining: remaining }
+    return { docKey, label: VERIFICATION_DOC_LABELS[docKey], status: latest?.status || 'missing', needsReview, verificationDelayed: !scanning && isRateLimitedReview(latest, decision?.reason), reason: latest?.status === 'pending' && !needsReview ? 'Automatic verification is in progress.' : documentReviewMessage(docKey, latest, decision?.reason), canUpdate, uploadsRemaining: remaining }
   }).filter(doc => doc.status !== 'approved')
   return { status, checking: Boolean(consistency?.checking), message: status === 'approved' ? 'Your account is verified.' : status === 'waitlisted' ? 'Your account needs a review by PESO staff. Open My Documents to correct or explain a difference.' : consistency?.checking ? 'Your documents are being checked. You can open My Documents to review your details.' : documents.length ? 'Your account is under review because the required documents below still need verification.' : 'Your documents have been reviewed. PESO staff need to complete the account review.', documents }
 }

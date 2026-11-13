@@ -16,6 +16,7 @@ beforeEach(() => {
   localStorage.clear()
   sessionStorage.clear()
   mockFetch.mockImplementation(async (url, options) => {
+    if (url.endsWith('/api/signup/nsrp-import')) return { ok: true, json: async () => ({ answers: {}, warnings: [], importToken: 'empty-proof' }) }
     if (url.endsWith('/api/signup/email-code')) return { ok: true, json: async () => ({ ok: true }) }
     if (url.endsWith('/api/signup/email-code/verify')) return { ok: true, json: async () => ({ ok: true, proofToken: 'proof-1' }) }
     if (url.endsWith('/api/nsrp/validate-signup')) {
@@ -41,6 +42,20 @@ afterEach(() => {
 })
 
 const renderWizard = () => render(<ApplicantSignupWizard onCancel={() => {}} />)
+
+it('toggles both signup passwords from either visibility button', () => {
+  renderWizard()
+  const password = screen.getByLabelText(/^Password/i, { selector: 'input' })
+  const confirmation = screen.getByLabelText(/^Confirm password/i, { selector: 'input' })
+  expect(password).toHaveAttribute('type', 'password')
+  expect(confirmation).toHaveAttribute('type', 'password')
+  fireEvent.click(screen.getByRole('button', { name: 'Show confirm password' }))
+  expect(password).toHaveAttribute('type', 'text')
+  expect(confirmation).toHaveAttribute('type', 'text')
+  fireEvent.click(screen.getByRole('button', { name: 'Hide password', exact: true }))
+  expect(password).toHaveAttribute('type', 'password')
+  expect(confirmation).toHaveAttribute('type', 'password')
+})
 
 async function completeAccountStep() {
   renderWizard()
@@ -193,7 +208,6 @@ describe('upload path end-to-end', () => {
     await completeAccountStep()
     fireEvent.click(screen.getByRole('radio', { name: /I already have a filled NSRP form/i }))
     fireEvent.change(screen.getByLabelText(/Filled NSRP form/i), { target: { files: [pdfFile('my-nsrp.pdf')] } })
-    fireEvent.click(screen.getByText('Retrieve from NSRP'))
     await screen.findByText('Maria')
     fireEvent.click(screen.getByRole('checkbox', { name: /checked these details/i }))
     fireEvent.click(screen.getByText('Use these details'))
@@ -223,7 +237,6 @@ describe('upload path end-to-end', () => {
     await completeAccountStep()
     fireEvent.click(screen.getByRole('radio', { name: /I already have a filled NSRP form/i }))
     fireEvent.change(screen.getByLabelText(/Filled NSRP form/i), { target: { files: [pdfFile('partial.pdf')] } })
-    fireEvent.click(screen.getByText('Retrieve from NSRP'))
     await screen.findByText('Maria')
     fireEvent.click(screen.getByRole('checkbox', { name: /checked these details/i }))
     fireEvent.click(screen.getByText('Use these details'))
@@ -237,7 +250,6 @@ describe('upload path end-to-end', () => {
     await completeAccountStep()
     fireEvent.click(screen.getByRole('radio', { name: /I already have a filled NSRP form/i }))
     fireEvent.change(screen.getByLabelText(/Filled NSRP form/i), { target: { files: [pdfFile('complete.pdf')] } })
-    fireEvent.click(screen.getByText('Retrieve from NSRP'))
     await screen.findByText('Maria')
     fireEvent.click(screen.getByRole('checkbox', { name: /checked these details/i }))
     fireEvent.click(screen.getByText('Use these details'))
@@ -257,7 +269,6 @@ describe('upload path end-to-end', () => {
     fireEvent.click(screen.getByRole('radio', { name: /I already have a filled NSRP form/i }))
     const input = screen.getByLabelText(/Filled NSRP form/i)
     fireEvent.change(input, { target: { files: [pdfFile('old.pdf')] } })
-    fireEvent.click(screen.getByText('Retrieve from NSRP'))
     await screen.findByText('Maria')
     fireEvent.change(input, { target: { files: [pdfFile('replacement.pdf')] } })
     expect(screen.queryByText('Maria')).not.toBeInTheDocument()

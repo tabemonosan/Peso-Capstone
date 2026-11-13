@@ -15,7 +15,6 @@ import ProfileDropdown from './components/ProfileDropdown'
 import PortfolioLinksEditor from './components/PortfolioLinksEditor'
 import PortfolioLinks from './components/PortfolioLinks'
 import ResumeUploader from './components/ResumeUploader'
-import NsrpImportReview from './components/NsrpImportReview'
 import PageGuide from './components/PageGuide'
 import MyApplicationsPage from './components/MyApplicationsPage'
 import ApplicantReputationPage from './components/ApplicantReputationPage'
@@ -33,6 +32,7 @@ import JobsView from "./components/JobsView"
 import VerificationDocumentsForm, { emptyVerificationDocs, validateVerificationDocs } from "./components/VerificationDocumentsForm"
 import VerificationDocsReviewModal from "./components/VerificationDocsReviewModal"
 import MyDocumentsPage from "./components/MyDocumentsPage"
+import { useScrollHidden } from './hooks/useScrollHidden'
 import VerifyEmailPage from "./components/VerifyEmailPage"
 import EmailVerificationBanner from "./components/EmailVerificationBanner"
 import CompleteRegistrationPage from "./components/CompleteRegistrationPage"
@@ -124,7 +124,6 @@ const navigationByRole = {
     { id: "dashboard", label: "Home" },
     { id: "jobs", label: "Jobs" },
     { id: "my-applications", label: "My applications" },
-    { id: "my-reputation", label: "My reputation" },
     { id: "reputation", label: "Reviews" },
     { id: "notify", label: "Notifications" },
   ],
@@ -200,6 +199,7 @@ function App() {
   const [showProfileDocuments, setShowProfileDocuments] = useState(() => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('editNsrp') === '1')
   const documentLinkHandled = useRef(false)
   const [isLoggedIn, setIsLoggedIn] = useState(false)
+  const portalNavHidden = useScrollHidden(isLoggedIn)
   useEffect(() => {
     if (currentUser?.role === 'Admin' && !adminViewAllowed(currentUser, activeView)) setActiveView('dashboard')
   }, [currentUser, activeView])
@@ -300,6 +300,7 @@ const toggleSkill = (selected, skill) => {
       return ['signup', 'employer'].includes(saved) ? saved : 'login'
     } catch { return 'login' }
   })
+  const [standaloneLogin, setStandaloneLogin] = useState(false)
   const [showSignupRestoreNotice, setShowSignupRestoreNotice] = useState(() => authView !== 'login')
   const [forgotPasswordOpen, setForgotPasswordOpen] = useState(false)
   useEffect(() => {
@@ -310,6 +311,7 @@ const toggleSkill = (selected, skill) => {
     try { sessionStorage.setItem('peso-auth-view', 'login') } catch { /* Keep the success screen usable without storage. */ }
     setShowSignupRestoreNotice(false)
   }
+  const [signupPasswordsVisible, setSignupPasswordsVisible] = useState(false)
   const [signupForm, setSignupForm] = useState({
     email: "",
     password: "",
@@ -359,6 +361,7 @@ const toggleSkill = (selected, skill) => {
   const [pendingJobs, setPendingJobs] = useState([])
   const [notifications, setNotifications] = useState([])
   const [unreadCount, setUnreadCount] = useState(0)
+  const [featureNotifications, setFeatureNotifications] = useState({ counts: {}, asOf: null })
   const [approvedJobs, setApprovedJobs] = useState([])
   const [declinedJobs, setDeclinedJobs] = useState([])
   const [referredApplicantIdsByJob, setReferredApplicantIdsByJob] = useState({})
@@ -606,10 +609,34 @@ const toggleSkill = (selected, skill) => {
       .catch(() => setEmployerRequests((current) => ({ ...current, loading: false })))
   }, [employerRequestsPagination, requestSort.sortBy, requestSort.order])
 
+  const fetchFeatureNotifications = async () => {
+    const token = getToken()
+    if (!token || activeRole !== 'Admin') return
+    try {
+      const response = await fetch(`${API_URL}/api/notifications/features`, { headers: { Authorization: `Bearer ${token}` } })
+      if (!response.ok) return
+      const data = await response.json()
+      if (getToken() !== token) return
+      setFeatureNotifications({ counts: data.counts || {}, asOf: data.asOf || null })
+    } catch { /* Keep the last counts until the next refresh. */ }
+  }
+  const readFeatureNotifications = async (feature) => {
+    if (activeRole !== 'Admin' || !featureNotifications.counts[feature] || !featureNotifications.asOf) return
+    try {
+      const response = await fetch(`${API_URL}/api/notifications/features/${encodeURIComponent(feature)}/read`, {
+        method: 'PATCH', headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ before: featureNotifications.asOf }),
+      })
+      if (response.ok) fetchNotifications()
+    } catch { /* Leave unread counts in place when acknowledgment fails. */ }
+  }
+  useEffect(() => { setFeatureNotifications({ counts: {}, asOf: null }) }, [currentUser?.email, activeRole, isLoggedIn])
+
   const fetchNotifications = () => {
     const token = getToken()
     if (!token) return
 
+    if (activeRole === 'Admin') fetchFeatureNotifications()
     const { page, pageSize } = notifPageRef.current
     fetch(`${API_URL}/api/notifications?page=${page}&limit=${pageSize}`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -1294,7 +1321,7 @@ const toggleSkill = (selected, skill) => {
       if (!response.ok) {
         const payload = await response.json().catch(() => null)
         console.warn('Failed to mark notification as read:', payload?.error || response.status)
-      }
+      } else fetchFeatureNotifications()
     } catch (err) {
       console.warn('Failed to mark notification as read:', err?.message || err)
     }
@@ -1322,6 +1349,7 @@ const toggleSkill = (selected, skill) => {
       const now = new Date().toISOString()
       setNotifications((current) => current.map((item) => ({ ...item, read: true, readAt: item.readAt || now })))
       setUnreadCount(0)
+      fetchFeatureNotifications()
     } catch (err) {
       console.warn('Failed to mark notifications as read:', err?.message || err)
     }
@@ -1420,8 +1448,10 @@ const toggleSkill = (selected, skill) => {
   // Poll so the navbar bell badge stays current
   useEffect(() => {
     if (!isLoggedIn) return undefined
-    const timer = setInterval(() => fetchNotifications(), 30000)
-    return () => clearInterval(timer)
+    const refresh = () => fetchNotifications()
+    const timer = setInterval(refresh, 30000)
+    window.addEventListener('focus', refresh)
+    return () => { clearInterval(timer); window.removeEventListener('focus', refresh) }
   }, [isLoggedIn, currentUser?.email, activeRole])
 
   useEffect(() => {
@@ -1812,11 +1842,12 @@ const toggleSkill = (selected, skill) => {
             <div><span className="auth-feature-icon auth-feature-icon-mint"><PortalNavIcon name="employers" /></span><div><strong>For employers</strong><p>Connect with local talent through PESO.</p></div></div>
           </div>
           <p className="auth-intro-footer">LOCAL TALENT. SHARED OPPORTUNITY.</p>
+          <button type="button" onClick={() => setStandaloneLogin(false)} className="mt-5 w-fit text-sm font-medium text-[var(--peso-primary)] underline underline-offset-4">Back to the landing page</button>
         </aside>}
         <div className={`auth-card${authView === 'login' ? '' : ' auth-card-wide'}`}>
           {authView !== 'login' && (
             <div className="mb-4 flex justify-start">
-              <button type="button" aria-label="Back to home page" onClick={() => setAuthView('login')} className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-800 transition hover:bg-blue-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">
+              <button type="button" aria-label="Back to home page" onClick={() => { setAuthView('login'); setStandaloneLogin(false) }} className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-800 transition hover:bg-blue-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">
                 <span aria-hidden="true">←</span> Back to home
               </button>
             </div>
@@ -2027,7 +2058,7 @@ const toggleSkill = (selected, skill) => {
                   Password
                 </label>
                 <PasswordInput
-                  id="signup-password"
+                  id="signup-password" visible={signupPasswordsVisible} onVisibilityChange={setSignupPasswordsVisible}
 
                   value={signupForm.password}
                   onChange={(e) => setSignupForm({ ...signupForm, password: e.target.value })}
@@ -2035,14 +2066,13 @@ const toggleSkill = (selected, skill) => {
                   autoComplete="new-password"
                   required
                 />
-                <PasswordChecklist password={signupForm.password} confirmPassword={signupForm.confirmPassword} />
               </div>
               <div>
                 <label htmlFor="signup-confirm-password" className="block text-sm font-medium text-slate-200">
                   Confirm password
                 </label>
                 <PasswordInput
-                  id="signup-confirm-password" visibilityLabel="confirm password"
+                  id="signup-confirm-password" visible={signupPasswordsVisible} onVisibilityChange={setSignupPasswordsVisible} visibilityLabel="confirm password"
 
                   value={signupForm.confirmPassword}
                   onChange={(e) => setSignupForm({ ...signupForm, confirmPassword: e.target.value })}
@@ -2050,6 +2080,7 @@ const toggleSkill = (selected, skill) => {
                   required
                 />
               </div>
+              <PasswordChecklist password={signupForm.password} confirmPassword={signupForm.confirmPassword} />
               <div>
                 <label htmlFor="signup-resume" className="block text-sm font-medium text-slate-200">
                   Resume (PDF, DOCX, JPG, or PNG; max 5 MB)
@@ -2086,12 +2117,20 @@ const toggleSkill = (selected, skill) => {
     )
     const recovery = forgotPasswordOpen && <ForgotPasswordModal initialEmail={formData.email} onClose={() => setForgotPasswordOpen(false)} onDone={email => { setFormData(data => ({ ...data, email, password: '' })); setForgotPasswordOpen(false) }} />
     const openPublicFlow = view => {
+      setStandaloneLogin(true)
       setAuthView(view)
       requestAnimationFrame(() => document.querySelector('.auth-page')?.scrollIntoView?.({ block: 'start' }))
     }
-    return authView === 'login'
-      ? <><LandingPage onApplicantSignup={() => openPublicFlow('signup')} onEmployerSignup={() => openPublicFlow('employer')} onApplicantForm={() => openPublicFlow('nsrp-applicant')} onEmployerForm={() => openPublicFlow('nsrp-employer')}>{authentication}</LandingPage>{recovery}</>
-      : authentication
+    const openLogin = () => {
+      setStandaloneLogin(true)
+      requestAnimationFrame(() => {
+        window.scrollTo({ top: 0 })
+        document.querySelector('#email')?.focus({ preventScroll: true })
+      })
+    }
+    return authView === 'login' && !standaloneLogin
+      ? <><LandingPage onSignIn={openLogin} onApplicantSignup={() => openPublicFlow('signup')} onEmployerSignup={() => openPublicFlow('employer')} onApplicantForm={() => openPublicFlow('nsrp-applicant')} onEmployerForm={() => openPublicFlow('nsrp-employer')} />{recovery}</>
+      : <>{authentication}{recovery}</>
   }
 
   if (isLoggedIn && currentUser?.role === 'Admin' && currentUser.mustChangePassword) return <InternalPasswordChange token={getToken()} email={currentUser.email} onLogout={handleLogout} onChanged={token => { localStorage.setItem('peso-token', token); setCurrentUser(user => ({ ...user, token, mustChangePassword: false })); setActiveView('dashboard') }} />
@@ -2155,6 +2194,7 @@ const toggleSkill = (selected, skill) => {
                 onProfile={() => { setShowProfileDocuments(false); setActiveView("profile") }}
                 onLinks={activeRole === 'Applicant' ? () => setShowPortfolioLinks(true) : undefined}
                 onResume={activeRole === 'Applicant' ? () => setShowResumeUploader(true) : undefined}
+                onReputation={activeRole === 'Applicant' && applicantApproved ? () => { setShowProfileDocuments(false); setActiveView('my-reputation') } : undefined}
                 onSettings={activeRole === 'Applicant' ? () => {
                   setShowProfileDocuments(false)
                   setActiveView('account-settings')
@@ -2185,15 +2225,17 @@ const toggleSkill = (selected, skill) => {
       </header>
 
       <div className="portal-layout">
-        <div className="portal-sidebar">
+        <div className={`portal-sidebar portal-scroll-nav${portalNavHidden ? ' is-hidden' : ''}`}>
           <nav className="portal-nav" aria-label={`${activeRole} navigation`}>
             {portalNavItems.map((item, index) => (
               <button
                 key={`${item.id}-${item.label}-${index}`}
+                aria-label={activeRole === 'Admin' && featureNotifications.counts[item.id] > 0 ? `${item.label}, ${featureNotifications.counts[item.id]} new notifications` : undefined}
                 type="button"
                 onClick={() => {
                   if (activeRole === 'Admin' && item.id === 'employment-updates') setHiringUpdates({})
                   setActiveView(item.id)
+                  readFeatureNotifications(item.id)
                 }}
                 className={`portal-nav-item ${
                   activeView === item.id ? "is-active" : ""
@@ -2201,6 +2243,7 @@ const toggleSkill = (selected, skill) => {
               >
                 <PortalNavIcon name={activeRole === 'Applicant' && item.id === 'dashboard' ? 'home' : item.id} />
                 <span>{item.label}</span>
+                {activeRole === 'Admin' && featureNotifications.counts[item.id] > 0 && <span className="portal-nav-notification-badge" aria-hidden="true">{featureNotifications.counts[item.id] > 99 ? '99+' : featureNotifications.counts[item.id]}</span>}
               </button>
             ))}
           </nav>
@@ -2569,10 +2612,6 @@ const toggleSkill = (selected, skill) => {
           {jobSubmittedOpen && <Modal onClose={() => setJobSubmittedOpen(false)} labelledBy="job-submitted-title" maxWidth="max-w-md"><h2 id="job-submitted-title" className="text-xl font-bold text-slate-900">{jobSubmittedOpen.status === 'approved' ? 'Job posting published' : 'Job request submitted for review'}</h2><p className="mt-3 text-sm text-slate-600">{jobSubmittedOpen.status === 'approved' ? 'Your job posting passed automatic safety screening and is now visible to applicants.' : 'PESO will review your job posting. You can track its status in Job Postings.'}</p><JobScreeningSummary moderation={jobSubmittedOpen.moderation} /><button type="button" onClick={() => setJobSubmittedOpen(false)} className="mt-5 rounded-full bg-blue-600 px-5 py-2 text-sm font-semibold text-white">Done</button></Modal>}
 
           {activeRole === 'Applicant' && activeView === 'account-settings' && <section data-applicant-window tabIndex={-1} className="scroll-mt-28 space-y-6" aria-label="Account settings window">
-                  {currentUser?.verificationDocuments?.some(doc => doc.docKey === 'nsrpForm' && doc.sourceType === 'uploaded') && <NsrpImportReview key={currentUser.id} token={getToken()} disabled={isEditingProfile || profileSaving} onUse={({ profile }) => {
-                    setCurrentUser(current => ({ ...current, profile }))
-                    setProfileData(normalizeProfile({ ...currentUser, profile }, 'Applicant'))
-                  }} />}
                   <div id="profile-documents">
                     <MyDocumentsPage
                       guideState={currentUser?.pageGuides}
@@ -2599,10 +2638,6 @@ const toggleSkill = (selected, skill) => {
           {activeView === "profile" && (<section className={`${activeRole === 'Employer' ? 'employer-profile-card portal-card' : activeRole === 'Applicant' ? 'applicant-profile-card portal-card' : ''} rounded-2xl border border-slate-800 bg-slate-900/70 p-6`}>
               {activeRole === 'Applicant' ? (
                 <>
-                  <h2 className="text-xl font-semibold text-white">Applicant Profile</h2>
-                  <p className="mt-3 text-slate-400">Update your traits and personal information.</p>
-
-
                   <EditableProfileCover name={formatFullName(profileData) || profileData.name || 'Your name'} initials={applicantProfileInitials} photo={profileData.profileImage} banner={profileData.bannerImage} editing={isEditingProfile} saving={profileSaving} onEdit={() => setIsEditingProfile(true)} onSave={saveProfileEdits} onCancel={cancelProfileEdits} onImage={handleImageFile} photoInputRef={profilePhotoInputRef} />
 
                   <div className="applicant-profile-summary mt-6 rounded-2xl border border-slate-700 bg-slate-950/80 p-4">
@@ -2741,7 +2776,7 @@ const toggleSkill = (selected, skill) => {
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-slate-300">Skills <span className="text-slate-500">(optional)</span></label>
+                      <label className="block text-sm font-medium text-slate-300">Skills</label>
                       <SkillTagPicker
                         selected={profileData.skills}
                         disabled={!isEditingProfile || profileSaving}
@@ -2837,13 +2872,16 @@ const toggleSkill = (selected, skill) => {
               <h2 className="text-xl font-semibold text-slate-900">Employer Module</h2>
               <p className="mt-3 text-slate-600">Submit job requests and track their review status.</p>
 
+              <div className="mt-6 flex flex-wrap items-center gap-3">
               <button
                 type="button"
                 onClick={openCreateJobPosting}
-                className="mt-6 rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
+                className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950"
               >
                 Create Job Posting
               </button>
+              <button type="button" aria-pressed={employerJobStatusFilter === 'archive'} aria-controls="employer-job-requests" onClick={() => setEmployerJobStatusFilter('archive')} className={`rounded-2xl border px-4 py-2 text-sm font-semibold ${employerJobStatusFilter === 'archive' ? 'border-cyan-600 bg-cyan-50 text-cyan-900' : 'border-slate-300 bg-white text-slate-700'}`}>Archive ({archivedMyJobs.length})</button>
+              </div>
 
               {showCreateJobPosting && (
                 <div
@@ -2877,16 +2915,15 @@ const toggleSkill = (selected, skill) => {
                 </div>
               )}
 
-              <div className="employer-pending-panel mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-5">
+              <div id="employer-job-requests" className="employer-pending-panel mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-5">
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div><h3 className="text-lg font-semibold text-slate-900">My Job Requests</h3><p className="mt-1 text-xs text-slate-600">Expired postings move to Archive three days after their application deadline.</p></div>
+                  <div><h3 className="text-lg font-semibold text-slate-900">{employerJobStatusFilter === 'archive' ? 'Archived Job Postings' : 'My Job Requests'}</h3><p className="mt-1 text-xs text-slate-600">Expired postings move to Archive after their application deadline.</p></div>
                   <div className="flex flex-wrap gap-2">
                     {[
                       { id: 'all', label: 'All', activeClass: 'bg-slate-200 text-slate-950', count: activeMyJobs.length },
                       { id: 'pending', label: 'Pending', activeClass: 'bg-yellow-400 text-slate-950', count: employerPendingJobs.length },
                       { id: 'approved', label: 'Approved', activeClass: 'bg-green-500 text-slate-900', count: employerApprovedJobs.length },
                       { id: 'declined', label: 'Declined', activeClass: 'bg-red-500 text-slate-900', count: employerDeclinedJobs.length },
-                      { id: 'archive', label: 'Archive', activeClass: 'bg-slate-200 text-slate-950', count: archivedMyJobs.length },
                     ].map((filter) => (
                       <button
                         key={filter.id}
@@ -2904,7 +2941,7 @@ const toggleSkill = (selected, skill) => {
                   </div>
                 </div>
                 {filteredMyJobs.length === 0 ? (
-                  <p className="mt-3 text-slate-600">{employerJobStatusFilter === 'archive' ? 'No archived job postings. Expired postings move here three days after their deadline.' : myJobs.length === 0 ? 'No job requests submitted yet.' : `No ${employerJobStatusFilter} job requests.`}</p>
+                  <p className="mt-3 text-slate-600">{employerJobStatusFilter === 'archive' ? 'No archived job postings. Expired postings move here after their deadline.' : myJobs.length === 0 ? 'No job requests submitted yet.' : `No ${employerJobStatusFilter} job requests.`}</p>
                 ) : (
                   <>
                     <div className="mt-3">

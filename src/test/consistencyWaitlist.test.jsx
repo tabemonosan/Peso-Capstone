@@ -6,6 +6,14 @@ import CheckDocumentsButton from '../components/CheckDocumentsButton'
 import MyDocumentsModal from '../components/MyDocumentsModal'
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 const state = { waitlisted: true, status: 'waitlisted', contact: 'SAMPLE PESO contact', officeHours: 'SAMPLE office hours', issues: [{ document: 'validId1', label: 'Valid ID #1', fieldGroup: 'birth date', message: 'The date of birth we read may not match your NSRP.', chancesLeft: 0, canResubmit: false }] }
+it('shows rate-limited verification without a flag or correction prompt', () => {
+  render(<MyDocumentsModal token="sample" onClose={() => {}} info={{ verificationStatus: 'under_review', review: { documents: [{ docKey: 'validId1', needsReview: true, verificationDelayed: true, reason: 'Automatic verification has reached its daily limit. You do not need to upload it again.' }] }, documents: [{ docKey: 'validId1', label: 'Valid ID #1', status: 'pending', uploadsRemaining: 4, latest: { version: 1 } }] }} />)
+  expect(screen.getByText('Awaiting verification')).toBeInTheDocument()
+  expect(screen.getByText(/daily limit/)).toBeInTheDocument()
+  expect(screen.queryByText('Flagged for review')).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Explain a difference' })).not.toBeInTheDocument()
+  expect(screen.queryByText('How to correct this submission')).not.toBeInTheDocument()
+})
 it('shows neutral reasons, chances, office details and approximate-reading guidance', () => {
   render(<ConsistencyWaitlistCard state={state} />)
   expect(screen.getByRole('heading', { name: 'Why is my account waitlisted?' })).toBeInTheDocument()

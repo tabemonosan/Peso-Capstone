@@ -1,6 +1,7 @@
 import { isJobArchived, jobArchiveAt } from '../../shared/jobArchive.js'
 import { formatLocation, formatSalary, mapEmploymentType } from '../../shared/jobPosting.js'
 import JobLanguageRequirements from './JobLanguageRequirements'
+import CompanyRating from './CompanyRating'
 
 export default function JobPostingDetails({ job, onClose, onEdit }) {
   const archived = isJobArchived(job)
@@ -21,11 +22,11 @@ export default function JobPostingDetails({ job, onClose, onEdit }) {
   ]
   return <>
     <div className="flex items-start justify-between gap-4">
-      <div><h2 id="employer-job-details-title" className="text-xl font-bold text-slate-900">{job.title}</h2><p id="employer-job-details-company" className="mt-1 text-sm text-slate-600">{job.company}</p></div>
+      <div><h2 id="employer-job-details-title" className="text-xl font-bold text-slate-900">{job.title}</h2><p id="employer-job-details-company" className="mt-1 text-sm text-slate-600">{job.company}<CompanyRating rating={job.employerBranding?.rating} /></p></div>
       {onClose && <button type="button" onClick={onClose} aria-label="Close job details" className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold">Close</button>}
     </div>
     {mapEmploymentType(job.employmentType) && <div className="job-browser-tags" aria-label="Job classification"><span aria-label={`Employment type: ${mapEmploymentType(job.employmentType)}`}>{mapEmploymentType(job.employmentType)}</span></div>}
-    {archived && <p role="status" className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">Archived on {new Date(jobArchiveAt(job)).toLocaleDateString('en-PH', { timeZone: 'Asia/Manila' })}, three days after the application deadline. Applications and hiring records are retained.</p>}
+    {archived && <p role="status" className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">Archived on {new Date(jobArchiveAt(job)).toLocaleDateString('en-PH', { timeZone: 'Asia/Manila' })}, after the application deadline. Applications and hiring records are retained.</p>}
     <section aria-label="Required skills" className="mt-5 rounded-xl bg-slate-50 p-3">
       <h3 className="text-sm font-semibold text-slate-900">Required skills</h3>
       {job.skills?.length > 0 ? <ul className="mt-2 flex list-none flex-wrap gap-2 p-0">

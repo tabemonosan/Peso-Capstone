@@ -7,8 +7,23 @@ import { generateNsrpPdf } from '../nsrpPdf.js'
 import { readNsrpPdf } from '../services/nsrpImportReader.js'
 import { extractNsrp, importProof, reviewedImport } from '../services/nsrpImport.js'
 import { mergeNsrpIntoProfile, sanitizeNsrpImport, nsrpImportDate } from '../../shared/nsrpImport.js'
+import { applicantProfileContent, nsrpProfileSkills } from '../../shared/applicantProfile.js'
 
 describe('completed NSRP import', () => {
+  it('uses specified other skills instead of the Others category and repairs saved placeholders', () => {
+    const answers = { skills: ['Gardening', 'Others'], othersText: 'pharmacist; Gardening' }
+    expect(nsrpProfileSkills(answers)).toEqual(['Gardening', 'Pharmacist'])
+    expect(mergeNsrpIntoProfile({}, answers).skills).toEqual(['Gardening', 'Pharmacist'])
+    expect(applicantProfileContent({ skills: ['Others'], nsrp: answers })).toEqual({ skills: ['Pharmacist', 'Gardening'], summary: '' })
+    expect(applicantProfileContent({ skills: [], nsrp: answers }).skills).toEqual([])
+    expect(nsrpProfileSkills({ skills: ['Gardening'], othersText: 'Pharmacist' })).toEqual(['Gardening'])
+    expect(nsrpProfileSkills({ skills: ['Others'] })).toEqual([])
+  })
+  it('retrieves the specified other skill from a completed PDF into the profile', async () => {
+    const result = await extractNsrp(await generateNsrpPdf({ firstName: 'Juan', surname: 'Cruz', skills: ['Others'], othersText: 'pharmacist' }))
+    expect(result.answers).toMatchObject({ skills: ['Others'], othersText: 'PHARMACIST' })
+    expect(mergeNsrpIntoProfile({}, result.answers).skills).toEqual(['Pharmacist'])
+  }, 60000)
   it('retrieves standard PDF text, education and actual marked skills through the isolated reader', async () => {
     const input = { surname: 'Cruz', firstName: 'Juan', middleName: 'Santos', dob: '1990-06-11', addressCity: 'Manito', addressProvince: 'Albay', cellphone: '09171234567', sex: 'Male', skills: ['Embroidery', 'Gardening'], education: [{ level: 'Tertiary', school: 'Example College', course: 'BSIT', year: '2012' }], technicalTraining: [{ course: 'Cooking', institution: 'Example Institute', fromDate: '2020-01-01', toDate: '2020-06-01' }], workExperience: [{ company: 'Example Company', position: 'Cook', fromDate: '2021-01-01', toDate: '2022-02-01', status: 'Contractual' }] }
     const result = await extractNsrp(await generateNsrpPdf(input))

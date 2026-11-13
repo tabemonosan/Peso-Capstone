@@ -1,6 +1,6 @@
 // Consistency screening policy; no extracted document values belong here or in findings.
 import { isSharedPhoneFinding } from './verificationFindings.js'
-export const WAITLIST_RULES_VERSION = '2026-11-13.4'
+export const WAITLIST_RULES_VERSION = '2026-11-13.8'
 export const APPLICANT_STATUSES = ['under_review', 'waitlisted', 'approved', 'declined', 'restricted']
 export const WAITLIST_DEFAULTS = { waitlistOnMismatch: true, waitlistAttempts: 3, pesoContact: 'Contact your local PESO office.', pesoOfficeHours: 'Contact PESO to confirm office hours.' }
 export const WAITLIST_LIMITS = { timeoutMs: 90000, reminderDays: 7, staleDays: 30, maxAttemptsSetting: 5, minOcrConfidence: 60 }
